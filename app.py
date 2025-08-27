@@ -22,7 +22,14 @@ def get_val(msg, name, alt_name=None):
     return v
 
 def pace_from_speed(spd):
-    if spd is None or spd <= 0:
+    """Вернуть темп 'М:СС' из скорости м/с. None если скорость невалидна."""
+    if spd is None:
+        return None
+    try:
+        spd = float(spd)
+    except (TypeError, ValueError):
+        return None
+    if spd <= 0:
         return None
     sec_per_km = 1000.0 / spd
     m = int(sec_per_km // 60)
@@ -30,7 +37,14 @@ def pace_from_speed(spd):
     return f"{m}:{s:02d}"
 
 def speed_to_pace_min_per_km(spd):
-    if spd is None or spd <= 0:
+    """Вернуть темп в мин/км (float) из скорости м/с. np.nan если скорость невалидна."""
+    if spd is None:
+        return np.nan
+    try:
+        spd = float(spd)
+    except (TypeError, ValueError):
+        return np.nan
+    if spd <= 0:
         return np.nan
     return (1000.0 / spd) / 60.0
 
