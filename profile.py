@@ -9,40 +9,49 @@ DEFAULT_PROFILE: Dict[str, Any] = {
     "zone_bounds_text": "110,130,145,160,175",
 }
 
-def _select_profile(supabase, user_id: str) -> Optional[Dict[str, Any]]:
-    res = supabase.table("user_profiles").select("*").eq("user_id", user_id).execute()
-    data = getattr(res, "data", None) or []
-    return data[0] if data else None
+def _safe_select_profile(supabase, user_id: str) -> Optional[Dict[str, Any]]:
+    """Читает профиль. При любых APIError возвращает None и не роняет приложение."""
+    try:
+        res = supabase.table("user_profiles").select("*").eq("user_id", user_id).execute()
+        data = getattr(res, "data", None) or []
+        return data[0] if data else None
+    except Exception:
+        # сюда попадаем при RLS/политиках/схеме
+        st.warning("Нет доступа к таблице user_profiles (RLS/политики). Использую значения по умолчанию.")
+        return None
+
+def _safe_upsert_profile(supabase, row: Dict[str, Any]) -> bool:
+    """Пытается сделать upsert. При ошибке — возвращает False и не роняет UI."""
+    try:
+        supabase.table("user_profiles").upsert(row, on_conflict="user_id").execute()
+        return True
+    except Exception:
+        st.warning("Не удалось сохранить профиль (RLS/политики).")
+        return False
 
 def load_or_init_profile(supabase, user_id: str) -> Dict[str, Any]:
     """
-    Возвращает профиль пользователя. Если записи нет — создаёт через UPSERT.
-    Никогда не роняет приложение: вернёт хотя бы дефолт.
+    Возвращает профиль пользователя. Если нет доступа/записи — дефолт с user_id.
+    Никогда не роняет приложение.
     """
     if not user_id:
         return {**DEFAULT_PROFILE, "user_id": None}
 
-    # уже есть?
-    row = _select_profile(supabase, user_id)
+    row = _safe_select_profile(supabase, user_id)
     if row:
         return row
 
-    # создать (без дублей)
-    new_row = {"user_id": user_id, **DEFAULT_PROFILE}
-    try:
-        supabase.table("user_profiles").upsert(new_row, on_conflict="user_id").execute()
-    except Exception:
-        # дадим UI жить, а наверху покажем предупреждение
-        st.warning("Не удалось создать профиль (проверь RLS/схему). Использую значения по умолчанию.")
-        return new_row
-
-    # перечитать
-    row2 = _select_profile(supabase, user_id)
-    return row2 or new_row
+    # Профиля нет или SELECT не дали — вернём дефолт, а upsert попробуем "втихую"
+    default_row = {"user_id": user_id, **DEFAULT_PROFILE}
+    _safe_upsert_profile(supabase, default_row)
+    # пробуем перечитать (если SELECT запрещён — снова вернёт None)
+    row2 = _safe_select_profile(supabase, user_id)
+    return row2 or default_row
 
 def profile_sidebar(supabase, user: Dict[str, Any], profile_row: Dict[str, Any]):
     """
-    Рендерит параметры анализа в сайдбаре и возвращает: hr_rest, hr_max, zone_bounds_text
+    Сайдбар параметров анализа. Возвращает: hr_rest, hr_max, zone_bounds_text.
+    Никогда не падает из-за БД.
     """
     st.markdown("### ⚙️ Параметры анализа")
 
@@ -72,10 +81,10 @@ def profile_sidebar(supabase, user: Dict[str, Any], profile_row: Dict[str, Any])
             "hr_max": int(hr_max),
             "zone_bounds_text": zone_bounds_text.strip(),
         }
-        try:
-            supabase.table("user_profiles").upsert(row, on_conflict="user_id").execute()
+        ok = _safe_upsert_profile(supabase, row)
+        if ok:
             st.success("Профиль сохранён.")
-        except Exception:
-            st.error("Не удалось сохранить профиль. Проверь политики RLS и схему таблицы.")
+        else:
+            st.error("Профиль не сохранён (проверь RLS/политики в Supabase).")
 
     return int(hr_rest), int(hr_max), zone_bounds_text
