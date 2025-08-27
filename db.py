@@ -1,4 +1,4 @@
-# db.py — сохранение/чтение тренировок в Supabase (JWT прокидываем в PostgREST, маппинг колонок, сериализация)
+# db.py — сохранение/чтение тренировок в Supabase (JWT, маппинг колонок, нормализация типов)
 
 from __future__ import annotations
 import math
@@ -17,31 +17,46 @@ KEY_MAP_SAVE = {
 KEY_MAP_LOAD = {v: k for k, v in KEY_MAP_SAVE.items()}
 
 
-def _attach_auth_token(supabase) -> None:
+def _attach_auth_token(supabase) -> str:
     """
     Прокидывает access_token текущего пользователя в PostgREST.
-    Иначе RLS видит auth.uid() = null и блокирует insert/select.
+    Возвращает uid текущего пользователя (или бросает исключение, если его нет).
     """
-    try:
-        sess = supabase.auth.get_session()
-        token = None
-        if sess:
-            # supabase-py >=2: sess.access_token
-            token = getattr(sess, "access_token", None)
-            # иногда объект-обёртка: sess.session.access_token
-            if token is None and hasattr(sess, "session"):
-                token = getattr(sess.session, "access_token", None)
-            # на всякий случай, если это dict
-            if token is None and isinstance(sess, dict):
-                token = sess.get("access_token")
-        if token:
-            # разные версии клиента: postgrest.auth(...) или rest.auth(...)
-            if hasattr(supabase, "postgrest") and hasattr(supabase.postgrest, "auth"):
-                supabase.postgrest.auth(token)
-            elif hasattr(supabase, "rest") and hasattr(supabase.rest, "auth"):
-                supabase.rest.auth(token)
-    except Exception:
-        pass  # не падать, просто не получится вставить — покажем RLS-ошибку выше
+    # 1) получаем пользователя
+    gu = supabase.auth.get_user()
+    uid = None
+    if gu is not None:
+        # supabase-py >=2 возвращает объект с .user.id
+        uid = getattr(getattr(gu, "user", None), "id", None)
+        if uid is None and isinstance(gu, dict):
+            uid = gu.get("user", {}).get("id")
+
+    if not uid:
+        raise RuntimeError("Нет аутентифицированного пользователя: получите доступ к аккаунту и повторите попытку.")
+
+    # 2) получаем access_token
+    sess = supabase.auth.get_session()
+    token = None
+    if sess is not None:
+        token = getattr(sess, "access_token", None)
+        if token is None and hasattr(sess, "session"):
+            token = getattr(sess.session, "access_token", None)
+        if token is None and isinstance(sess, dict):
+            token = sess.get("access_token")
+
+    if not token:
+        raise RuntimeError("Не найден access_token для PostgREST. Повторно войдите в аккаунт.")
+
+    # 3) прокидываем токен в PostgREST клиент
+    if hasattr(supabase, "postgrest") and hasattr(supabase.postgrest, "auth"):
+        supabase.postgrest.auth(token)
+    elif hasattr(supabase, "rest") and hasattr(supabase.rest, "auth"):
+        supabase.rest.auth(token)
+    else:
+        # крайне маловероятно, но чтобы явно упасть, если клиент странный
+        raise RuntimeError("Клиент Supabase не умеет postgrest.auth(token). Обновите supabase-py.")
+
+    return uid
 
 
 def _jsonable(value: Any) -> Any:
@@ -87,16 +102,30 @@ def _normalize_row_for_save(user_id: str, row: Dict[str, Any]) -> Dict[str, Any]
 
 
 def save_workouts(supabase, user_id: str, summaries: List[Dict[str, Any]]) -> None:
+    """
+    Перед вставкой:
+      1) Берём текущий uid из auth и ИМЕННО ЕГО ставим в user_id (игнорируем пришедший параметр).
+      2) Прокидываем access_token в PostgREST, чтобы auth.uid() в RLS совпал с user_id.
+    """
     if not summaries:
         return
-    # критично: подложить JWT перед запросом
-    _attach_auth_token(supabase)
 
-    rows = [_normalize_row_for_save(user_id, r or {}) for r in summaries]
+    try:
+        uid = _attach_auth_token(supabase)  # удостоверились, что есть токен и uid
+    except Exception as e:
+        # Покажем причину в UI и пробросим
+        try:
+            import streamlit as st
+            st.error(str(e))
+        except Exception:
+            pass
+        raise
+
+    rows = [_normalize_row_for_save(uid, r or {}) for r in summaries]  # ПРИНУДИТЕЛЬНО ПОДМЕНЯЕМ user_id = uid
+
     try:
         supabase.table("workouts").insert(rows).execute()
     except Exception as e:
-        # дружелюбный вывод причины
         try:
             import streamlit as st
             if hasattr(e, "args") and e.args and isinstance(e.args[0], dict):
@@ -114,12 +143,19 @@ def save_workouts(supabase, user_id: str, summaries: List[Dict[str, Any]]) -> No
 
 
 def fetch_workouts(supabase, user_id: str, limit: int = 200) -> pd.DataFrame:
-    # тоже нужен JWT, иначе select отрежется RLS
-    _attach_auth_token(supabase)
+    uid = None
+    try:
+        uid = _attach_auth_token(supabase)
+    except Exception:
+        # пусть select попробует без токена, но вероятно упадёт политикой — это ок
+        pass
+
+    # фильтруем по uid (если было получено), иначе по переданному user_id
+    filter_uid = uid or user_id
 
     res = supabase.table("workouts") \
         .select("*") \
-        .eq("user_id", user_id) \
+        .eq("user_id", filter_uid) \
         .order("start_time", desc=False) \
         .limit(limit) \
         .execute()
