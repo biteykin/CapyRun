@@ -10,31 +10,61 @@ from utils import format_duration, ewma_daily, build_ics, to_excel
 def render_multi_workouts(files, supabase, user_id, hr_rest: int, hr_max: int):
     st.subheader("📈 Прогресс: сводка по тренировкам")
 
+    # --- Parse all files and collect summaries ---
     summaries = []
     for f in files:
-        _, _, _, summary = parse_fit_file(f, hr_rest, hr_max)
-        summaries.append(summary)
+        try:
+            _, _, _, summary = parse_fit_file(f, hr_rest, hr_max)
+            if summary is not None and isinstance(summary, dict):
+                summaries.append(summary)
+        except Exception as e:
+            st.warning(f"Ошибка при обработке файла: {getattr(f, 'name', str(f))}. {e}")
 
-    df_sum = pd.DataFrame(summaries).dropna(subset=["date"]).sort_values("start_time").reset_index(drop=True)
-    if df_sum.empty:
+    # --- Build DataFrame for summaries ---
+    if not summaries:
+        st.info("Нет данных для анализа тренировок.")
+        return
+
+    df_sum = pd.DataFrame(summaries)
+    # Defensive: ensure 'date' and 'start_time' exist and are not all NaN
+    if "date" not in df_sum.columns or df_sum["date"].isna().all():
         st.info("Недостаточно данных с датами для построения трендов.")
         return
 
-    df_sum["date"] = pd.to_datetime(df_sum["date"]).dt.normalize()
+    # Drop rows without date, sort by start_time if present
+    df_sum = df_sum.dropna(subset=["date"])
+    if "start_time" in df_sum.columns:
+        df_sum = df_sum.sort_values("start_time")
+    df_sum = df_sum.reset_index(drop=True)
+
+    # Normalize date column
+    df_sum["date"] = pd.to_datetime(df_sum["date"], errors="coerce").dt.normalize()
     if "time_s" in df_sum.columns:
         df_sum["time_hms"] = df_sum["time_s"].apply(format_duration)
 
     st.dataframe(df_sum)
 
-    # Daily load + ATL/CTL/TSB
+    # --- Daily load + ATL/CTL/TSB ---
     st.subheader("Нагрузка (TRIMP) по дням и тренды ATL/CTL/TSB")
+    # Defensive: fill missing TRIMP/distance_km with 0 for aggregation
+    for col in ["TRIMP", "distance_km"]:
+        if col not in df_sum.columns:
+            df_sum[col] = 0.0
+        else:
+            df_sum[col] = pd.to_numeric(df_sum[col], errors="coerce").fillna(0.0)
+
     daily = df_sum.groupby("date").agg(
         TRIMP=("TRIMP", "sum"),
         distance_km=("distance_km", "sum")
     ).reset_index()
 
-    full = pd.DataFrame({"date": pd.date_range(df_sum["date"].min(), df_sum["date"].max(), freq="D")})
-    daily = full.merge(daily, on="date", how="left").fillna({"TRIMP": 0.0, "distance_km": 0.0})
+    # Fill missing days in the range
+    if not daily.empty:
+        full = pd.DataFrame({"date": pd.date_range(daily["date"].min(), daily["date"].max(), freq="D")})
+        daily = full.merge(daily, on="date", how="left").fillna({"TRIMP": 0.0, "distance_km": 0.0})
+    else:
+        st.info("Недостаточно данных для построения дневной нагрузки.")
+        return
 
     daily["ATL"] = ewma_daily(daily["TRIMP"].values, tau_days=7)
     daily["CTL"] = ewma_daily(daily["TRIMP"].values, tau_days=42)
@@ -55,7 +85,7 @@ def render_multi_workouts(files, supabase, user_id, hr_rest: int, hr_max: int):
     with c4:
         st.metric("TSB (сегодня)", f"{daily['TSB'].iloc[-1]:.0f}")
 
-    # Plan for next week
+    # --- Plan for next week ---
     st.subheader("📝 Черновик плана на следующую неделю")
     plan_df = pd.DataFrame()
     note = None
@@ -86,7 +116,7 @@ def render_multi_workouts(files, supabase, user_id, hr_rest: int, hr_max: int):
     else:
         st.info("Недостаточно данных для составления плана (нужно ≥1 день с данными).")
 
-    # ICS export
+    # --- ICS export ---
     with st.expander("📆 Экспорт плана в календарь (.ics)"):
         if plan_df.empty:
             st.warning("План пуст — сначала сформируй его выше.")
@@ -114,24 +144,30 @@ def render_multi_workouts(files, supabase, user_id, hr_rest: int, hr_max: int):
             )
             st.download_button("📥 Скачать iCal (.ics)", data=ics_text, file_name="capyrun_plan.ics", mime="text/calendar")
 
-    # Excel export
+    # --- Excel export ---
     xls = to_excel({"Workouts": df_sum, "DailyLoad": daily, "NextWeekPlan": plan_df})
     st.download_button("⬇️ Скачать Excel (прогресс + план)", data=xls,
                        file_name="capyrun_progress.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-    # Save all to DB
+    # --- Save all to DB ---
     if st.button("📦 Сохранить все тренировки в историю"):
         save_workouts(supabase, user_id, summaries)
         st.success("Сохранено в БД")
 
-    # History from DB
+    # --- History from DB ---
     with st.expander("📚 Мои тренировки"):
-        df_hist = fetch_workouts(supabase, user_id, limit=100)
-        if not df_hist.empty:
-            df_hist = df_hist.copy()
-            if "time_s" in df_hist.columns:
-                df_hist["время"] = df_hist["time_s"].apply(format_duration)
-            st.dataframe(df_hist)
-        else:
-            st.write("Пока пусто.")
+        try:
+            df_hist = fetch_workouts(supabase, user_id, limit=100)
+            # Defensive: check if df_hist is a DataFrame and not empty
+            if isinstance(df_hist, pd.DataFrame) and not df_hist.empty:
+                df_hist = df_hist.copy()
+                if "time_s" in df_hist.columns:
+                    df_hist["время"] = df_hist["time_s"].apply(format_duration)
+                st.dataframe(df_hist)
+            else:
+                st.write("Пока пусто.")
+        except ValueError as e:
+            st.error("Ошибка при загрузке истории тренировок. Возможно, история пуста или повреждена.")
+        except Exception as e:
+            st.error(f"Не удалось загрузить историю тренировок: {e}")
