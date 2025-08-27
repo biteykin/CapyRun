@@ -481,15 +481,3 @@ xls = to_excel({
 st.download_button("⬇️ Скачать Excel (прогресс + план)", data=xls,
                    file_name="capyrun_progress.xlsx",
                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-
-
-        # ---- Выгрузка Excel: Progress + Plan ----
-        xls = to_excel({
-            "Workouts": df_sum,
-            "DailyLoad": daily,
-            "NextWeekPlan": plan_df
-        })
-        st.download_button("⬇️ Скачать Excel (прогресс + план)", data=xls,
-                           file_name="capyrun_progress.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
