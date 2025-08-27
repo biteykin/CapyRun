@@ -402,6 +402,75 @@ else:
         st.dataframe(plan_df)
 
 
+# === NEW: Экспорт плана в календарь (ICS) ===
+import datetime as dt
+
+with st.expander("📆 Экспорт плана в календарь (.ics)"):
+    # настройки экспорта
+    today = dt.date.today()
+    next_monday = today + dt.timedelta(days=(7 - today.weekday())) if today.weekday() != 0 else today
+
+    start_date = st.date_input("Дата начала плана", value=next_monday, help="С какого понедельника начинаем расписание")
+    workout_time = st.time_input("Время тренировки", value=dt.time(7, 0))
+    selected_days = st.multiselect(
+        "Какие дни добавить", 
+        options=["Пн","Вт","Ср","Чт","Пт","Сб","Вс"],
+        default=["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+    )
+    duration_minutes = st.number_input("Длительность события в календаре (мин)", min_value=15, max_value=240, value=60, step=5)
+
+    # маппинг дней
+    day_to_idx = {"Пн":0,"Вт":1,"Ср":2,"Чт":3,"Пт":4,"Сб":5,"Вс":6}
+
+    def dtstamp():
+        return dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+
+    def fmt_dt(d: dt.date, t: dt.time):
+        return dt.datetime.combine(d, t).strftime("%Y%m%dT%H%M%S")
+
+    def build_ics(plan_df, start_date, workout_time, selected_days, duration_minutes):
+        lines = [
+            "BEGIN:VCALENDAR",
+            "VERSION:2.0",
+            "PRODID:-//CapyRun//Weekly Plan//EN"
+        ]
+        for _, row in plan_df.iterrows():
+            day = str(row["День"])
+            if day not in selected_days:
+                continue
+            idx = day_to_idx.get(day, 0)
+            d = start_date + dt.timedelta(days=idx)
+            start = fmt_dt(d, workout_time)
+            end_dt = (dt.datetime.combine(d, workout_time) + dt.timedelta(minutes=int(duration_minutes)))
+            end = end_dt.strftime("%Y%m%dT%H%M%S")
+
+            title = f'{row["Тип"]} — {row["Пробежка (км)"]} км'
+            desc = f'CapyRun: {row["Тип"]}. Плановый объём: {row["Пробежка (км)"]} км.'
+
+            uid = f"{start}-{hash(title) & 0xffffffff}@capyrun"
+            lines += [
+                "BEGIN:VEVENT",
+                f"UID:{uid}",
+                f"DTSTAMP:{dtstamp()}",
+                f"DTSTART:{start}",
+                f"DTEND:{end}",
+                f"SUMMARY:{title}",
+                f"DESCRIPTION:{desc}",
+                "END:VEVENT"
+            ]
+        lines.append("END:VCALENDAR")
+        return "\n".join(lines)
+
+    ics_text = build_ics(plan_df, start_date, workout_time, selected_days, duration_minutes)
+    st.download_button(
+        "📥 Скачать iCal (.ics)",
+        data=ics_text,
+        file_name="capyrun_plan.ics",
+        mime="text/calendar"
+    )
+
+
+
         # ---- Выгрузка Excel: Progress + Plan ----
         xls = to_excel({
             "Workouts": df_sum,
