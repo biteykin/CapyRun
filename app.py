@@ -49,7 +49,7 @@ with st.sidebar:
         st.stop()
 
     # 2) Профиль атлета (HR/zones) — загрузка и UI
-    profile_row = load_or_init_profile(supabase, user.id)
+    profile_row = load_or_init_profile(supabase, user["id"])
     hr_rest, hr_max, zone_bounds_text = profile_sidebar(supabase, user, profile_row)
 
 uploaded = st.file_uploader("Загрузите FIT-файл(ы)", type=["fit"], accept_multiple_files=True)
