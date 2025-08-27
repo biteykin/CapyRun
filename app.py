@@ -9,6 +9,7 @@ import altair as alt
 import streamlit as st
 from fitparse import FitFile
 import datetime as dt
+from typing import Any
 
 # --- наши модули ---
 from auth import get_supabase, auth_sidebar
@@ -36,20 +37,22 @@ st.set_page_config(page_title="CapyRun — FIT Analyzer", page_icon="🏃", layo
 st.title("🏃 CapyRun — FIT Analyzer")
 st.caption("Загрузи один или несколько .fit → отчёт / прогресс / план + календарь (ICS) + Excel")
 
+# --- совместимость user-объекта из auth_sidebar (dict/obj) ---
+def user_id(u: Any):
+    return u.get("id") if isinstance(u, dict) else getattr(u, "id", None)
+
 # Supabase клиент
 supabase = get_supabase()
 
 # Sidebar: auth + profile
-# Sidebar: auth + profile
 with st.sidebar:
-    # Авторизация
+    # 1) Авторизация
     user = auth_sidebar(supabase)
     if not user:
-        # Если не залогинен — форма логина + stop()
         st.stop()
 
     # 2) Профиль атлета (HR/zones) — загрузка и UI
-    profile_row = load_or_init_profile(supabase, user["id"])
+    profile_row = load_or_init_profile(supabase, user_id(user))
     hr_rest, hr_max, zone_bounds_text = profile_sidebar(supabase, user, profile_row)
 
 uploaded = st.file_uploader("Загрузите FIT-файл(ы)", type=["fit"], accept_multiple_files=True)
@@ -276,7 +279,7 @@ else:
 
         # Save to DB
         if st.button("📦 Сохранить тренировку в историю"):
-            save_workouts(supabase, user.id, [summary])
+            save_workouts(supabase, user_id(user), [summary])
             st.success("Сохранено в БД")
 
     # ---------------- Несколько файлов ----------------
@@ -395,12 +398,12 @@ else:
 
         # Save all to DB
         if st.button("📦 Сохранить все тренировки в историю"):
-            save_workouts(supabase, user.id, summaries)
+            save_workouts(supabase, user_id(user), summaries)
             st.success("Сохранено в БД")
 
         # History from DB
         with st.expander("📚 Мои тренировки"):
-            df_hist = fetch_workouts(supabase, user.id, limit=100)
+            df_hist = fetch_workouts(supabase, user_id(user), limit=100)
             if not df_hist.empty:
                 df_hist = df_hist.copy()
                 if "time_s" in df_hist.columns:
