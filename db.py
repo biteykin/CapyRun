@@ -103,43 +103,26 @@ def _normalize_row_for_save(user_id: str, row: Dict[str, Any]) -> Dict[str, Any]
 
 def save_workouts(supabase, user_id: str, summaries: List[Dict[str, Any]]) -> None:
     """
-    Перед вставкой:
-      1) Берём текущий uid из auth и ИМЕННО ЕГО ставим в user_id (игнорируем пришедший параметр).
-      2) Прокидываем access_token в PostgREST, чтобы auth.uid() в RLS совпал с user_id.
+    Пишем через RPC-функцию insert_workouts: она сама ставит user_id = auth.uid().
     """
     if not summaries:
         return
 
-    try:
-        uid = _attach_auth_token(supabase)  # удостоверились, что есть токен и uid
-    except Exception as e:
-        # Покажем причину в UI и пробросим
-        try:
-            import streamlit as st
-            st.error(str(e))
-        except Exception:
-            pass
-        raise
+    # Нормализуем и маппим ключи (как раньше), но БЕЗ user_id — его проставит функция
+    rows = []
+    for r in summaries:
+        r = r or {}
+        norm = {}
+        for k, v in r.items():
+            sk = KEY_MAP_SAVE.get(k, k)  # trimp/ef/pa_hr_pct
+            norm[sk] = _jsonable(v)
+        rows.append(norm)
 
-    rows = [_normalize_row_for_save(uid, r or {}) for r in summaries]  # ПРИНУДИТЕЛЬНО ПОДМЕНЯЕМ user_id = uid
+    # ВАЖНО: перед RPC должен быть прокинут JWT (иначе auth.uid() будет NULL)
+    uid, token = _attach_auth_token(supabase)
 
-    try:
-        supabase.table("workouts").insert(rows).execute()
-    except Exception as e:
-        try:
-            import streamlit as st
-            if hasattr(e, "args") and e.args and isinstance(e.args[0], dict):
-                info = e.args[0]
-                code = info.get("code")
-                message = info.get("message")
-                details = info.get("details")
-                hint = info.get("hint")
-                st.error(f"Supabase insert error [{code}]: {message}\n{details or ''}\n{hint or ''}")
-            else:
-                st.error(f"Supabase insert error: {getattr(e, 'message', None) or str(e)}")
-        except Exception:
-            pass
-        raise
+    # Вызов RPC
+    supabase.rpc("insert_workouts", {"_rows": rows}).execute()
 
 
 def fetch_workouts(supabase, user_id: str, limit: int = 200) -> pd.DataFrame:
