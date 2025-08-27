@@ -207,14 +207,19 @@ def build_ics(
     lines.append("END:VCALENDAR")
     return "\n".join(lines)
 
-# utils.py
+# для лендинга
 import streamlit as st
 import streamlit.components.v1 as components
+
+def set_auth_mode(mode: str):
+    """Сохраняет желаемый режим в сайдбаре: 'login' | 'signup'."""
+    if mode in ("login", "signup"):
+        st.session_state["auth_mode"] = mode
 
 def open_sidebar():
     """
     Принудительно разворачивает сайдбар, если он свернут.
-    Делает несколько попыток с интервалами, т.к. DOM может рендериться не сразу.
+    Делает несколько попыток, т.к. DOM может рендериться не сразу.
     """
     components.html(
         """
@@ -223,29 +228,17 @@ def open_sidebar():
           function expandOnce() {
             const doc = window.parent?.document;
             if (!doc) return;
-
-            // Кнопки, которые иногда встречаются в разных версиях Streamlit
             const btn =
               doc.querySelector('[data-testid="stSidebarCollapseButton"]') ||
               doc.querySelector('[data-testid="baseButton-headerNoPadding"]') ||
               doc.querySelector('[data-testid="stSidebar"] button');
-
             const sidebar = doc.querySelector('[data-testid="stSidebar"]');
-
-            // Если явно знаем, что свернуто — кликаем
             const aria = btn ? btn.getAttribute('aria-expanded') : null;
-            const isCollapsedAria = aria === 'false';
-            const isCollapsedByWidth = sidebar ? sidebar.offsetWidth < 20 : false;
-
-            if (btn && (isCollapsedAria || isCollapsedByWidth)) {
-              btn.click();
-            }
+            const collapsedAria = aria === 'false';
+            const collapsedByWidth = sidebar ? sidebar.offsetWidth < 20 : false;
+            if (btn && (collapsedAria || collapsedByWidth)) btn.click();
           }
-
-          // Несколько попыток: DOM/React может быть не готов
-          for (let i = 0; i < 15; i++) {
-            setTimeout(expandOnce, 120 * (i + 1));
-          }
+          for (let i = 0; i < 15; i++) setTimeout(expandOnce, 120 * (i + 1));
         })();
         </script>
         """,
