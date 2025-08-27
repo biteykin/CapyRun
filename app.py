@@ -124,31 +124,26 @@ else:
                 f"Техническая информация: {e}"
             )
 
-# --- Кнопка "Сохранить в БД" для загруженных файлов ---
+# -# --- Кнопка "Сохранить в БД" для загруженных файлов ---
 st.markdown("#### 💾 Сохранить загруженные тренировки в БД")
 if st.button("Сохранить в БД"):
+    saved, failed = 0, []
     cache = st.session_state.get("_uploads_cache") or []
-    results = [
-        save_workout(
-            supabase,
-            user_id=uid,
-            filename=item["name"],
-            size_bytes=item["size"],
-            parsed=None,  # сюда позже подставим реальные метрики
-        )
-        for item in cache
-    ]
-
-    saved = sum(1 for ok, _, _ in results if ok)
-    failed = [
-        f"{item['name']}: {err or ex}"
-        for item, (ok, err, _), ex in zip(
-            cache,
-            results,
-            [None] * len(results)
-        )
-        if not ok
-    ]
+    for item in cache:
+        try:
+            ok, err, row = save_workout(
+                supabase,
+                user_id=uid,
+                filename=item["name"],
+                size_bytes=item["size"],
+                parsed=None,  # сюда позже подставим реальные метрики
+            )
+            if ok:
+                saved += 1
+            else:
+                failed.append(f"{item['name']}: {err}")
+        except Exception as ex:
+            failed.append(f"{item['name']}: {ex}")
 
     if saved:
         st.success(f"Сохранено тренировок: {saved}")
