@@ -44,16 +44,23 @@ def user_id(u: Any):
 # Supabase клиент
 supabase = get_supabase()
 
-# Sidebar: auth + profile
+# --- "Sidebar: auth + profile" ---
 with st.sidebar:
-    # 1) Авторизация
-    user = auth_sidebar(supabase)
+    # 1) Авторизация — форма появится здесь, если юзер не залогинен.
+    # Если залогинен, НИЧЕГО не рисуем (show_when_authed=False), просто получаем user.
+    user = auth_sidebar(supabase, show_when_authed=False)
     if not user:
         st.stop()
 
-    # 2) Профиль атлета (HR/zones) — загрузка и UI
+    # 2) Параметры анализа (сверху)
     profile_row = load_or_init_profile(supabase, user_id(user))
     hr_rest, hr_max, zone_bounds_text = profile_sidebar(supabase, user, profile_row)
+
+    # 3) Разделитель и АККАУНТ (внизу)
+    st.divider()
+    from auth import account_block
+    account_block(supabase, user)
+
 
 uploaded = st.file_uploader("Загрузите FIT-файл(ы)", type=["fit"], accept_multiple_files=True)
 
