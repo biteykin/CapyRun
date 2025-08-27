@@ -1,3 +1,5 @@
+# app.py — CapyRun FIT Analyzer v3.1 (date merge fix)
+
 import io
 import math
 import numpy as np
@@ -9,8 +11,8 @@ from datetime import timedelta
 from math import exp
 
 # ---------------- UI / Sidebar ----------------
-st.set_page_config(page_title="CapyRun — FIT Analyzer v3", page_icon="🏃", layout="wide")
-st.title("🏃 CapyRun — FIT Analyzer v3")
+st.set_page_config(page_title="CapyRun — FIT Analyzer v3.1", page_icon="🏃", layout="wide")
+st.title("🏃 CapyRun — FIT Analyzer v3.1")
 st.caption("Загрузи один или несколько .fit → отчёт по сессии / тренды нагрузки / черновик плана + Excel")
 
 with st.sidebar:
@@ -166,7 +168,6 @@ def parse_fit_file(uploaded_file):
     df_ses = pd.DataFrame(ses_rows)
 
     # Summary per workout
-    # start_time
     start_time = None
     if not df_ses.empty and pd.notna(df_ses.iloc[0].get("start_time")):
         start_time = pd.to_datetime(df_ses.iloc[0]["start_time"])
@@ -211,7 +212,7 @@ def parse_fit_file(uploaded_file):
 
     summary = {
         "start_time": start_time,
-        "date": start_time.date() if start_time else None,
+        "date": start_time.date() if start_time else None,  # будет нормализовано позже
         "sport": (df_ses.iloc[0]["sport"] if not df_ses.empty else None),
         "distance_km": round(distance_km, 2) if distance_km else None,
         "time_min": round(time_min, 1) if time_min else None,
@@ -227,7 +228,7 @@ def parse_fit_file(uploaded_file):
 if not uploaded:
     st.info("Загрузи один или несколько .fit файлов, чтобы увидеть отчёт/прогресс.")
 else:
-    # Один файл → прежний детальный отчёт
+    # Один файл → детальный отчёт
     if len(uploaded) == 1:
         file = uploaded[0]
         df_rec, df_laps, df_ses, summary = parse_fit_file(file)
@@ -310,93 +311,102 @@ else:
             summaries.append(summary)
 
         df_sum = pd.DataFrame(summaries).dropna(subset=["date"]).sort_values("start_time").reset_index(drop=True)
+
+        # --- FIX: приводим тип ключа к datetime64[ns] (полночь) ---
+        if not df_sum.empty:
+            df_sum["date"] = pd.to_datetime(df_sum["date"]).dt.normalize()
+
         st.dataframe(df_sum)
 
         # ---- Ежедневная нагрузка и ATL/CTL/TSB ----
         st.subheader("Нагрузка (TRIMP) по дням и тренды ATL/CTL/TSB")
+
+        if df_sum.empty:
+            st.info("Недостаточно данных с датами для построения трендов.")
+            st.stop()
+
         daily = df_sum.groupby("date").agg(
             TRIMP=("TRIMP", "sum"),
             distance_km=("distance_km", "sum")
         ).reset_index()
 
-        if not daily.empty:
-            # растянем на последовательные дни
-            full = pd.DataFrame({"date": pd.date_range(daily["date"].min(), daily["date"].max(), freq="D")})
-            daily = full.merge(daily, on="date", how="left").fillna({"TRIMP":0.0, "distance_km":0.0})
+        # последовательные дни на интервале min..max по df_sum
+        full = pd.DataFrame({
+            "date": pd.date_range(df_sum["date"].min(), df_sum["date"].max(), freq="D")
+        })
+        daily = full.merge(daily, on="date", how="left").fillna({"TRIMP": 0.0, "distance_km": 0.0})
 
-            # EWMA вручную (ежедневный шаг)
-            def ewma(load, tau_days):
-                alpha = 1 - exp(-1.0 / tau_days)
-                out = []
-                prev = 0.0
-                for v in load:
-                    prev = prev + alpha * (v - prev)
-                    out.append(prev)
-                return np.array(out)
+        # EWMA вручную (ежедневный шаг)
+        def ewma(load, tau_days):
+            alpha = 1 - exp(-1.0 / tau_days)
+            out = []
+            prev = 0.0
+            for v in load:
+                prev = prev + alpha * (v - prev)
+                out.append(prev)
+            return np.array(out)
 
-            daily["ATL"] = ewma(daily["TRIMP"].values, tau_days=7)
-            daily["CTL"] = ewma(daily["TRIMP"].values, tau_days=42)
-            daily["TSB"] = daily["CTL"] - daily["ATL"]
+        daily["ATL"] = ewma(daily["TRIMP"].values, tau_days=7)
+        daily["CTL"] = ewma(daily["TRIMP"].values, tau_days=42)
+        daily["TSB"] = daily["CTL"] - daily["ATL"]
 
-            # график
-            base = daily.melt(id_vars="date", value_vars=["TRIMP","ATL","CTL","TSB"], var_name="metric", value_name="value")
-            chart = alt.Chart(base).mark_line().encode(
-                x="date:T",
-                y="value:Q",
-                color="metric:N"
-            ).interactive()
-            st.altair_chart(chart, use_container_width=True)
+        # график
+        base = daily.melt(id_vars="date", value_vars=["TRIMP","ATL","CTL","TSB"], var_name="metric", value_name="value")
+        chart = alt.Chart(base).mark_line().encode(
+            x="date:T",
+            y="value:Q",
+            color="metric:N"
+        ).interactive()
+        st.altair_chart(chart, use_container_width=True)
 
-            # quick KPIs за последнюю неделю
-            last7 = daily.tail(7)
-            c1,c2,c3,c4 = st.columns(4)
-            with c1: st.metric("TRIMP 7д", f"{last7['TRIMP'].sum():.0f}")
-            with c2: st.metric("DIST 7д", f"{last7['distance_km'].sum():.1f} км")
-            with c3: st.metric("ATL (сегодня)", f"{daily['ATL'].iloc[-1]:.0f}")
-            with c4: st.metric("TSB (сегодня)", f"{daily['TSB'].iloc[-1]:.0f}")
+        # quick KPIs за последнюю неделю
+        last7 = daily.tail(7)
+        c1,c2,c3,c4 = st.columns(4)
+        with c1: st.metric("TRIMP 7д", f"{last7['TRIMP'].sum():.0f}")
+        with c2: st.metric("DIST 7д", f"{last7['distance_km'].sum():.1f} км")
+        with c3: st.metric("ATL (сегодня)", f"{daily['ATL'].iloc[-1]:.0f}")
+        with c4: st.metric("TSB (сегодня)", f"{daily['TSB'].iloc[-1]:.0f}")
 
-            # ---- Черновик плана на 7 дней ----
-            st.subheader("📝 Черновик плана на следующую неделю")
-            last_week_km = float(last7["distance_km"].sum())
-            tsb = float(daily["TSB"].iloc[-1])
+        # ---- Черновик плана на 7 дней ----
+        st.subheader("📝 Черновик плана на следующую неделю")
+        last_week_km = float(last7["distance_km"].sum())
+        tsb = float(daily["TSB"].iloc[-1])
 
-            # логика рекомендации объёма
-            if tsb < -10:
-                target_km = max(0.0, last_week_km * 0.9)  # лёгкий дилоад
-                note = "TSB низкий → снизим объём (~-10%) для восстановления."
-            elif tsb > 10:
-                target_km = last_week_km * 1.10  # небольшой рост
-                note = "TSB высокий → можно аккуратно поднять объём (~+10%)."
-            else:
-                target_km = last_week_km * 1.05  # поддержание/слегка вверх
-                note = "TSB в норме → поддержим/слегка увеличим (~+5%)."
-
-            # распределение объёма (км) по дням (примерная схема)
-            dist_split = np.array([0.12,0.16,0.10,0.18,0.08,0.26,0.10])  # Пн..Вс
-            day_names = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
-            km_plan = (dist_split * target_km).round(1)
-
-            # типы сессий
-            types = ["Easy Z1–Z2", "Tempo Z3 (20–30 мин)", "Easy Z1–Z2",
-                     "Intervals Z4 (6×3’/2’)", "Recovery 30–40’ Z1", "Long Z2", "Easy + strides"]
-
-            plan_df = pd.DataFrame({
-                "День": day_names,
-                "Тип": types,
-                "Пробежка (км)": km_plan
-            })
-
-            st.write(note)
-            st.dataframe(plan_df)
-
-            # ---- Выгрузка Excel: Progress + Plan ----
-            xls = to_excel({
-                "Workouts": df_sum,
-                "DailyLoad": daily,
-                "NextWeekPlan": plan_df
-            })
-            st.download_button("⬇️ Скачать Excel (прогресс + план)", data=xls,
-                               file_name="capyrun_progress.xlsx",
-                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        # логика рекомендации объёма
+        if tsb < -10:
+            target_km = max(0.0, last_week_km * 0.9)  # лёгкий дилоад
+            note = "TSB низкий → снизим объём (~-10%) для восстановления."
+        elif tsb > 10:
+            target_km = last_week_km * 1.10  # небольшой рост
+            note = "TSB высокий → можно аккуратно поднять объём (~+10%)."
         else:
-            st.info("Недостаточно данных для построения трендов. Проверь, что у файлов есть даты/сводка.")
+            target_km = last_week_km * 1.05  # поддержание/слегка вверх
+            note = "TSB в норме → поддержим/слightly увеличим (~+5%)."
+
+        # распределение объёма (км) по дням (примерная схема)
+        dist_split = np.array([0.12,0.16,0.10,0.18,0.08,0.26,0.10])  # Пн..Вс
+        day_names = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+        km_plan = (dist_split * target_km).round(1)
+
+        # типы сессий
+        types = ["Easy Z1–Z2", "Tempo Z3 (20–30 мин)", "Easy Z1–Z2",
+                 "Intervals Z4 (6×3’/2’)", "Recovery 30–40’ Z1", "Long Z2", "Easy + strides"]
+
+        plan_df = pd.DataFrame({
+            "День": day_names,
+            "Тип": types,
+            "Пробежка (км)": km_plan
+        })
+
+        st.write(note)
+        st.dataframe(plan_df)
+
+        # ---- Выгрузка Excel: Progress + Plan ----
+        xls = to_excel({
+            "Workouts": df_sum,
+            "DailyLoad": daily,
+            "NextWeekPlan": plan_df
+        })
+        st.download_button("⬇️ Скачать Excel (прогресс + план)", data=xls,
+                           file_name="capyrun_progress.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
