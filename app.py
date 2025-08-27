@@ -405,72 +405,122 @@ else:
 st.dataframe(plan_df)
 
 
+# ---- Черновик плана на 7 дней ----
+st.subheader("📝 Черновик плана на следующую неделю")
+
+plan_df = pd.DataFrame()   # <-- гарантируем, что переменная существует
+note = None
+
+# готовим метрики за последнюю неделю
+last7 = daily.tail(7) if not daily.empty else pd.DataFrame()
+
+if not daily.empty and not last7.empty:
+    last_week_km = float(last7["distance_km"].sum())
+    tsb = float(daily["TSB"].iloc[-1])
+
+    # логика рекомендации объёма
+    if tsb < -10:
+        target_km = max(0.0, last_week_km * 0.9)   # лёгкий дилоад
+        note = "TSB низкий → снизим объём (~-10%) для восстановления."
+    elif tsb > 10:
+        target_km = last_week_km * 1.10            # небольшой рост
+        note = "TSB высокий → можно аккуратно поднять объём (~+10%)."
+    else:
+        target_km = last_week_km * 1.05            # поддержание/слегка вверх
+        note = "TSB в норме → поддержим/слегка увеличим (~+5%)."
+
+    # распределение объёма (км) по дням (примерная схема)
+    dist_split = np.array([0.12,0.16,0.10,0.18,0.08,0.26,0.10])  # Пн..Вс
+    day_names = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+    km_plan = (dist_split * target_km).round(1)
+
+    # типы сессий
+    types = ["Easy Z1–Z2", "Tempo Z3 (20–30 мин)", "Easy Z1–Z2",
+             "Intervals Z4 (6×3’/2’)", "Recovery 30–40’ Z1", "Long Z2", "Easy + strides"]
+
+    plan_df = pd.DataFrame({
+        "День": day_names,
+        "Тип": types,
+        "Пробежка (км)": km_plan
+    })
+
+    if note:
+        st.write(note)
+    st.dataframe(plan_df)
+else:
+    st.info("Недостаточно данных для составления плана (нужно ≥1 день с данными).")
+
 # === NEW: Экспорт плана в календарь (ICS) ===
-import datetime as dt  # можешь перенести в самый верх файла, если хочешь
+import datetime as dt  # можно перенести в самый верх файла
 
 with st.expander("📆 Экспорт плана в календарь (.ics)"):
-    # настройки экспорта
-    today = dt.date.today()
-    next_monday = today + dt.timedelta(days=(7 - today.weekday())) if today.weekday() != 0 else today
+    if plan_df.empty:
+        st.warning("План пуст — сначала сформируй его выше.")
+    else:
+        # настройки экспорта
+        today = dt.date.today()
+        next_monday = today + dt.timedelta(days=(7 - today.weekday())) if today.weekday() != 0 else today
 
-    start_date = st.date_input("Дата начала плана", value=next_monday, help="С какого понедельника начинаем расписание")
-    workout_time = st.time_input("Время тренировки", value=dt.time(7, 0))
-    selected_days = st.multiselect(
-        "Какие дни добавить", 
-        options=["Пн","Вт","Ср","Чт","Пт","Сб","Вс"],
-        default=["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
-    )
-    duration_minutes = st.number_input("Длительность события в календаре (мин)", min_value=15, max_value=240, value=60, step=5)
+        start_date = st.date_input("Дата начала плана", value=next_monday, help="С какого понедельника начинаем расписание")
+        workout_time = st.time_input("Время тренировки", value=dt.time(7, 0))
+        selected_days = st.multiselect(
+            "Какие дни добавить",
+            options=["Пн","Вт","Ср","Чт","Пт","Сб","Вс"],
+            default=["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+        )
+        duration_minutes = st.number_input("Длительность события в календаре (мин)", min_value=15, max_value=240, value=60, step=5)
 
-    # маппинг дней
-    day_to_idx = {"Пн":0,"Вт":1,"Ср":2,"Чт":3,"Пт":4,"Сб":5,"Вс":6}
+        # маппинг дней
+        day_to_idx = {"Пн":0,"Вт":1,"Ср":2,"Чт":3,"Пт":4,"Сб":5,"Вс":6}
 
-    def dtstamp():
-        return dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+        def dtstamp():
+            return dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
 
-    def fmt_dt(d: dt.date, t: dt.time):
-        return dt.datetime.combine(d, t).strftime("%Y%m%dT%H%M%S")
+        def fmt_dt(d: dt.date, t: dt.time):
+            return dt.datetime.combine(d, t).strftime("%Y%m%dT%H%M%S")
 
-    def build_ics(plan_df, start_date, workout_time, selected_days, duration_minutes):
-        lines = [
-            "BEGIN:VCALENDAR",
-            "VERSION:2.0",
-            "PRODID:-//CapyRun//Weekly Plan//EN"
-        ]
-        for _, row in plan_df.iterrows():
-            day = str(row["День"])
-            if day not in selected_days:
-                continue
-            idx = day_to_idx.get(day, 0)
-            d = start_date + dt.timedelta(days=idx)
-            start = fmt_dt(d, workout_time)
-            end_dt = (dt.datetime.combine(d, workout_time) + dt.timedelta(minutes=int(duration_minutes)))
-            end = end_dt.strftime("%Y%m%dT%H%M%S")
-
-            title = f'{row["Тип"]} — {row["Пробежка (км)"]} км'
-            desc = f'CapyRun: {row["Тип"]}. Плановый объём: {row["Пробежка (км)"]} км.'
-
-            uid = f"{start}-{hash(title) & 0xffffffff}@capyrun"
-            lines += [
-                "BEGIN:VEVENT",
-                f"UID:{uid}",
-                f"DTSTAMP:{dtstamp()}",
-                f"DTSTART:{start}",
-                f"DTEND:{end}",
-                f"SUMMARY:{title}",
-                f"DESCRIPTION:{desc}",
-                "END:VEVENT"
+        def build_ics(plan_df, start_date, workout_time, selected_days, duration_minutes):
+            lines = [
+                "BEGIN:VCALENDAR",
+                "VERSION:2.0",
+                "PRODID:-//CapyRun//Weekly Plan//EN"
             ]
-        lines.append("END:VCALENDAR")
-        return "\n".join(lines)
+            for _, row in plan_df.iterrows():
+                day = str(row["День"])
+                if day not in selected_days:
+                    continue
+                idx = day_to_idx.get(day, 0)
+                d = start_date + dt.timedelta(days=idx)
+                start = fmt_dt(d, workout_time)
+                end_dt = (dt.datetime.combine(d, workout_time) + dt.timedelta(minutes=int(duration_minutes)))
+                end = end_dt.strftime("%Y%m%dT%H%M%S")
 
-    ics_text = build_ics(plan_df, start_date, workout_time, selected_days, duration_minutes)
-    st.download_button(
-        "📥 Скачать iCal (.ics)",
-        data=ics_text,
-        file_name="capyrun_plan.ics",
-        mime="text/calendar"
-    )
+                title = f'{row["Тип"]} — {row["Пробежка (км)"]} км'
+                desc = f'CapyRun: {row["Тип"]}. Плановый объём: {row["Пробежка (км)"]} км.'
+
+                uid = f"{start}-{hash(title) & 0xffffffff}@capyrun"
+                lines += [
+                    "BEGIN:VEVENT",
+                    f"UID:{uid}",
+                    f"DTSTAMP:{dtstamp()}",
+                    f"DTSTART:{start}",
+                    f"DTEND:{end}",
+                    f"SUMMARY:{title}",
+                    f"DESCRIPTION:{desc}",
+                    "END:VEVENT"
+                ]
+            lines.append("END:VCALENDAR")
+            return "\n".join(lines)
+
+        ics_text = build_ics(plan_df, start_date, workout_time, selected_days, duration_minutes)
+        st.download_button(
+            "📥 Скачать iCal (.ics)",
+            data=ics_text,
+            file_name="capyrun_plan.ics",
+            mime="text/calendar"
+        )
+
+
 
 # ---- Выгрузка Excel: Progress + Plan ----
 xls = to_excel({
