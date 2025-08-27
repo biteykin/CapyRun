@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 import datetime as dt
 from math import exp
+import streamlit as st
+import streamlit.components.v1 as components
 
 # ------------ Generic helpers ------------
 def get_val(msg, name, alt_name=None):
@@ -207,15 +209,18 @@ def build_ics(
     lines.append("END:VCALENDAR")
     return "\n".join(lines)
 
-# открытие сайдбара на лендинге
-import streamlit as st
-import streamlit.components.v1 as components
+# ------------ Sidebar helpers (auth landing integration) ------------
+def set_auth_mode(mode: str):
+    """Сохраняет желаемый режим для сайдбара: 'login' | 'signup'."""
+    if mode in ("login", "signup"):
+        st.session_state["auth_mode"] = mode
 
 def open_sidebar():
     """
     Надёжно разворачивает сайдбар.
-    1) Ставит 'expanded' в localStorage (Streamlit читает это при рендере)
-    2) Несколько раз кликает по кнопке разворота, если ширина небольшая
+    1) Помечает состояние 'expanded' в localStorage
+    2) Несколько раз кликает по кнопке разворота
+    3) Коротко наблюдает за DOM и повторяет попытку при изменениях
     """
     components.html(
         """
@@ -248,9 +253,14 @@ def open_sidebar():
           }
 
           // серия попыток — DOM может рендериться с задержкой
-          for (let i = 0; i < 12; i++) {
-            setTimeout(ensureOpen, 120 * (i + 1));
-          }
+          for (let i = 0; i < 12; i++) setTimeout(ensureOpen, 120 * (i + 1));
+
+          // короткий наблюдатель — если ширина не выросла, пробуем ещё
+          const host = doc?.querySelector('[data-testid="stSidebar"]') || doc?.body;
+          if (!host) return;
+          const mo = new MutationObserver(() => { if (!isExpanded()) ensureOpen(); });
+          mo.observe(host, { attributes: true, childList: true, subtree: true });
+          setTimeout(() => mo.disconnect(), 3000);
         })();
         </script>
         """,
