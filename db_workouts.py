@@ -1,10 +1,18 @@
 # db_workouts.py
 from __future__ import annotations
-from typing import Tuple, Optional, List, Dict, Any
+
+from typing import Tuple, Optional, List, Dict, Any, Union
 from datetime import datetime
 import uuid
 
-def _extract_response(resp) -> Tuple[Optional[dict | list], Optional[str]]:
+
+# ---------- ВСПОМОГАТЕЛЬНОЕ ----------
+
+def _extract_response(resp) -> Tuple[Optional[Union[dict, list]], Optional[str]]:
+    """
+    Унифицированный разбор ответа supabase-py (v1/v2).
+    Возвращает (data, error_message).
+    """
     data = getattr(resp, "data", None)
     err = getattr(resp, "error", None)
     if isinstance(resp, dict):
@@ -14,23 +22,55 @@ def _extract_response(resp) -> Tuple[Optional[dict | list], Optional[str]]:
         err = err.get("message") or str(err)
     return data, (str(err) if err else None)
 
+
+def _ensure_auth(supabase) -> None:
+    """
+    Подшивает access_token текущей сессии к postgrest-клиенту,
+    чтобы RLS (auth.uid()) работал корректно. Совместимо с v1/v2.
+    """
+    try:
+        token = None
+
+        # supabase-py v2
+        if hasattr(supabase, "auth") and hasattr(supabase.auth, "get_session"):
+            sess = supabase.auth.get_session()
+            # sess может быть объектом или dict
+            token = getattr(sess, "access_token", None) or (sess and sess.get("access_token"))
+
+        # fallback для некоторых конфигураций v1
+        if not token and hasattr(supabase, "auth") and hasattr(supabase.auth, "get_user"):
+            user = supabase.auth.get_user()
+            token = getattr(user, "access_token", None) or (user and user.get("access_token"))
+
+        if token and hasattr(supabase, "postgrest") and hasattr(supabase.postgrest, "auth"):
+            supabase.postgrest.auth(token)
+    except Exception:
+        # Не валим приложение, просто молча продолжаем — запрос тогда упрётся в 401/403 и его поймаем выше.
+        pass
+
+
+# ---------- ОСНОВНЫЕ ФУНКЦИИ ----------
+
 def save_workout(
     supabase,
     *,
     user_id: str,
     filename: str,
     size_bytes: int,
-    parsed: dict | None = None,
+    parsed: Optional[dict] = None,
 ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
     """
-    Универсальная вставка, совместимая с разными версиями supabase-py:
-    - Пытается insert().select(...).single().execute() (новые клиенты)
-    - Если .select() недоступен — insert().execute(), затем добираем строку по заранее сгенерированному id
+    Сохраняет тренировку в таблицу public.workouts.
+    Совместимо с разными версиями supabase-py:
+      - Пытается insert().select(...).single().execute() (новые клиенты)
+      - Если .select() недоступен — делает insert().execute(), затем добирает строку по заранее сгенерированному id
+    Возвращает: (ok, error_message, inserted_row)
     """
     try:
+        _ensure_auth(supabase)
         parsed = parsed or {}
 
-        workout_id = str(uuid.uuid4())
+        workout_id = str(uuid.uuid4())  # генерим id на клиенте, чтобы при старых клиентах можно было достать запись
         payload = {
             "id": workout_id,
             "user_id": user_id,
@@ -40,39 +80,43 @@ def save_workout(
             "duration_sec": parsed.get("duration_sec"),
             "distance_m": parsed.get("distance_m"),
             "moving_time_sec": parsed.get("moving_time_sec"),
-            "fit_summary": parsed,
+            "fit_summary": parsed,  # JSONB
             "uploaded_at": datetime.utcnow().isoformat(),
         }
 
         builder = supabase.table("workouts").insert(payload)
 
-        # 1) Новый API
+        # Попытка №1: новый API с .select().single()
         try:
-            resp = builder.select("id, filename, sport, duration_sec, distance_m, uploaded_at").single().execute()
+            resp = builder.select(
+                "id, filename, sport, duration_sec, distance_m, uploaded_at, user_id"
+            ).single().execute()
             data, err = _extract_response(resp)
             if err:
                 return False, err, None
             if not data:
+                # Добираем запись по id (на случай пустого data)
                 resp2 = (
                     supabase.table("workouts")
-                    .select("id, filename, sport, duration_sec, distance_m, uploaded_at")
+                    .select("id, filename, sport, duration_sec, distance_m, uploaded_at, user_id")
                     .eq("id", workout_id).single().execute()
                 )
                 data2, err2 = _extract_response(resp2)
                 if err2:
                     return False, err2, None
                 if not data2:
-                    return False, "Вставка не вернула строку (возможны RLS/политики).", None
+                    return False, "Вставка не вернула строку (возможны RLS-политики).", None
                 return True, None, data2
             return True, None, data
 
         except AttributeError:
-            # 2) Старый клиент — без .select()
+            # Старые клиенты: .select() отсутствует у результата insert()
             resp = builder.execute()
             data, err = _extract_response(resp)
             if err:
                 return False, err, None
 
+            # Некоторые версии возвращают вставленные строки сразу
             row = None
             if isinstance(data, list) and data:
                 row = data[0]
@@ -80,18 +124,20 @@ def save_workout(
                 row = data
 
             if not row or "id" not in row:
+                # Добираем по нашему заранее сгенерированному id
                 resp2 = (
                     supabase.table("workouts")
-                    .select("id, filename, sport, duration_sec, distance_m, uploaded_at")
+                    .select("id, filename, sport, duration_sec, distance_m, uploaded_at, user_id")
                     .eq("id", workout_id).single().execute()
                 )
                 data2, err2 = _extract_response(resp2)
                 if err2:
                     return False, err2, None
                 if not data2:
-                    return False, "Вставка не вернула строку (возможны RLS/политики).", None
+                    return False, "Вставка не вернула строку (возможны RLS-политики).", None
                 return True, None, data2
 
+            # Нормализуем возвращаемую строку
             return True, None, {
                 "id": row.get("id", workout_id),
                 "filename": row.get("filename", filename),
@@ -99,10 +145,12 @@ def save_workout(
                 "duration_sec": row.get("duration_sec"),
                 "distance_m": row.get("distance_m"),
                 "uploaded_at": row.get("uploaded_at"),
+                "user_id": row.get("user_id", user_id),
             }
 
     except Exception as e:
         return False, str(e), None
+
 
 def list_workouts(
     supabase,
@@ -110,9 +158,14 @@ def list_workouts(
     user_id: str,
     limit: int = 20
 ) -> List[Dict[str, Any]]:
+    """
+    Возвращает последние N тренировок пользователя.
+    Безопасный селект: подшиваем токен, запрашиваем '*', ловим ошибки выше (пусть UI решает, что показывать).
+    """
+    _ensure_auth(supabase)
     resp = (
         supabase.table("workouts")
-        .select("id, uploaded_at, filename, sport, duration_sec, distance_m")
+        .select("*")  # избегаем 400 из-за несовпадения списка колонок со схемой
         .eq("user_id", user_id)
         .order("uploaded_at", desc=True)
         .limit(limit)
@@ -120,5 +173,6 @@ def list_workouts(
     )
     data, err = _extract_response(resp)
     if err:
+        # Вернём пусто — UI может показать предупреждение/ошибку.
         return []
     return data or []

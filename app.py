@@ -56,16 +56,21 @@ def _workouts_df(rows):
 
 # 1) Список последних тренировок пользователя
 st.markdown("### 🏃 Мои тренировки")
-_rows = list_workouts(supabase, user_id=uid, limit=20)
-df = _workouts_df(_rows)
-if df is None or df.empty:
-    st.info("Пока нет сохранённых тренировок.")
-else:
-    st.dataframe(
-        df[["uploaded_at", "filename", "sport", "duration_sec", "distance_km"]],
-        use_container_width=True,
-        hide_index=True
-    )
+try:
+    _rows = list_workouts(supabase, user_id=uid, limit=20)
+    if not _rows:
+        st.info("Пока нет сохранённых тренировок.")
+    else:
+        import pandas as pd
+        df = pd.DataFrame(_rows)
+        if "distance_m" in df.columns:
+            df["distance_km"] = (df["distance_m"].fillna(0) / 1000).round(2)
+        cols = [c for c in ["uploaded_at", "filename", "sport", "duration_sec", "distance_km"] if c in df.columns]
+        st.dataframe(df[cols] if cols else df, use_container_width=True, hide_index=True)
+except Exception as e:
+    import traceback
+    st.error("Не удалось загрузить список тренировок (возможно, RLS/политики или нет токена).")
+    st.code("".join(traceback.format_exception_only(type(e), e)))
 
 st.divider()
 
