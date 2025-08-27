@@ -152,6 +152,8 @@ def save_workout(
         return False, str(e), None
 
 
+# db_workouts.py — вставь вместо текущего list_workouts
+
 def list_workouts(
     supabase,
     *,
@@ -160,19 +162,60 @@ def list_workouts(
 ) -> List[Dict[str, Any]]:
     """
     Возвращает последние N тренировок пользователя.
-    Безопасный селект: подшиваем токен, запрашиваем '*', ловим ошибки выше (пусть UI решает, что показывать).
+    Пробуем ORDER BY uploaded_at, если нет — created_at, если нет — без ORDER BY
+    и сортируем уже на клиенте.
     """
     _ensure_auth(supabase)
+
+    # 1) Попытка с uploaded_at
+    try:
+        resp = (
+            supabase.table("workouts")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("uploaded_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        data, err = _extract_response(resp)
+        if not err:
+            return data or []
+    except Exception:
+        pass  # упали из-за отсутствия колонки — пробуем дальше
+
+    # 2) Попытка с created_at (часто такая колонка есть по привычке)
+    try:
+        resp = (
+            supabase.table("workouts")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        data, err = _extract_response(resp)
+        if not err:
+            return data or []
+    except Exception:
+        pass
+
+    # 3) Без ORDER BY → сортируем в Python по лучшему доступному полю
     resp = (
         supabase.table("workouts")
-        .select("*")  # избегаем 400 из-за несовпадения списка колонок со схемой
+        .select("*")
         .eq("user_id", user_id)
-        .order("uploaded_at", desc=True)
         .limit(limit)
         .execute()
     )
     data, err = _extract_response(resp)
-    if err:
-        # Вернём пусто — UI может показать предупреждение/ошибку.
-        return []
-    return data or []
+    rows = data or []
+    # сортировка в памяти
+    def _key(r):
+        return (
+            r.get("uploaded_at")
+            or r.get("created_at")
+            or r.get("inserted_at")
+            or ""
+        )
+    rows.sort(key=_key, reverse=True)
+    return rows
