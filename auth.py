@@ -1,4 +1,3 @@
-# auth.py
 from __future__ import annotations
 import re
 import os
@@ -19,22 +18,18 @@ EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 def get_supabase() -> "Client":
     """
     Создаёт клиент Supabase, читая конфиг из st.secrets или ENV.
-    Никаких обращений к секретам на уровне импорта — только здесь.
     """
     url = None
     key = None
 
-    # 1) Пытаемся из secrets
     try:
         if "supabase" in st.secrets:
             sb = st.secrets["supabase"]
-            # поддержим оба варианта ключа: anon_key или key
             url = sb.get("url")
             key = sb.get("anon_key") or sb.get("key")
     except Exception:
         pass
 
-    # 2) Если нет в secrets — пробуем ENV (на всякий)
     url = url or os.getenv("SUPABASE_URL")
     key = key or os.getenv("SUPABASE_KEY")
 
@@ -43,12 +38,6 @@ def get_supabase() -> "Client":
             "⚠️ Supabase не сконфигурирован.\n\n"
             "Добавь секреты `[supabase] url` и `anon_key` (или `key`) в `.streamlit/secrets.toml`, "
             "или задай ENV `SUPABASE_URL` / `SUPABASE_KEY`."
-        )
-        st.caption(
-            "Пример `.streamlit/secrets.toml`:\n\n"
-            "[supabase]\n"
-            "url = \"https://YOUR_PROJECT.supabase.co\"\n"
-            "anon_key = \"YOUR_ANON_KEY\"\n"
         )
         st.stop()
 
@@ -61,21 +50,18 @@ def get_supabase() -> "Client":
 
 # ---------- helpers ----------
 def _current_user(supabase) -> Optional[Dict[str, Any]]:
-    # Пытаемся достать активную сессию
     try:
         sess = supabase.auth.get_session()
         if sess and getattr(sess, "user", None):
             return {"id": sess.user.id, "email": sess.user.email}
     except Exception:
         pass
-    # Пытаемся достать пользователя напрямую
     try:
         gu = supabase.auth.get_user()
         if gu and getattr(gu, "user", None):
             return {"id": gu.user.id, "email": gu.user.email}
     except Exception:
         pass
-    # Фоллбек на session_state
     u = st.session_state.get(SESSION_USER_KEY)
     return u if isinstance(u, dict) and u.get("id") else None
 
@@ -120,7 +106,6 @@ def _sign_up(supabase, email: str, password: str) -> tuple[Optional[Dict], Optio
         if user_now:
             return user_now, None, False
         user_norm = _normalize_user(getattr(res, "user", None)) or _normalize_user(res)
-        # если требуется подтверждение email — вернём needs_confirmation=True
         return (user_norm, None, True) if not user_now else (user_norm, None, False)
     except Exception as e:
         msg = f"{e}".lower()
@@ -149,10 +134,6 @@ def auth_sidebar(supabase, show_when_authed: bool = True) -> Optional[Dict, Any]
     - Если авторизован:
         * show_when_authed=True  -> рисует account_block и возвращает user
         * show_when_authed=False -> ничего не рисует, просто возвращает user
-
-    Режим синхронизируется с лендингом через st.session_state['auth_mode']:
-      - "login"  -> Вход
-      - "signup" -> Регистрация
     """
     box = st.empty()
     user = _current_user(supabase)
@@ -168,20 +149,24 @@ def auth_sidebar(supabase, show_when_authed: bool = True) -> Optional[Dict, Any]
     with box.container():
         st.markdown("### Вход / Регистрация")
 
-        # синхронизация с лендингом
-        mode_external = st.session_state.get("auth_mode", "login")  # "login" | "signup"
-        choices = ["Вход", "Регистрация"]
-        default_index = 0 if mode_external == "login" else 1
+        # режим извне: "login" | "signup"
+        external_mode = st.session_state.get("auth_mode", "login")
+        label_for_external = "Вход" if external_mode == "login" else "Регистрация"
+
+        # если только что переключили на лендинге → подставляем в радио
+        if st.session_state.get("_just_switched_auth"):
+            st.session_state["auth_mode_radio"] = label_for_external
+            st.session_state["_just_switched_auth"] = False
 
         mode_label = st.radio(
             "Режим",
-            choices,
-            index=default_index,
+            ["Вход", "Регистрация"],
+            key="auth_mode_radio",
             horizontal=True,
             label_visibility="collapsed",
-            key="auth_mode_label",
         )
-        # поддерживаем двунаправленно
+
+        # двунаправленная синхронизация
         st.session_state["auth_mode"] = "login" if mode_label == "Вход" else "signup"
 
         email = st.text_input("Email", key="auth_email")
