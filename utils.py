@@ -212,28 +212,42 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 def open_sidebar():
-    """Принудительно разворачивает сайдбар, если он был свернут."""
+    """
+    Принудительно разворачивает сайдбар, если он свернут.
+    Делает несколько попыток с интервалами, т.к. DOM может рендериться не сразу.
+    """
     components.html(
         """
         <script>
-        const tryOpen = () => {
-          const btn = window.parent.document.querySelector('[data-testid="stSidebarCollapseButton"]');
-          const sidebar = window.parent.document.querySelector('[data-testid="stSidebar"]');
-          if (!btn || !sidebar) return;
-          const expanded = btn.getAttribute('aria-expanded');
-          // Если свернут, кликаем по кнопке сворачивания чтобы развернуть
-          if (expanded === 'false') btn.click();
-        };
-        // Пытаемся несколько раз (на случай, если DOM ещё не готов)
-        for (let i = 0; i < 5; i++) setTimeout(tryOpen, 100 * (i + 1));
+        (function() {
+          function expandOnce() {
+            const doc = window.parent?.document;
+            if (!doc) return;
+
+            // Кнопки, которые иногда встречаются в разных версиях Streamlit
+            const btn =
+              doc.querySelector('[data-testid="stSidebarCollapseButton"]') ||
+              doc.querySelector('[data-testid="baseButton-headerNoPadding"]') ||
+              doc.querySelector('[data-testid="stSidebar"] button');
+
+            const sidebar = doc.querySelector('[data-testid="stSidebar"]');
+
+            // Если явно знаем, что свернуто — кликаем
+            const aria = btn ? btn.getAttribute('aria-expanded') : null;
+            const isCollapsedAria = aria === 'false';
+            const isCollapsedByWidth = sidebar ? sidebar.offsetWidth < 20 : false;
+
+            if (btn && (isCollapsedAria || isCollapsedByWidth)) {
+              btn.click();
+            }
+          }
+
+          // Несколько попыток: DOM/React может быть не готов
+          for (let i = 0; i < 15; i++) {
+            setTimeout(expandOnce, 120 * (i + 1));
+          }
+        })();
         </script>
         """,
         height=0,
     )
-
-def set_auth_mode(mode: str):
-    """Сохраняет желаемый режим в сайдбаре: 'login' | 'signup'."""
-    if mode not in ("login", "signup"):
-        return
-    st.session_state["auth_mode"] = mode
-
