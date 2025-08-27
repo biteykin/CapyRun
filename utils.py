@@ -206,3 +206,34 @@ def build_ics(
 
     lines.append("END:VCALENDAR")
     return "\n".join(lines)
+
+# utils.py
+import streamlit as st
+import streamlit.components.v1 as components
+
+def open_sidebar():
+    """Принудительно разворачивает сайдбар, если он был свернут."""
+    components.html(
+        """
+        <script>
+        const tryOpen = () => {
+          const btn = window.parent.document.querySelector('[data-testid="stSidebarCollapseButton"]');
+          const sidebar = window.parent.document.querySelector('[data-testid="stSidebar"]');
+          if (!btn || !sidebar) return;
+          const expanded = btn.getAttribute('aria-expanded');
+          // Если свернут, кликаем по кнопке сворачивания чтобы развернуть
+          if (expanded === 'false') btn.click();
+        };
+        // Пытаемся несколько раз (на случай, если DOM ещё не готов)
+        for (let i = 0; i < 5; i++) setTimeout(tryOpen, 100 * (i + 1));
+        </script>
+        """,
+        height=0,
+    )
+
+def set_auth_mode(mode: str):
+    """Сохраняет желаемый режим в сайдбаре: 'login' | 'signup'."""
+    if mode not in ("login", "signup"):
+        return
+    st.session_state["auth_mode"] = mode
+
