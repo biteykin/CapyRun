@@ -1,6 +1,6 @@
 # db_workouts.py
 from __future__ import annotations
-from typing import Tuple, Optional, Dict, Any
+from typing import Tuple, Optional, List, Dict, Any
 from datetime import datetime
 import uuid
 
@@ -24,13 +24,13 @@ def save_workout(
 ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
     """
     Универсальная вставка, совместимая с разными версиями supabase-py:
-    - Пытается использовать insert().select(...).single().execute() (новые клиенты)
-    - Если .select() недоступен — делает insert().execute(), затем добирает строку через select по id
+    - Пытается insert().select(...).single().execute() (новые клиенты)
+    - Если .select() недоступен — insert().execute(), затем добираем строку по заранее сгенерированному id
     """
     try:
         parsed = parsed or {}
 
-        workout_id = str(uuid.uuid4())  # генерим id на клиенте, чтобы можно было достать запись после insert
+        workout_id = str(uuid.uuid4())
         payload = {
             "id": workout_id,
             "user_id": user_id,
@@ -46,14 +46,13 @@ def save_workout(
 
         builder = supabase.table("workouts").insert(payload)
 
-        # Попытка №1: новый API с .select().single()
+        # 1) Новый API
         try:
             resp = builder.select("id, filename, sport, duration_sec, distance_m, uploaded_at").single().execute()
             data, err = _extract_response(resp)
             if err:
                 return False, err, None
             if not data:
-                # На всякий случай попробуем добрать запись по id
                 resp2 = (
                     supabase.table("workouts")
                     .select("id, filename, sport, duration_sec, distance_m, uploaded_at")
@@ -68,13 +67,12 @@ def save_workout(
             return True, None, data
 
         except AttributeError:
-            # У старых клиентов нет .select() после insert
+            # 2) Старый клиент — без .select()
             resp = builder.execute()
             data, err = _extract_response(resp)
             if err:
                 return False, err, None
-            # Некоторые версии уже возвращают вставленные строки;
-            # если да — берём первую, иначе — добираем по id
+
             row = None
             if isinstance(data, list) and data:
                 row = data[0]
@@ -82,7 +80,6 @@ def save_workout(
                 row = data
 
             if not row or "id" not in row:
-                # Добираем запись по сгенерированному id
                 resp2 = (
                     supabase.table("workouts")
                     .select("id, filename, sport, duration_sec, distance_m, uploaded_at")
@@ -95,7 +92,6 @@ def save_workout(
                     return False, "Вставка не вернула строку (возможны RLS/политики).", None
                 return True, None, data2
 
-            # Если row есть — возвращаем его (или добираем витрину колонок, если хочется)
             return True, None, {
                 "id": row.get("id", workout_id),
                 "filename": row.get("filename", filename),
@@ -107,3 +103,22 @@ def save_workout(
 
     except Exception as e:
         return False, str(e), None
+
+def list_workouts(
+    supabase,
+    *,
+    user_id: str,
+    limit: int = 20
+) -> List[Dict[str, Any]]:
+    resp = (
+        supabase.table("workouts")
+        .select("id, uploaded_at, filename, sport, duration_sec, distance_m")
+        .eq("user_id", user_id)
+        .order("uploaded_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    data, err = _extract_response(resp)
+    if err:
+        return []
+    return data or []
