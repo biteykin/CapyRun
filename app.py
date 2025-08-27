@@ -40,11 +40,18 @@ st.caption("Загрузи один или несколько .fit → отчё�
 supabase = get_supabase()
 
 # Sidebar: auth + profile
+# Sidebar: auth + profile
 with st.sidebar:
-    # 1) Авторизация
+    # Авторизация
     user = auth_sidebar(supabase)
     if not user:
+        # Если не залогинен — форма логина + stop()
         st.stop()
+
+    # Если авторизован — показываем только профиль
+    profile_row = load_or_init_profile(supabase, user.id)
+    hr_rest, hr_max, zone_bounds_text = profile_sidebar(supabase, user, profile_row)
+
 
     # 2) Профиль атлета (HR/zones) — загрузка и UI
     profile_row = load_or_init_profile(supabase, user.id)
