@@ -1,12 +1,10 @@
 # landing.py
 import streamlit as st
-from utils import open_sidebar, set_auth_mode
+from utils import open_sidebar  # set_auth_mode не нужен — пишем в session_state напрямую
 
 def _switch_and_focus(mode: str, toast_icon: str):
     # 1) запоминаем желаемый режим для сайдбара
-    if mode not in ("login", "signup"):
-        mode = "login"
-    st.session_state["auth_mode"] = mode
+    st.session_state["auth_mode"] = mode if mode in ("login", "signup") else "login"
     st.session_state["_just_switched_auth"] = True
 
     # 2) раскрываем сайдбар
@@ -15,7 +13,7 @@ def _switch_and_focus(mode: str, toast_icon: str):
     # 3) подсказка
     st.toast("Форма входа и регистрации — в сайдбаре слева 👈", icon=toast_icon)
 
-    # 4) мгновенная перерисовка, чтобы радио в сайдбаре стало в нужное положение
+    # 4) мгновенная перерисовка, чтобы radio в сайдбаре встал как надо
     st.rerun()
 
 def render_landing() -> None:
