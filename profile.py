@@ -1,21 +1,13 @@
-# new code
-
+# profile.py — vDEBUG-3
 from __future__ import annotations
 import datetime as dt
 from typing import Any, Dict, Optional, Tuple
-
 import streamlit as st
 
-DEFAULTS = {
-    "hr_rest": 50,
-    "hr_max": 185,
-    "zone_bounds_text": "120,140,155,170",
-}
-
-# ---------------- internals ----------------
+DEFAULTS = {"hr_rest": 50, "hr_max": 185, "zone_bounds_text": "120,140,155,170"}
+PROFILE_VERSION = "profile.py vDEBUG-3"  # ← покажем на экране, чтобы знать, что файл активен
 
 def _attach_auth_token(supabase) -> Optional[str]:
-    """Attach access_token to PostgREST; return token or None."""
     token = None
     try:
         token = st.session_state.get("sb_access_token")
@@ -32,7 +24,6 @@ def _attach_auth_token(supabase) -> Optional[str]:
                     token = sess.get("access_token")
         except Exception:
             pass
-
     if token:
         try:
             if hasattr(supabase, "postgrest") and hasattr(supabase.postgrest, "auth"):
@@ -43,19 +34,12 @@ def _attach_auth_token(supabase) -> Optional[str]:
             pass
     return token
 
-
 def _get_current_user_id(supabase, user: Optional[Dict[str, Any]] = None) -> Optional[str]:
-    """Return current user's uid from several sources."""
-    # 1) from passed user (from app.py / auth_sidebar)
     if isinstance(user, dict) and user.get("id"):
         return str(user["id"])
-
-    # 2) from session_state (where auth_sidebar puts user object)
     u = st.session_state.get("auth_user")
     if isinstance(u, dict) and u.get("id"):
         return str(u["id"])
-
-    # 3) from supabase.auth.get_user()
     try:
         gu = supabase.auth.get_user()
         uid = getattr(getattr(gu, "user", None), "id", None)
@@ -65,15 +49,9 @@ def _get_current_user_id(supabase, user: Optional[Dict[str, Any]] = None) -> Opt
             return str(uid)
     except Exception:
         pass
-
     return None
 
-# ---------------- public API ----------------
-
 def load_or_init_profile(supabase, user_id: str) -> Dict[str, Any]:
-    """
-    Load profile by user_id. If not found, return defaults (without creating).
-    """
     _attach_auth_token(supabase)
     try:
         res = (
@@ -93,21 +71,18 @@ def load_or_init_profile(supabase, user_id: str) -> Dict[str, Any]:
                 "zone_bounds_text": row.get("zone_bounds_text", DEFAULTS["zone_bounds_text"]),
             }
     except Exception as e:
-        st.warning(f"Could not load profile: {e}")
+        st.warning(f"Не удалось загрузить профиль: {e}")
     return {"user_id": user_id, **DEFAULTS}
 
-
 def save_profile(supabase, user: Optional[Dict[str, Any]], hr_rest: int, hr_max: int, zone_bounds_text: str) -> bool:
-    """
-    Upsert profile by user_id. user_id is taken from passed user/session, not from field params.
-    """
     token = _attach_auth_token(supabase)
     uid = _get_current_user_id(supabase, user)
 
+    # ЯВНАЯ ДИАГНОСТИКА:
+    st.info(f"DEBUG(save_profile): token_present={bool(token)} | uid={uid} | ss.auth_user={bool(st.session_state.get('auth_user'))}")
+
     if not uid:
-        st.error("No active session. Please log in and try again.")
-        # Debug hint to understand why no uid
-        st.caption(f"DEBUG: token_present={bool(token)} | session_user={bool(st.session_state.get('auth_user'))}")
+        st.error("Нет активной сессии. Войдите в аккаунт и повторите. (см. DEBUG выше)")
         return False
 
     row = {
@@ -119,37 +94,28 @@ def save_profile(supabase, user: Optional[Dict[str, Any]], hr_rest: int, hr_max:
     }
 
     try:
-        # upsert by user_id (in DB: user_id PRIMARY KEY)
         supabase.table("profiles").upsert(row, on_conflict="user_id").execute()
         return True
     except Exception as e:
-        # Unpack PostgREST message if possible
-        msg = "Profile not saved (check RLS/policies in Supabase)."
+        msg = "Профиль не сохранён (проверь RLS/политики в Supabase)."
         if hasattr(e, "args") and e.args and isinstance(e.args[0], dict):
-            info = e.args[0]
-            code = info.get("code")
-            message = info.get("message")
-            details = info.get("details")
-            hint = info.get("hint")
-            msg = f"Profile not saved [{code}]: {message}\n{details or ''}\n{hint or ''}"
+            info = e.args[0]; code = info.get("code"); message = info.get("message")
+            details = info.get("details"); hint = info.get("hint")
+            msg = f"Профиль не сохранён [{code}]: {message}\n{details or ''}\n{hint or ''}"
         st.error(msg)
+        st.exception(e)  # ← полный трейсбек в UI для диагностики
         return False
 
-
 def profile_sidebar(supabase, user: Dict[str, Any], profile_row: Dict[str, Any]) -> Tuple[int, int, str]:
-    """
-    Render profile block in sidebar.
-    Returns (hr_rest, hr_max, zone_bounds_text).
-    """
-    st.markdown("### ⚙️ Profile")
-    hr_rest = st.number_input("Resting HR (HRrest)", 30, 120, int(profile_row.get("hr_rest", DEFAULTS["hr_rest"])))
-    hr_max  = st.number_input("Max HR (HRmax)", 120, 240, int(profile_row.get("hr_max", DEFAULTS["hr_max"])))
-    zone_bounds_text = st.text_input("HR Zone Bounds (comma-separated)", value=str(profile_row.get("zone_bounds_text", DEFAULTS["zone_bounds_text"])))
+    st.markdown("### ⚙️ Профиль")
+    st.caption(PROFILE_VERSION)  # ← видно активную версию файла
+    hr_rest = st.number_input("Пульс в покое (HRrest)", 30, 120, int(profile_row.get("hr_rest", DEFAULTS["hr_rest"])))
+    hr_max  = st.number_input("Максимальный пульс (HRmax)", 120, 240, int(profile_row.get("hr_max", DEFAULTS["hr_max"])))
+    zone_bounds_text = st.text_input("Границы зон ЧСС (через запятую)", value=str(profile_row.get("zone_bounds_text", DEFAULTS["zone_bounds_text"])))
 
-    if st.button("💾 Save Profile", use_container_width=True, key="btn_save_profile"):
-        with st.spinner("Saving profile..."):
+    if st.button("💾 Сохранить профиль", use_container_width=True, key="btn_save_profile"):
+        with st.spinner("Сохраняем профиль..."):
             ok = save_profile(supabase, user, hr_rest, hr_max, zone_bounds_text)
         if ok:
-            st.success("Profile saved.")
-
+            st.success("Профиль сохранён.")
     return int(hr_rest), int(hr_max), zone_bounds_text
