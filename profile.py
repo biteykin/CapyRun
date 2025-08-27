@@ -100,6 +100,7 @@ def save_profile(supabase, hr_rest: int, hr_max: int, zone_bounds_text: str) -> 
         st.error("Нет активной сессии. Войдите в аккаунт и повторите.")
         return False
 
+    # Используем dict comprehension для row, чтобы избежать лишних проверок
     row = {
         "user_id": uid,
         "hr_rest": int(hr_rest) if hr_rest is not None else None,
@@ -109,19 +110,18 @@ def save_profile(supabase, hr_rest: int, hr_max: int, zone_bounds_text: str) -> 
     }
 
     try:
-        # upsert по user_id (нужен unique/PK на user_id)
         supabase.table("profiles").upsert(row, on_conflict="user_id").execute()
         return True
     except Exception as e:
-        # Разворачиваем сообщение PostgREST, если возможно
+        # Оптимизированная обработка ошибок
         msg = "Профиль не сохранён (проверь RLS/политики в Supabase)."
-        if hasattr(e, "args") and e.args and isinstance(e.args[0], dict):
-            info = e.args[0]
-            code = info.get("code")
-            message = info.get("message")
-            details = info.get("details")
-            hint = info.get("hint")
-            msg = f"Профиль не сохранён [{code}]: {message}\n{details or ''}\n{hint or ''}"
+        info = getattr(e, "args", [None])[0]
+        if isinstance(info, dict):
+            code = info.get("code", "")
+            message = info.get("message", "")
+            details = info.get("details", "")
+            hint = info.get("hint", "")
+            msg = f"Профиль не сохранён [{code}]: {message}\n{details}\n{hint}"
         st.error(msg)
         return False
 
