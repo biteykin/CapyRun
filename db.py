@@ -3,7 +3,7 @@
 from __future__ import annotations
 import math
 import datetime as dt
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -17,10 +17,10 @@ KEY_MAP_SAVE = {
 KEY_MAP_LOAD = {v: k for k, v in KEY_MAP_SAVE.items()}
 
 
-def _attach_auth_token(supabase) -> str:
+def _attach_auth_token(supabase) -> Tuple[Optional[str], Optional[str]]:
     """
     Прокидывает access_token текущего пользователя в PostgREST.
-    Возвращает uid текущего пользователя (или бросает исключение, если его нет).
+    Возвращает (uid, token) текущего пользователя (или (None, None), если его нет).
     """
     # 1) получаем пользователя
     gu = supabase.auth.get_user()
@@ -30,9 +30,6 @@ def _attach_auth_token(supabase) -> str:
         uid = getattr(getattr(gu, "user", None), "id", None)
         if uid is None and isinstance(gu, dict):
             uid = gu.get("user", {}).get("id")
-
-    if not uid:
-        raise RuntimeError("Нет аутентифицированного пользователя: получите доступ к аккаунту и повторите попытку.")
 
     # 2) получаем access_token
     sess = supabase.auth.get_session()
@@ -44,19 +41,15 @@ def _attach_auth_token(supabase) -> str:
         if token is None and isinstance(sess, dict):
             token = sess.get("access_token")
 
-    if not token:
-        raise RuntimeError("Не найден access_token для PostgREST. Повторно войдите в аккаунт.")
-
     # 3) прокидываем токен в PostgREST клиент
-    if hasattr(supabase, "postgrest") and hasattr(supabase.postgrest, "auth"):
-        supabase.postgrest.auth(token)
-    elif hasattr(supabase, "rest") and hasattr(supabase.rest, "auth"):
-        supabase.rest.auth(token)
-    else:
-        # крайне маловероятно, но чтобы явно упасть, если клиент странный
-        raise RuntimeError("Клиент Supabase не умеет postgrest.auth(token). Обновите supabase-py.")
+    if token:
+        if hasattr(supabase, "postgrest") and hasattr(supabase.postgrest, "auth"):
+            supabase.postgrest.auth(token)
+        elif hasattr(supabase, "rest") and hasattr(supabase.rest, "auth"):
+            supabase.rest.auth(token)
+        # если не умеет — не бросаем, просто не делаем
 
-    return uid
+    return uid, token
 
 
 def _jsonable(value: Any) -> Any:
@@ -104,6 +97,7 @@ def _normalize_row_for_save(user_id: str, row: Dict[str, Any]) -> Dict[str, Any]
 def save_workouts(supabase, user_id: str, summaries: List[Dict[str, Any]]) -> None:
     """
     Пишем через RPC-функцию insert_workouts: она сама ставит user_id = auth.uid().
+    Если пользователь не аутентифицирован — не делаем ничего.
     """
     if not summaries:
         return
@@ -121,18 +115,16 @@ def save_workouts(supabase, user_id: str, summaries: List[Dict[str, Any]]) -> No
     # ВАЖНО: перед RPC должен быть прокинут JWT (иначе auth.uid() будет NULL)
     uid, token = _attach_auth_token(supabase)
 
+    if not uid or not token:
+        # Не аутентифицирован — не сохраняем, но не бросаем исключение
+        return
+
     # Вызов RPC
     supabase.rpc("insert_workouts", {"_rows": rows}).execute()
 
 
 def fetch_workouts(supabase, user_id: str, limit: int = 200) -> pd.DataFrame:
-    uid = None
-    try:
-        uid = _attach_auth_token(supabase)
-    except Exception:
-        # пусть select попробует без токена, но вероятно упадёт политикой — это ок
-        pass
-
+    uid, token = _attach_auth_token(supabase)
     # фильтруем по uid (если было получено), иначе по переданному user_id
     filter_uid = uid or user_id
 
