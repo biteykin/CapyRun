@@ -1,19 +1,11 @@
 # profile.py
-from __future__ import annotations
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 import streamlit as st
 
-try:
-    from postgrest.exceptions import APIError  # type: ignore
-except Exception:
-    class APIError(Exception):  # fallback, чтобы не падать при импорте
-        pass
-
-# Значения по умолчанию, если у пользователя ещё нет профиля
+# Значения по умолчанию
 DEFAULT_PROFILE: Dict[str, Any] = {
     "hr_rest": 50,
     "hr_max": 190,
-    # Границы зон через запятую (пример): Z1..Z5 по HR
     "zone_bounds_text": "110,130,145,160,175",
 }
 
@@ -24,64 +16,66 @@ def _select_profile(supabase, user_id: str) -> Optional[Dict[str, Any]]:
 
 def load_or_init_profile(supabase, user_id: str) -> Dict[str, Any]:
     """
-    Возвращает строку профиля пользователя из user_profiles.
-    Если записи нет — создаёт через UPSERT по user_id.
-    Никогда не падает наружу из-за APIError: вернёт хотя бы дефолт.
+    Возвращает профиль пользователя. Если записи нет — создаёт через UPSERT.
+    Никогда не роняет приложение: вернёт хотя бы дефолт.
     """
     if not user_id:
-        # На всякий случай, чтобы не ловить obscure errors
         return {**DEFAULT_PROFILE, "user_id": None}
 
-    # 1) Пытаемся прочитать
+    # уже есть?
     row = _select_profile(supabase, user_id)
     if row:
         return row
 
-    # 2) Нет записи — создаём UPSERT-ом (без гонок и дублей)
+    # создать (без дублей)
     new_row = {"user_id": user_id, **DEFAULT_PROFILE}
     try:
-        supabase.table("user_profiles").upsert(
-            new_row,
-            on_conflict="user_id",
-        ).execute()
-    except APIError as e:
-        # Возможные причины: RLS/политики, ограничения схемы, конфликт и т.п.
-        # Пробуем ещё раз просто прочитать — возможно, запись уже существует.
-        st.warning("Не удалось сразу создать профиль — проверяю существующую запись.")
-    finally:
-        row2 = _select_profile(supabase, user_id)
-        if row2:
-            return row2
-        # Совсем крайний случай: отдать дефолт, чтобы UI не падал
-        st.warning("Профиль не найден и не создан. Проверь политики RLS для user_profiles.")
+        supabase.table("user_profiles").upsert(new_row, on_conflict="user_id").execute()
+    except Exception:
+        # дадим UI жить, а наверху покажем предупреждение
+        st.warning("Не удалось создать профиль (проверь RLS/схему). Использую значения по умолчанию.")
         return new_row
+
+    # перечитать
+    row2 = _select_profile(supabase, user_id)
+    return row2 or new_row
 
 def profile_sidebar(supabase, user: Dict[str, Any], profile_row: Dict[str, Any]):
     """
-    Рендер параметров анализа и возврат значений для app.py:
-    hr_rest, hr_max, zone_bounds_text
+    Рендерит параметры анализа в сайдбаре и возвращает: hr_rest, hr_max, zone_bounds_text
     """
     st.markdown("### ⚙️ Параметры анализа")
+
     hr_rest = st.number_input(
         "Пульс в покое (HRrest)",
         min_value=30, max_value=100,
         value=int(profile_row.get("hr_rest", DEFAULT_PROFILE["hr_rest"])),
-        step=1,
-        key="ui_hr_rest",
+        step=1, key="ui_hr_rest",
     )
     hr_max = st.number_input(
         "Макс. пульс (HRmax)",
         min_value=140, max_value=230,
         value=int(profile_row.get("hr_max", DEFAULT_PROFILE["hr_max"])),
-        step=1,
-        key="ui_hr_max",
+        step=1, key="ui_hr_max",
     )
     zone_bounds_text = st.text_input(
         "Границы зон HR (через запятую)",
         value=str(profile_row.get("zone_bounds_text", DEFAULT_PROFILE["zone_bounds_text"])),
-        help="Напр., 110,130,145,160,175  (между Z1..Z5)",
+        help="Напр.: 110,130,145,160,175",
         key="ui_zone_bounds",
     )
 
-    # Кнопка сохранения
-    if st.butto
+    if st.button("💾 Сохранить профиль"):
+        row = {
+            "user_id": user.get("id") if isinstance(user, dict) else getattr(user, "id", None),
+            "hr_rest": int(hr_rest),
+            "hr_max": int(hr_max),
+            "zone_bounds_text": zone_bounds_text.strip(),
+        }
+        try:
+            supabase.table("user_profiles").upsert(row, on_conflict="user_id").execute()
+            st.success("Профиль сохранён.")
+        except Exception:
+            st.error("Не удалось сохранить профиль. Проверь политики RLS и схему таблицы.")
+
+    return int(hr_rest), int(hr_max), zone_bounds_text
