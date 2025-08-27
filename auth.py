@@ -1,3 +1,4 @@
+# auth.py
 from __future__ import annotations
 import re
 import os
@@ -16,9 +17,7 @@ EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
 def get_supabase() -> "Client":
-    """
-    Создаёт клиент Supabase, читая конфиг из st.secrets или ENV.
-    """
+    """Создаёт клиент Supabase, читая конфиг из st.secrets или ENV."""
     url = None
     key = None
 
@@ -35,9 +34,8 @@ def get_supabase() -> "Client":
 
     if not url or not key:
         st.error(
-            "⚠️ Supabase не сконфигурирован.\n\n"
-            "Добавь секреты `[supabase] url` и `anon_key` (или `key`) в `.streamlit/secrets.toml`, "
-            "или задай ENV `SUPABASE_URL` / `SUPABASE_KEY`."
+            "⚠️ Supabase не сконфигурирован. Добавь `[supabase] url` и `anon_key` (или `key`) "
+            "в `.streamlit/secrets.toml` или ENV `SUPABASE_URL` / `SUPABASE_KEY`."
         )
         st.stop()
 
@@ -86,7 +84,7 @@ def _sign_out(supabase) -> None:
 
 
 # ---------- low-level auth with safe errors ----------
-def _sign_in(supabase, email: str, password: str) -> tuple[Optional[Dict], Optional[str]]:
+def _sign_in(supabase, email: str, password: str) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
     try:
         res = supabase.auth.sign_in_with_password({"email": email, "password": password})
         user = _normalize_user(getattr(res, "user", None)) or _normalize_user(res) or _current_user(supabase)
@@ -95,7 +93,7 @@ def _sign_in(supabase, email: str, password: str) -> tuple[Optional[Dict], Optio
         return None, "Неверный email или пароль."
 
 
-def _sign_up(supabase, email: str, password: str) -> tuple[Optional[Dict], Optional[str], bool]:
+def _sign_up(supabase, email: str, password: str) -> tuple[Optional[Dict[str, Any]], Optional[str], bool]:
     if not EMAIL_RE.match(email):
         return None, "Некорректный email.", False
     if len(password) < 6:
@@ -128,7 +126,7 @@ def account_block(supabase, user: Dict[str, Any]) -> None:
         st.rerun()
 
 
-def auth_sidebar(supabase, show_when_authed: bool = True) -> Optional[Dict, Any]:
+def auth_sidebar(supabase, show_when_authed: bool = True) -> Optional[Dict[str, Any]]:
     """
     - Если не авторизован — рисует форму, возвращает None.
     - Если авторизован:
@@ -153,7 +151,7 @@ def auth_sidebar(supabase, show_when_authed: bool = True) -> Optional[Dict, Any]
         external_mode = st.session_state.get("auth_mode", "login")
         label_for_external = "Вход" if external_mode == "login" else "Регистрация"
 
-        # если только что переключили на лендинге → подставляем в радио
+        # если только что переключили на лендинге → подставим в радио
         if st.session_state.get("_just_switched_auth"):
             st.session_state["auth_mode_radio"] = label_for_external
             st.session_state["_just_switched_auth"] = False
