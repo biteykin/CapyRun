@@ -211,57 +211,46 @@ def build_ics(
 import streamlit as st
 import streamlit.components.v1 as components
 
-def set_auth_mode(mode: str):
-    if mode in ("login", "signup"):
-        st.session_state["auth_mode"] = mode
-
 def open_sidebar():
     """
-    Принудительно разворачивает сайдбар (работает даже при медленном рендере).
-    Пытается несколько селекторов, кликает несколько раз, следит за DOM.
+    Надёжно разворачивает сайдбар.
+    1) Ставит 'expanded' в localStorage (Streamlit читает это при рендере)
+    2) Несколько раз кликает по кнопке разворота, если ширина небольшая
     """
     components.html(
         """
         <script>
         (function() {
           const doc = window.parent?.document;
-          if (!doc) return;
 
           function isExpanded() {
-            const btn = doc.querySelector('[data-testid="stSidebarCollapseButton"]');
-            const sidebar = doc.querySelector('[data-testid="stSidebar"]');
-            const aria = btn ? btn.getAttribute('aria-expanded') : null;
-            const wide = sidebar ? sidebar.getBoundingClientRect().width : 0;
-            return aria === 'true' || wide > 50;
+            const sb = doc?.querySelector('[data-testid="stSidebar"]');
+            return sb ? sb.getBoundingClientRect().width > 50 : false;
+          }
+
+          function markExpanded() {
+            try { window.parent?.localStorage?.setItem('streamlit:sidebarState', 'expanded'); } catch(e) {}
           }
 
           function clickToggle() {
             const btn =
-              doc.querySelector('[data-testid="stSidebarCollapseButton"]') ||
-              doc.querySelector('[data-testid="baseButton-headerNoPadding"]') ||
-              doc.querySelector('[data-testid="stSidebar"] button');
+              doc?.querySelector('[data-testid="stSidebarCollapseButton"]') ||
+              doc?.querySelector('[data-testid="baseButton-headerNoPadding"]') ||
+              doc?.querySelector('[data-testid="stSidebar"] button');
             if (btn) btn.click();
           }
 
           function ensureOpen() {
             if (isExpanded()) return;
-            // Двойной клик на всякий
+            markExpanded();
             clickToggle();
             setTimeout(() => { if (!isExpanded()) clickToggle(); }, 120);
           }
 
-          // Первые активные попытки
-          for (let i = 0; i < 10; i++) setTimeout(ensureOpen, 120 * (i + 1));
-
-          // Если всё ещё закрыт — наблюдаем за DOM и пробуем снова
-          const sidebar = doc.querySelector('[data-testid="stSidebar"]') || doc.body;
-          if (!sidebar) return;
-          const mo = new MutationObserver(() => {
-            if (!isExpanded()) ensureOpen();
-          });
-          mo.observe(sidebar, { attributes: true, childList: true, subtree: true });
-          // Отпустим через пару секунд
-          setTimeout(() => mo.disconnect(), 3000);
+          // серия попыток — DOM может рендериться с задержкой
+          for (let i = 0; i < 12; i++) {
+            setTimeout(ensureOpen, 120 * (i + 1));
+          }
         })();
         </script>
         """,
