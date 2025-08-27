@@ -401,9 +401,12 @@ else:
         st.write(note)
         st.dataframe(plan_df)
 
+        st.write(note)
+st.dataframe(plan_df)
+
 
 # === NEW: Экспорт плана в календарь (ICS) ===
-import datetime as dt
+import datetime as dt  # можешь перенести в самый верх файла, если хочешь
 
 with st.expander("📆 Экспорт плана в календарь (.ics)"):
     # настройки экспорта
@@ -468,6 +471,16 @@ with st.expander("📆 Экспорт плана в календарь (.ics)"):
         file_name="capyrun_plan.ics",
         mime="text/calendar"
     )
+
+# ---- Выгрузка Excel: Progress + Plan ----
+xls = to_excel({
+    "Workouts": df_sum,
+    "DailyLoad": daily,
+    "NextWeekPlan": plan_df
+})
+st.download_button("⬇️ Скачать Excel (прогресс + план)", data=xls,
+                   file_name="capyrun_progress.xlsx",
+                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 
