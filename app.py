@@ -12,7 +12,7 @@ import datetime as dt
 from typing import Any
 
 # --- наши модули ---
-from auth import get_supabase, auth_sidebar
+from auth import get_supabase, auth_sidebar, account_block
 from profile import load_or_init_profile, profile_sidebar
 from db import save_workouts, fetch_workouts
 from utils import (
@@ -47,7 +47,7 @@ supabase = get_supabase()
 # --- "Sidebar: auth + profile" ---
 with st.sidebar:
     # 1) Авторизация — форма появится здесь, если юзер не залогинен.
-    # Если залогинен, НИЧЕГО не рисуем (show_when_authed=False), просто получаем user.
+    # Если залогинен, ничего не рисуем (show_when_authed=False), просто получаем user.
     user = auth_sidebar(supabase, show_when_authed=False)
     if not user:
         st.stop()
@@ -58,9 +58,7 @@ with st.sidebar:
 
     # 3) Разделитель и АККАУНТ (внизу)
     st.divider()
-    from auth import account_block
     account_block(supabase, user)
-
 
 uploaded = st.file_uploader("Загрузите FIT-файл(ы)", type=["fit"], accept_multiple_files=True)
 
