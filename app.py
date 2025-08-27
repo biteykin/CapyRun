@@ -72,6 +72,23 @@ st.divider()
 # 2) Загрузка файлов и просмотр отчётов
 uploaded_files = st.file_uploader("Загрузите FIT-файл(ы)", type=["fit"], accept_multiple_files=True)
 
+# Кэшируем байты сразу при загрузке, чтобы не зависеть от закрытия файловых объектов
+if uploaded_files:
+    valid_files = [f for f in uploaded_files if f is not None and getattr(f, "size", 1) > 0]
+    # сохраняем в сессию: имя + байты + размер
+    st.session_state["_uploads_cache"] = [
+        {
+            "name": f.name,
+            "bytes": f.getvalue(),   # снимаем копию, пока файл точно жив
+            "size": len(f.getvalue())
+        }
+        for f in valid_files
+    ]
+else:
+    valid_files = []
+    st.session_state.pop("_uploads_cache", None)
+
+
 if not uploaded_files:
     st.info("Загрузи один или несколько .fit файлов, чтобы увидеть отчёт/прогресс.")
 else:
@@ -107,40 +124,35 @@ else:
                 f"Техническая информация: {e}"
             )
 
-    # 3) Кнопка «Сохранить в БД» для всех загруженных файлов (минимум полей)
-    st.markdown("#### 💾 Сохранить загруженные тренировки в БД")
-    if st.button("Сохранить в БД"):
-        saved, failed = 0, []
-        for f in valid_files:
-            try:
-                file_bytes = f.getvalue()
-                # На этом этапе сохраняем без детального парсинга.
-                # Когда добавишь парсер — передай parsed={...} со sport/duration/distance.
-                ok, err, _row = save_workout(
-                    supabase,
-                    user_id=uid,
-                    filename=getattr(f, "name", "unknown.fit"),
-                    size_bytes=len(file_bytes),
-                    parsed=None,
-                )
-                if ok:
-                    saved += 1
-                else:
-                    failed.append(f"{getattr(f, 'name', 'unknown.fit')}: {err}")
-            except Exception as ex:
-                failed.append(f"{getattr(f, 'name', 'unknown.fit')}: {ex}")
+# --- Кнопка "Сохранить в БД" для загруженных файлов ---
+st.markdown("#### 💾 Сохранить загруженные тренировки в БД")
+if st.button("Сохранить в БД"):
+    cache = st.session_state.get("_uploads_cache") or []
+    results = [
+        save_workout(
+            supabase,
+            user_id=uid,
+            filename=item["name"],
+            size_bytes=item["size"],
+            parsed=None,  # сюда позже подставим реальные метрики
+        )
+        for item in cache
+    ]
 
-        if saved:
-            st.success(f"Сохранено тренировок: {saved}")
-        if failed:
-            st.error("Не удалось сохранить:\n- " + "\n- ".join(failed))
+    saved = sum(1 for ok, _, _ in results if ok)
+    failed = [
+        f"{item['name']}: {err or ex}"
+        for item, (ok, err, _), ex in zip(
+            cache,
+            results,
+            [None] * len(results)
+        )
+        if not ok
+    ]
 
-        # Обновим список сверху после сохранения
-        _rows = list_workouts(supabase, user_id=uid, limit=20)
-        df = _workouts_df(_rows)
-        if df is not None and not df.empty:
-            st.dataframe(
-                df[["uploaded_at", "filename", "sport", "duration_sec", "distance_km"]],
-                use_container_width=True,
-                hide_index=True
-            )
+    if saved:
+        st.success(f"Сохранено тренировок: {saved}")
+    if failed:
+        st.error("Не удалось сохранить:\n- " + "\n- ".join(failed))
+
+    st.rerun()  # сразу перерисуем экран, чтобы список наверху обновился
