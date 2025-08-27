@@ -29,12 +29,14 @@ from utils import (
     ewma_daily,
     build_ics,
 )
-from landing import render_landing  # ← лендинг до авторизации
+from landing import render_landing   # лендинг до авторизации
 
 # =========================================================
 # UI
 # =========================================================
-st.set_page_config(page_title="CapyRun — FIT Analyzer", page_icon="🏃", layout="wide")
+st.set_page_config(page_title="CapyRun — FIT Analyzer", page_icon="🏃", layout="wide", initial_sidebar_state="expanded")
+st.title("🏃 CapyRun — FIT Analyzer")
+st.caption("Загрузи один или несколько .fit → отчёт / прогресс / план + календарь (ICS) + Excel")
 
 # --- совместимость user-объекта из auth_sidebar (dict/obj) ---
 def user_id(u: Any):
@@ -45,26 +47,18 @@ supabase = get_supabase()
 
 # --- "Sidebar: auth + profile" ---
 with st.sidebar:
-    # Форма авторизации видна всегда; если юзер не залогинен — не стопаем здесь,
-    # чтобы отрисовать лендинг в основной области.
+    # 1) Авторизация — форма появится здесь, если юзер не залогинен
     user = auth_sidebar(supabase, show_when_authed=False)
-
-    # Параметры анализа и аккаунт — только для залогиненных
+    # 2) Если залогинен — профиль и блок аккаунта
     if user:
         profile_row = load_or_init_profile(supabase, user_id(user))
         hr_rest, hr_max, zone_bounds_text = profile_sidebar(supabase, user, profile_row)
-
         st.divider()
         account_block(supabase, user)
-
-# --- До авторизации показываем лендинг и выходим ---
-if not user:
-    render_landing()
-    st.stop()
-
-# --- После авторизации: основная страница ---
-st.title("🏃 CapyRun — FIT Analyzer")
-st.caption("Загрузи один или несколько .fit → отчёт / прогресс / план + календарь (ICS) + Excel")
+    else:
+        # если не залогинен — отрисуем лендинг и остановим приложение
+        render_landing()
+        st.stop()
 
 uploaded = st.file_uploader("Загрузите FIT-файл(ы)", type=["fit"], accept_multiple_files=True)
 
