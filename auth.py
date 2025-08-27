@@ -81,6 +81,40 @@ def _sign_out(supabase) -> None:
         supabase.auth.sign_out()
     except Exception:
         pass
+    # Also clear tokens from session state
+    st.session_state.pop("sb_access_token", None)
+    st.session_state.pop("sb_refresh_token", None)
+
+
+def _store_session_tokens(res: Any) -> None:
+    """
+    Extracts access_token and refresh_token from the result of sign_in/sign_up and stores them in st.session_state.
+    """
+    access_token = None
+    refresh_token = None
+
+    # Try to get from res.session or res
+    session = getattr(res, "session", None)
+    if session:
+        access_token = getattr(session, "access_token", None)
+        refresh_token = getattr(session, "refresh_token", None)
+    if not access_token:
+        access_token = getattr(res, "access_token", None)
+    if not refresh_token:
+        refresh_token = getattr(res, "refresh_token", None)
+
+    # Sometimes tokens are in dicts
+    if not access_token and isinstance(res, dict):
+        access_token = res.get("access_token")
+        refresh_token = res.get("refresh_token")
+        if "session" in res and isinstance(res["session"], dict):
+            access_token = access_token or res["session"].get("access_token")
+            refresh_token = refresh_token or res["session"].get("refresh_token")
+
+    if access_token:
+        st.session_state["sb_access_token"] = access_token
+    if refresh_token:
+        st.session_state["sb_refresh_token"] = refresh_token
 
 
 # ---------- low-level auth with safe errors ----------
@@ -88,7 +122,11 @@ def _sign_in(supabase, email: str, password: str) -> tuple[Optional[Dict[str, An
     try:
         res = supabase.auth.sign_in_with_password({"email": email, "password": password})
         user = _normalize_user(getattr(res, "user", None)) or _normalize_user(res) or _current_user(supabase)
-        return (user, None) if user else (None, "Неверный email или пароль.")
+        if user:
+            _store_session_tokens(res)
+            return (user, None)
+        else:
+            return (None, "Неверный email или пароль.")
     except Exception:
         return None, "Неверный email или пароль."
 
@@ -104,6 +142,9 @@ def _sign_up(supabase, email: str, password: str) -> tuple[Optional[Dict[str, An
         if user_now:
             return user_now, None, False
         user_norm = _normalize_user(getattr(res, "user", None)) or _normalize_user(res)
+        # Store tokens if available (for instant sign-up)
+        if user_norm:
+            _store_session_tokens(res)
         return (user_norm, None, True) if not user_now else (user_norm, None, False)
     except Exception as e:
         msg = f"{e}".lower()
@@ -137,6 +178,18 @@ def auth_sidebar(supabase, show_when_authed: bool = True) -> Optional[Dict[str, 
     user = _current_user(supabase)
     if user:
         st.session_state[SESSION_USER_KEY] = user
+        # --- Update sb_access_token/sb_refresh_token from current session if changed ---
+        try:
+            sess = supabase.auth.get_session()
+            if sess:
+                access_token = getattr(sess, "access_token", None)
+                refresh_token = getattr(sess, "refresh_token", None)
+                if access_token and st.session_state.get("sb_access_token") != access_token:
+                    st.session_state["sb_access_token"] = access_token
+                if refresh_token and st.session_state.get("sb_refresh_token") != refresh_token:
+                    st.session_state["sb_refresh_token"] = refresh_token
+        except Exception:
+            pass
         if not show_when_authed:
             return user
         with box.container():
