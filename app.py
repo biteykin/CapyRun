@@ -44,9 +44,13 @@ uploaded_files = st.file_uploader("Загрузите FIT-файл(ы)", type=["
 if not uploaded_files:
     st.info("Загрузи один или несколько .fit файлов, чтобы увидеть отчёт/прогресс.")
 else:
-    if len(uploaded_files) == 1:
+    # Defensive: filter out None and empty files (Streamlit can sometimes return empty files)
+    valid_files = [f for f in uploaded_files if f is not None and getattr(f, "size", 1) > 0]
+    if not valid_files:
+        st.warning("Файл(ы) не загружены или пусты. Пожалуйста, выберите корректные .fit файлы.")
+    elif len(valid_files) == 1:
         render_single_workout(
-            file=uploaded_files[0],
+            file=valid_files[0],
             supabase=supabase,
             user_id=_user_id(user),
             hr_rest=hr_rest,
@@ -54,10 +58,17 @@ else:
             zone_bounds_text=zone_bounds_text,
         )
     else:
-        render_multi_workouts(
-            files=uploaded_files,
-            supabase=supabase,
-            user_id=_user_id(user),
-            hr_rest=hr_rest,
-            hr_max=hr_max,
-        )
+        try:
+            render_multi_workouts(
+                files=valid_files,
+                supabase=supabase,
+                user_id=_user_id(user),
+                hr_rest=hr_rest,
+                hr_max=hr_max,
+            )
+        except ValueError as e:
+            st.error(
+                "Ошибка при обработке тренировок. "
+                "Возможно, в вашей истории тренировок нет данных или они повреждены. "
+                f"Техническая информация: {e}"
+            )
