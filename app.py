@@ -5,11 +5,13 @@ import pandas as pd
 import altair as alt
 import streamlit as st
 from fitparse import FitFile
+from datetime import timedelta
+from math import exp
 
-# ---------- UI ----------
-st.set_page_config(page_title="CapyRun Quick Report", page_icon="🏃", layout="wide")
-st.title("🏃 CapyRun — Quick FIT Report")
-st.caption("Загрузи .fit → получи сводку, графики, зоны, compliance и Excel")
+# ---------------- UI / Sidebar ----------------
+st.set_page_config(page_title="CapyRun — FIT Analyzer v3", page_icon="🏃", layout="wide")
+st.title("🏃 CapyRun — FIT Analyzer v3")
+st.caption("Загрузи один или несколько .fit → отчёт по сессии / тренды нагрузки / черновик плана + Excel")
 
 with st.sidebar:
     st.header("⚙️ Параметры анализа")
@@ -18,9 +20,9 @@ with st.sidebar:
     zone_bounds = st.text_input("Границы зон HR (уд/мин, через запятую)", value="120,140,155,170,185")
     st.caption("Пример: 120,140,155,170,185 → получится Z1…Z5")
 
-uploaded = st.file_uploader("Загрузите FIT-файл", type=["fit"], accept_multiple_files=False)
+uploaded = st.file_uploader("Загрузите FIT-файл(ы)", type=["fit"], accept_multiple_files=True)
 
-# ---------- helpers ----------
+# ---------------- Helpers ----------------
 def get_val(msg, name, alt_name=None):
     v = msg.get_value(name)
     if (v is None) and alt_name:
@@ -37,36 +39,47 @@ def speed_to_pace_min_per_km(spd):
     if spd is None or spd <= 0: return np.nan
     return (1000.0 / spd) / 60.0
 
-def compute_trimp(hr_series, hr_rest, hr_max):
-    if hr_series is None or hr_series.isna().all(): return None
-    rel = (hr_series - hr_rest) / max(1, (hr_max - hr_rest))
-    rel = rel.clip(lower=0)
-    # грубо нормируем к минутам (временной шаг учитываем ниже при compliance)
-    return rel.mean() * (len(hr_series) / 60.0) * 100
+def parse_bounds(text):
+    try:
+        b = [int(x.strip()) for x in text.split(",") if x.strip()]
+        b = [v for v in b if 30 <= v <= 240]
+        b.sort()
+        return b
+    except Exception:
+        return []
 
-def zones_time(series, bounds):
-    if series is None or series.isna().all(): return None
-    bins = [-np.inf] + bounds + [np.inf]
-    z = pd.cut(series, bins=bins, labels=[f"Z{i}" for i in range(1, len(bins))])
-    return z.value_counts().sort_index()
+def compute_trimp_timeweighted(hr, dt, hr_rest, hr_max):
+    """TRIMP ≈ суммируем относительную интенсивность по времени (в минутах)."""
+    if hr is None or dt is None or hr.isna().all() or dt.isna().all(): return None
+    rel = (hr - hr_rest) / max(1, (hr_max - hr_rest))
+    rel = rel.clip(lower=0)
+    minutes = dt.fillna(0) / 60.0
+    val = float((rel * minutes).sum() * 100.0)
+    return val if val > 0 else None
 
 def efficiency_factor(speed, hr):
     if speed is None or hr is None: return None
     valid = speed.notna() & hr.notna() & (hr > 0)
     if not valid.any(): return None
-    return (speed[valid].mean() / hr[valid].mean())
+    return float(speed[valid].mean() / hr[valid].mean())
 
 def decoupling(speed, hr):
     valid = speed.notna() & hr.notna() & (hr > 0)
-    if valid.sum() < 20: return None
     idx = np.where(valid)[0]
+    if len(idx) < 40: return None
     half = len(idx) // 2
     first = idx[:half]; second = idx[half:]
-    if len(first) < 10 or len(second) < 10: return None
+    if len(first) < 20 or len(second) < 20: return None
     ef1 = speed.iloc[first].mean() / hr.iloc[first].mean()
     ef2 = speed.iloc[second].mean() / hr.iloc[second].mean()
     if ef1 <= 0: return None
-    return (ef2/ef1 - 1.0) * 100.0
+    return float((ef2/ef1 - 1.0) * 100.0)
+
+def zones_time(series, bounds):
+    if series is None or series.isna().all() or not bounds: return None
+    bins = [-np.inf] + bounds + [np.inf]
+    z = pd.cut(series, bins=bins, labels=[f"Z{i}" for i in range(1, len(bins))])
+    return z.value_counts().sort_index()
 
 def to_excel(dfs_named: dict):
     bio = io.BytesIO()
@@ -83,18 +96,9 @@ def to_excel(dfs_named: dict):
     bio.seek(0)
     return bio
 
-def parse_bounds(text):
-    try:
-        b = [int(x.strip()) for x in text.split(",") if x.strip()]
-        b = [v for v in b if 30 <= v <= 240]
-        b.sort()
-        return b
-    except Exception:
-        return []
-
-# ---------- parsing ----------
-if uploaded:
-    fit = FitFile(uploaded)
+# ---------------- Parsing for one file ----------------
+def parse_fit_file(uploaded_file):
+    fit = FitFile(uploaded_file)
 
     # Records
     rec_rows = []
@@ -117,15 +121,13 @@ if uploaded:
             df_rec["t_rel_s"] = (df_rec["timestamp"] - t0).dt.total_seconds()
         else:
             df_rec["t_rel_s"] = np.arange(len(df_rec))
+        df_rec["dt_s"] = df_rec["t_rel_s"].diff().fillna(0).clip(lower=0)  # неотрицательные шаги
         df_rec["pace"] = df_rec["speed"].apply(pace_from_speed)
-        # dt для более корректной интеграции по времени
-        df_rec["dt_s"] = df_rec["t_rel_s"].diff().fillna(0)
 
     # Laps
     lap_rows = []
     for m in fit.get_messages("lap"):
         lap_rows.append({
-            "message_index": get_val(m, "message_index"),
             "start_time": get_val(m, "start_time"),
             "total_distance_m": get_val(m, "total_distance"),
             "total_timer_time_s": get_val(m, "total_timer_time"),
@@ -137,7 +139,6 @@ if uploaded:
             "total_ascent_m": get_val(m, "total_ascent"),
             "total_descent_m": get_val(m, "total_descent"),
             "lap_trigger": get_val(m, "lap_trigger"),
-            "intensity": get_val(m, "intensity"),
         })
     df_laps = pd.DataFrame(lap_rows)
     if not df_laps.empty:
@@ -164,237 +165,238 @@ if uploaded:
         })
     df_ses = pd.DataFrame(ses_rows)
 
-    # Workout steps (targets) — если есть в файле
-    ws_rows = []
-    for m in fit.get_messages("workout_step"):
-        ws_rows.append({
-            "message_index": get_val(m, "message_index"),
-            "duration_type": get_val(m, "duration_type"),
-            "duration_value": get_val(m, "duration_value"),
-            "target_type": get_val(m, "target_type"),
-            # ниж/верх для кастомных целей (встречается у Garmin)
-            "custom_target_value_low": get_val(m, "custom_target_value_low"),
-            "custom_target_value_high": get_val(m, "custom_target_value_high"),
-            "intensity": get_val(m, "intensity"),
-        })
-    df_steps = pd.DataFrame(ws_rows)
+    # Summary per workout
+    # start_time
+    start_time = None
+    if not df_ses.empty and pd.notna(df_ses.iloc[0].get("start_time")):
+        start_time = pd.to_datetime(df_ses.iloc[0]["start_time"])
+    elif not df_rec.empty and df_rec["timestamp"].notna().any():
+        start_time = df_rec["timestamp"].min()
 
-    # ---------- metrics ----------
-    bounds = parse_bounds(zone_bounds)
-    if not df_rec.empty:
-        trimp = compute_trimp(df_rec["hr"], hr_rest, hr_max)
-        ef = efficiency_factor(df_rec["speed"], df_rec["hr"])
-        de = decoupling(df_rec["speed"], df_rec["hr"])
-        zt = zones_time(df_rec["hr"], bounds) if bounds else None
+    # distance
+    if not df_ses.empty and pd.notna(df_ses.iloc[0].get("total_distance_m")):
+        distance_km = df_ses.iloc[0]["total_distance_m"] / 1000.0
+    elif not df_rec.empty and df_rec["dist"].notna().any():
+        distance_km = df_rec["dist"].max() / 1000.0
     else:
-        trimp = ef = de = None
-        zt = None
+        distance_km = None
 
-    # ---------- summary metrics UI ----------
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        dist_km = None
-        if not df_ses.empty and pd.notna(df_ses.iloc[0].get("total_distance_m")):
-            dist_km = df_ses.iloc[0]["total_distance_m"] / 1000.0
-        elif not df_rec.empty and df_rec["dist"].notna().any():
-            dist_km = df_rec["dist"].max() / 1000.0
-        st.metric("Дистанция", f"{dist_km:.2f} км" if dist_km else "—")
-    with col2:
-        if not df_ses.empty and pd.notna(df_ses.iloc[0].get("total_timer_time_s")):
-            mins = df_ses.iloc[0]["total_timer_time_s"] / 60.0
-        elif not df_rec.empty and df_rec["t_rel_s"].notna().any():
-            mins = (df_rec["t_rel_s"].max() - df_rec["t_rel_s"].min()) / 60.0
-        else:
-            mins = None
-        st.metric("Время", f"{mins:.1f} мин" if mins else "—")
-    with col3:
-        st.metric("TRIMP (≈)", f"{trimp:.0f}" if trimp else "—")
-
-    col4, col5, col6 = st.columns(3)
-    with col4:
-        st.metric("EF (скорость/HR)", f"{ef:.4f}" if ef else "—")
-    with col5:
-        st.metric("Decoupling Pa:Hr", f"{de:.1f}%" if de is not None else "—")
-    with col6:
-        if not df_ses.empty and pd.notna(df_ses.iloc[0].get("avg_hr")):
-            st.metric("Средний HR", int(df_ses.iloc[0]["avg_hr"]))
-        else:
-            st.metric("Средний HR", "—")
-
-    st.divider()
-
-    # ---------- charts ----------
-    if not df_rec.empty:
-        left, right = st.columns(2)
-        with left:
-            st.subheader("Пульс и темп")
-            base = pd.DataFrame({
-                "t_min": df_rec["t_rel_s"] / 60.0,
-                "HR": df_rec["hr"],
-                "Pace (мин/км)": pd.to_numeric(df_rec["speed"].apply(speed_to_pace_min_per_km), errors="coerce")
-            })
-            hr_line = alt.Chart(base).mark_line().encode(x="t_min:Q", y="HR:Q")
-            pace_line = alt.Chart(base).mark_line().encode(x="t_min:Q", y=alt.Y("Pace (мин/км):Q", sort="descending"))
-            st.altair_chart(hr_line.interactive(), use_container_width=True)
-            st.altair_chart(pace_line.interactive(), use_container_width=True)
-        with right:
-            st.subheader("Каденс и высота")
-            base2 = pd.DataFrame({
-                "t_min": df_rec["t_rel_s"] / 60.0,
-                "Cadence (spm)": df_rec["cadence"],
-                "Elevation (m)": df_rec["elev"],
-            })
-            st.altair_chart(alt.Chart(base2).mark_line().encode(x="t_min:Q", y="Cadence (spm):Q").interactive(), use_container_width=True)
-            st.altair_chart(alt.Chart(base2).mark_line().encode(x="t_min:Q", y="Elevation (m):Q").interactive(), use_container_width=True)
-
-    # ---------- zones ----------
-    st.subheader("Зоны пульса")
-    if zt is not None:
-        df_z = zt.rename_axis("Zone").reset_index(name="seconds")
-        total = df_z["seconds"].sum()
-        df_z["%"] = (df_z["seconds"] / total * 100).round(1)
-        st.dataframe(df_z)
+    # time
+    if not df_ses.empty and pd.notna(df_ses.iloc[0].get("total_timer_time_s")):
+        time_min = df_ses.iloc[0]["total_timer_time_s"] / 60.0
+    elif not df_rec.empty and df_rec["t_rel_s"].notna().any():
+        time_min = (df_rec["t_rel_s"].max() - df_rec["t_rel_s"].min()) / 60.0
     else:
-        st.write("Нет данных HR или не заданы границы зон.")
+        time_min = None
 
-    # ---------- interval compliance ----------
-    st.subheader("Interval Compliance")
-    def friendly_target_row(t_type, lo, hi):
-        if t_type == "heart_rate":
-            return f"HR {int(lo)}–{int(hi)} bpm" if (lo and hi) else None
-        if t_type == "speed":  # покажем как темп
-            def f(x): 
-                return pace_from_speed(x) if x and x>0 else "—"
-            return f"Pace {f(hi)}–{f(lo)} (мин/км)" if (lo and hi) else None  # внимание: speed↑ => pace↓
-        if t_type == "power":
-            return f"Power {int(lo)}–{int(hi)} W" if (lo and hi) else None
-        return None
-
-    comp_rows = []
-    if not df_laps.empty:
-        # подготовим границы лап
-        lap_bounds = []
-        for i, r in df_laps.iterrows():
-            start = r["start_time"]
-            if i < len(df_laps)-1:
-                end = df_laps.loc[i+1, "start_time"]
-            else:
-                end = df_rec["timestamp"].max() if not df_rec.empty else (start + pd.Timedelta(seconds=r.get("total_timer_time_s") or 0))
-            lap_bounds.append((start, end))
-        # сопоставим с workout_steps по индексу (простое правило)
-        for i, (start, end) in enumerate(lap_bounds):
-            step = df_steps.iloc[i] if (not df_steps.empty and i < len(df_steps)) else None
-            t_mask = (df_rec["timestamp"] >= start) & (df_rec["timestamp"] < end) if not df_rec.empty else None
-            seg = df_rec.loc[t_mask] if (t_mask is not None and t_mask.any()) else pd.DataFrame(columns=df_rec.columns)
-
-            t_type = None; lo = hi = None
-            if step is not None and pd.notna(step.get("target_type")):
-                t_type = str(step["target_type"])
-                lo = step.get("custom_target_value_low")
-                hi = step.get("custom_target_value_high")
-                # у Garmin для speed это м/с, для HR — bpm, для power — W (обычно)
-            # если целей нет — можно оценить «стабильность темпа/HR» как суррогат
-            in_target_pct = None
-            if t_type in ("heart_rate", "speed", "power") and not seg.empty and lo and hi:
-                metric = None
-                if t_type == "heart_rate": metric = "hr"
-                elif t_type == "speed":    metric = "speed"
-                elif t_type == "power":    metric = "power"
-                v = seg[metric]
-                dt = seg["dt_s"].replace(0, 1.0)  # защита от нулей
-                inrange = (v >= lo) & (v <= hi)
-                if inrange.any():
-                    in_target_pct = round(100.0 * (dt[inrange].sum() / dt.sum()), 1)
-            elif not seg.empty:
-                # суррогатная «ровность темпа» — чем меньше std(pace), тем лучше (приводим к 0–100)
-                pace_min = seg["speed"].apply(speed_to_pace_min_per_km)
-                var = float(np.nanstd(pace_min))
-                in_target_pct = max(0, 100 - min(100, var * 30)) if not np.isnan(var) else None
-
-            comp_rows.append({
-                "lap": i+1,
-                "start_time": start,
-                "duration_s": round((end-start).total_seconds(), 1) if (pd.notna(start) and pd.notna(end)) else None,
-                "target": friendly_target_row(t_type, lo, hi) if t_type else "(нет цели)",
-                "avg_pace": pace_from_speed(df_laps.loc[i,"avg_speed_m_s"]) if pd.notna(df_laps.loc[i,"avg_speed_m_s"]) else None,
-                "avg_hr": int(df_laps.loc[i,"avg_hr"]) if pd.notna(df_laps.loc[i,"avg_hr"]) else None,
-                "compliance_%": in_target_pct
-            })
-    df_comp = pd.DataFrame(comp_rows)
-    if not df_comp.empty:
-        st.dataframe(df_comp)
-    else:
-        st.write("Нет лап или данных для оценки.")
-
-    # ---------- coach notes (rule-based) ----------
-    st.subheader("Coach Notes")
-    notes = []
-
-    # 1) decoupling
-    if de is not None:
-        if de >= 8:
-            notes.append("Высокий Pa:Hr (≈≥8%). Похоже на утомление/жару/недосон — снизь объём или беги медленнее на следующем Z2.")
-        elif de >= 5:
-            notes.append("Умеренный Pa:Hr (5–8%). Следи за восстановлением и гидратацией на длительных.")
-
-    # 2) zones balance
-    if zt is not None and not zt.empty:
-        total_s = zt.sum()
-        z1z2 = (zt.iloc[0:2].sum() / total_s) * 100 if len(zt) >= 2 else None
-        if z1z2 is not None and z1z2 < 60:
-            notes.append("Мало лёгкой работы (Z1–Z2 <60%). Для прогресса добавь спокойных километров.")
-        z5p = (zt.iloc[-1] / total_s) * 100 if len(zt) >= 5 else None
-        if z5p is not None and z5p > 15:
-            notes.append("Много высокоинтенсивной работы (>15% Z5). Дай телу восстановиться 1–2 дня.")
-
-    # 3) easy too hot
+    # avg hr
+    avg_hr = None
     if not df_ses.empty and pd.notna(df_ses.iloc[0].get("avg_hr")):
-        thr = hr_rest + 0.7 * (hr_max - hr_rest)  # ориентир границы аэробной
-        if df_ses.iloc[0]["avg_hr"] > thr:
-            notes.append("Средний HR выше разумной зоны для лёгкой пробежки. Притормози на easy, держи дыхание разговорным.")
+        avg_hr = float(df_ses.iloc[0]["avg_hr"])
+    elif not df_rec.empty and df_rec["hr"].notna().any():
+        avg_hr = float(df_rec["hr"].mean())
 
-    # 4) compliance hint
-    if not df_comp.empty and df_comp["compliance_%"].notna().any():
-        low = df_comp["compliance_%"].dropna()
-        if (low < 70).any():
-            notes.append("Есть интервалы с низким попаданием в цель (<70%). Сузь коридор целей или убери внешние раздражители (ветер, подъемы).")
+    # TRIMP (взвешенный по времени)
+    trimp = compute_trimp_timeweighted(
+        df_rec["hr"] if "hr" in df_rec else None,
+        df_rec["dt_s"] if "dt_s" in df_rec else None,
+        hr_rest, hr_max
+    )
 
-    if notes:
-        for n in notes:
-            st.write("• " + n)
-    else:
-        st.write("Отлично! Нарушений ритма и перегруза не видно. Продолжай в том же духе 💪")
+    # EF / Decoupling
+    ef = efficiency_factor(df_rec["speed"] if "speed" in df_rec else None,
+                           df_rec["hr"] if "hr" in df_rec else None)
+    de = decoupling(df_rec["speed"] if "speed" in df_rec else None,
+                    df_rec["hr"] if "hr" in df_rec else None)
 
-    # ---------- details ----------
-    st.subheader("Сессия")
-    st.dataframe(df_ses if not df_ses.empty else pd.DataFrame(columns=["—"]))
+    summary = {
+        "start_time": start_time,
+        "date": start_time.date() if start_time else None,
+        "sport": (df_ses.iloc[0]["sport"] if not df_ses.empty else None),
+        "distance_km": round(distance_km, 2) if distance_km else None,
+        "time_min": round(time_min, 1) if time_min else None,
+        "avg_hr": round(avg_hr) if avg_hr else None,
+        "TRIMP": round(trimp) if trimp else None,
+        "EF": round(ef, 4) if ef else None,
+        "Pa:Hr_%": round(de, 1) if de is not None else None,
+    }
 
-    st.subheader("Круги (laps)")
-    st.dataframe(df_laps if not df_laps.empty else pd.DataFrame(columns=["—"]))
+    return df_rec, df_laps, df_ses, summary
 
-    st.subheader("Точки (records) — без GPS")
-    st.dataframe(df_rec.head(500) if not df_rec.empty else pd.DataFrame(columns=["—"]))
-    if not df_rec.empty and len(df_rec) > 500:
-        st.caption(f"Показаны первые 500 строк из {len(df_rec)}.")
-
-    # ---------- download ----------
-    xls = to_excel({
-        "Summary": pd.DataFrame([{
-            "distance_km": (dist_km if dist_km else None),
-            "time_min": (mins if mins else None),
-            "TRIMP": (round(trimp) if trimp else None),
-            "EF": (float(ef) if ef else None),
-            "Pa:Hr_%": (float(de) if de is not None else None),
-            "hr_rest": hr_rest, "hr_max": hr_max
-        }]),
-        "Sessions": df_ses,
-        "Laps": df_laps,
-        "Records": df_rec,
-        "Compliance": df_comp
-    })
-    st.download_button("⬇️ Скачать Excel", data=xls,
-        file_name="fit_report.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
+# ---------------- Main logic ----------------
+if not uploaded:
+    st.info("Загрузи один или несколько .fit файлов, чтобы увидеть отчёт/прогресс.")
 else:
-    st.info("Загрузи .fit файл слева, чтобы увидеть отчёт.")
+    # Один файл → прежний детальный отчёт
+    if len(uploaded) == 1:
+        file = uploaded[0]
+        df_rec, df_laps, df_ses, summary = parse_fit_file(file)
+
+        bounds = parse_bounds(zone_bounds)
+        zt = zones_time(df_rec["hr"], bounds) if (not df_rec.empty and bounds) else None
+
+        # Summary metrics
+        c1,c2,c3 = st.columns(3)
+        with c1: st.metric("Дистанция", f"{summary['distance_km']:.2f} км" if summary["distance_km"] else "—")
+        with c2: st.metric("Время", f"{summary['time_min']:.1f} мин" if summary["time_min"] else "—")
+        with c3: st.metric("TRIMP (≈)", f"{summary['TRIMP']}" if summary["TRIMP"] else "—")
+
+        c4,c5,c6 = st.columns(3)
+        with c4: st.metric("EF (скорость/HR)", f"{summary['EF']}" if summary["EF"] else "—")
+        with c5: st.metric("Decoupling Pa:Hr", f"{summary['Pa:Hr_%']}%" if summary["Pa:Hr_%"] is not None else "—")
+        with c6: st.metric("Средний HR", f"{summary['avg_hr']}" if summary["avg_hr"] else "—")
+
+        st.divider()
+
+        # Charts
+        if not df_rec.empty:
+            left, right = st.columns(2)
+            with left:
+                st.subheader("Пульс и темп")
+                base = pd.DataFrame({
+                    "t_min": df_rec["t_rel_s"] / 60.0,
+                    "HR": df_rec["hr"],
+                    "Pace (мин/км)": pd.to_numeric(df_rec["speed"].apply(speed_to_pace_min_per_km), errors="coerce")
+                })
+                st.altair_chart(alt.Chart(base).mark_line().encode(x="t_min:Q", y="HR:Q").interactive(), use_container_width=True)
+                st.altair_chart(alt.Chart(base).mark_line().encode(x="t_min:Q", y=alt.Y("Pace (мин/км):Q", sort="descending")).interactive(), use_container_width=True)
+            with right:
+                st.subheader("Каденс и высота")
+                base2 = pd.DataFrame({
+                    "t_min": df_rec["t_rel_s"] / 60.0,
+                    "Cadence (spm)": df_rec["cadence"],
+                    "Elevation (m)": df_rec["elev"],
+                })
+                st.altair_chart(alt.Chart(base2).mark_line().encode(x="t_min:Q", y="Cadence (spm):Q").interactive(), use_container_width=True)
+                st.altair_chart(alt.Chart(base2).mark_line().encode(x="t_min:Q", y="Elevation (m):Q").interactive(), use_container_width=True)
+
+        # Zones
+        st.subheader("Зоны пульса")
+        if zt is not None:
+            df_z = zt.rename_axis("Zone").reset_index(name="seconds")
+            total = df_z["seconds"].sum()
+            df_z["%"] = (df_z["seconds"] / total * 100).round(1)
+            st.dataframe(df_z)
+        else:
+            st.write("Нет данных HR или не заданы границы зон.")
+
+        # Tables
+        st.subheader("Сессия")
+        st.dataframe(df_ses if not df_ses.empty else pd.DataFrame(columns=["—"]))
+        st.subheader("Круги (laps)")
+        st.dataframe(df_laps if not df_laps.empty else pd.DataFrame(columns=["—"]))
+        st.subheader("Точки (records) — без GPS")
+        st.dataframe(df_rec.head(500) if not df_rec.empty else pd.DataFrame(columns=["—"]))
+        if not df_rec.empty and len(df_rec) > 500:
+            st.caption(f"Показаны первые 500 строк из {len(df_rec)}.")
+
+        # Download
+        xls = to_excel({
+            "Summary": pd.DataFrame([summary]),
+            "Sessions": df_ses,
+            "Laps": df_laps,
+            "Records": df_rec
+        })
+        st.download_button("⬇️ Скачать Excel", data=xls,
+                           file_name="fit_report.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    # Несколько файлов → дашборд прогресса
+    else:
+        st.subheader("📈 Прогресс: сводка по тренировкам")
+        summaries = []
+        for f in uploaded:
+            df_rec, df_laps, df_ses, summary = parse_fit_file(f)
+            summaries.append(summary)
+
+        df_sum = pd.DataFrame(summaries).dropna(subset=["date"]).sort_values("start_time").reset_index(drop=True)
+        st.dataframe(df_sum)
+
+        # ---- Ежедневная нагрузка и ATL/CTL/TSB ----
+        st.subheader("Нагрузка (TRIMP) по дням и тренды ATL/CTL/TSB")
+        daily = df_sum.groupby("date").agg(
+            TRIMP=("TRIMP", "sum"),
+            distance_km=("distance_km", "sum")
+        ).reset_index()
+
+        if not daily.empty:
+            # растянем на последовательные дни
+            full = pd.DataFrame({"date": pd.date_range(daily["date"].min(), daily["date"].max(), freq="D")})
+            daily = full.merge(daily, on="date", how="left").fillna({"TRIMP":0.0, "distance_km":0.0})
+
+            # EWMA вручную (ежедневный шаг)
+            def ewma(load, tau_days):
+                alpha = 1 - exp(-1.0 / tau_days)
+                out = []
+                prev = 0.0
+                for v in load:
+                    prev = prev + alpha * (v - prev)
+                    out.append(prev)
+                return np.array(out)
+
+            daily["ATL"] = ewma(daily["TRIMP"].values, tau_days=7)
+            daily["CTL"] = ewma(daily["TRIMP"].values, tau_days=42)
+            daily["TSB"] = daily["CTL"] - daily["ATL"]
+
+            # график
+            base = daily.melt(id_vars="date", value_vars=["TRIMP","ATL","CTL","TSB"], var_name="metric", value_name="value")
+            chart = alt.Chart(base).mark_line().encode(
+                x="date:T",
+                y="value:Q",
+                color="metric:N"
+            ).interactive()
+            st.altair_chart(chart, use_container_width=True)
+
+            # quick KPIs за последнюю неделю
+            last7 = daily.tail(7)
+            c1,c2,c3,c4 = st.columns(4)
+            with c1: st.metric("TRIMP 7д", f"{last7['TRIMP'].sum():.0f}")
+            with c2: st.metric("DIST 7д", f"{last7['distance_km'].sum():.1f} км")
+            with c3: st.metric("ATL (сегодня)", f"{daily['ATL'].iloc[-1]:.0f}")
+            with c4: st.metric("TSB (сегодня)", f"{daily['TSB'].iloc[-1]:.0f}")
+
+            # ---- Черновик плана на 7 дней ----
+            st.subheader("📝 Черновик плана на следующую неделю")
+            last_week_km = float(last7["distance_km"].sum())
+            tsb = float(daily["TSB"].iloc[-1])
+
+            # логика рекомендации объёма
+            if tsb < -10:
+                target_km = max(0.0, last_week_km * 0.9)  # лёгкий дилоад
+                note = "TSB низкий → снизим объём (~-10%) для восстановления."
+            elif tsb > 10:
+                target_km = last_week_km * 1.10  # небольшой рост
+                note = "TSB высокий → можно аккуратно поднять объём (~+10%)."
+            else:
+                target_km = last_week_km * 1.05  # поддержание/слегка вверх
+                note = "TSB в норме → поддержим/слегка увеличим (~+5%)."
+
+            # распределение объёма (км) по дням (примерная схема)
+            dist_split = np.array([0.12,0.16,0.10,0.18,0.08,0.26,0.10])  # Пн..Вс
+            day_names = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+            km_plan = (dist_split * target_km).round(1)
+
+            # типы сессий
+            types = ["Easy Z1–Z2", "Tempo Z3 (20–30 мин)", "Easy Z1–Z2",
+                     "Intervals Z4 (6×3’/2’)", "Recovery 30–40’ Z1", "Long Z2", "Easy + strides"]
+
+            plan_df = pd.DataFrame({
+                "День": day_names,
+                "Тип": types,
+                "Пробежка (км)": km_plan
+            })
+
+            st.write(note)
+            st.dataframe(plan_df)
+
+            # ---- Выгрузка Excel: Progress + Plan ----
+            xls = to_excel({
+                "Workouts": df_sum,
+                "DailyLoad": daily,
+                "NextWeekPlan": plan_df
+            })
+            st.download_button("⬇️ Скачать Excel (прогресс + план)", data=xls,
+                               file_name="capyrun_progress.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        else:
+            st.info("Недостаточно данных для построения трендов. Проверь, что у файлов есть даты/сводка.")
