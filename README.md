@@ -1,0 +1,2 @@
+# CapyRun
+AI running coach
