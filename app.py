@@ -39,6 +39,13 @@ st.caption("Загрузи один или несколько .fit → отчё�
 # Supabase клиент
 supabase = get_supabase()
 
+# --- DEBUG: показать, что секреты загружены ---
+sb = st.secrets.get("supabase", {})
+st.sidebar.caption(f"🔧 secrets: url ok = {('url' in sb)}; key length = {len(sb.get('anon_key',''))}")
+st.sidebar.caption(f"🔧 key prefix = {sb.get('anon_key','')[:12] + '…' if sb.get('anon_key') else '—'}")
+# --- конец DEBUG ---
+
+
 # Sidebar: auth + profile
 with st.sidebar:
     # 1) Авторизация
