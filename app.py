@@ -42,8 +42,9 @@ def set_route(page: str, sub: str = None):
         else:
             st.experimental_set_query_params(page=page)
 
-st.title("🏃 CapyRun — FIT Analyzer")
-st.caption("Загрузи один или несколько .fit → отчёт / прогресс / план + календарь (ICS) + Excel")
+# (1) Убраны глобальные заголовки:
+# st.title("🏃 CapyRun — FIT Analyzer")
+# st.caption("Загрузи один или несколько .fit → отчёт / прогресс / план + календарь (ICS) + Excel")
 
 def _user_id(u: Any):
     return u.get("id") if isinstance(u, dict) else getattr(u, "id", None)
@@ -85,138 +86,140 @@ with st.sidebar:
     # Если залогинен — ничего не рисуем (как ты и хотел «убрать всё выше навигации»).
     user = auth_sidebar(supabase, show_when_authed=False)
 
-    # ==== Бренд + стили (PostHog-like) ====
-    st.markdown("""
-    <style>
-      /* Общий фон сайдбара — минимализм */
-      section[data-testid="stSidebar"] {
-        background: #0b0f19;            /* тёмный, как у PostHog Cloud */
-        border-right: 1px solid rgba(255,255,255,0.06);
-      }
-      /* Бренд-заголовок */
-      .cr-brand {
-        display:flex; align-items:center; gap:10px;
-        font-weight:700; font-size:18px; color:#fff; margin:8px 0 4px 0;
-      }
-      .cr-brand .logo {
-        width:28px; height:28px; display:inline-flex; 
-        align-items:center; justify-content:center;
-        background: linear-gradient(135deg, #ff5a76, #ff8a00);
-        border-radius:8px; color:#0b0f19; font-weight:900;
-      }
-      /* Заголовок секции */
-      .cr-section {
-        margin: 10px 0 6px 0; 
-        font-size:12px; letter-spacing:.06em; 
-        color:rgba(255,255,255,0.55); text-transform:uppercase;
-      }
-      /* Группа */
-      .cr-group { margin: 8px 0 14px 0; }
-      .cr-group-title {
-        color: rgba(255,255,255,0.6);
-        font-size: 12px; letter-spacing: .03em;
-        margin: 8px 0 6px 0; text-transform: uppercase;
-      }
-      /* Элемент меню */
-      .cr-item {
-        display:flex; align-items:center; gap:10px;
-        text-decoration:none; padding:10px 12px; border-radius:10px;
-        color:#e5e7eb; font-weight:500; margin:4px 0;
-        transition: all .15s ease;
-        border: 1px solid transparent;
-      }
-      .cr-item:hover {
-        background: rgba(255,255,255,0.04);
-        border-color: rgba(255,255,255,0.08);
-        transform: translateY(-1px);
-      }
-      .cr-item .ico { width:22px; text-align:center; }
-      .cr-item.active {
-        background: linear-gradient(135deg, rgba(255,90,118,0.18), rgba(255,138,0,0.18));
-        border-color: rgba(255,255,255,0.12);
-        color:#fff;
-      }
-      .cr-sep { height:1px; background: rgba(255,255,255,0.06); margin:12px 0; border-radius:1px; }
-    </style>
-    """, unsafe_allow_html=True)
-
-    st.markdown("""
-      <div class="cr-brand">
-        <div class="logo">🏃</div>
-        <div>CapyRun</div>
-      </div>
-      <div class="cr-section">🧭 Навигация</div>
-    """, unsafe_allow_html=True)
-
-    # Текущий маршрут (для подсветки активного пункта)
-    def _get_qp():
-        try: return dict(st.query_params)
-        except Exception: return st.experimental_get_query_params()
-
-    def _active(page, sub=None):
-        qp = _get_qp()
-        cur_p = (qp.get("page",[None])[0] if isinstance(qp.get("page"), list) else qp.get("page")) or "home"
-        cur_s = (qp.get("sub",[None])[0] if isinstance(qp.get("sub"), list) else qp.get("sub"))
-        return (cur_p == page) and ((cur_s or None) == (sub or None))
-
-    def _href(page, sub=None, **extra):
-        base = f"?page={page}" + (f"&sub={sub}" if sub else "")
-        for k,v in extra.items():
-            base += f"&{k}={v}"
-        return base
-
-    def nav_item(label, icon, page, sub=None, **extra):
-        active_cls = "active" if _active(page, sub) else ""
-        href = _href(page, sub, **extra)
-        st.markdown(f"""
-          <a class="cr-item {active_cls}" href="{href}">
-            <span class="ico">{icon}</span>
-            <span>{label}</span>
-          </a>
+    # (2) Навигация и бренд только если user:
+    if user:
+        # ==== Бренд + стили (PostHog-like) ====
+        st.markdown("""
+        <style>
+          /* Общий фон сайдбара — минимализм */
+          section[data-testid="stSidebar"] {
+            background: #0b0f19;            /* тёмный, как у PostHog Cloud */
+            border-right: 1px solid rgba(255,255,255,0.06);
+          }
+          /* Бренд-заголовок */
+          .cr-brand {
+            display:flex; align-items:center; gap:10px;
+            font-weight:700; font-size:18px; color:#fff; margin:8px 0 4px 0;
+          }
+          .cr-brand .logo {
+            width:28px; height:28px; display:inline-flex; 
+            align-items:center; justify-content:center;
+            background: linear-gradient(135deg, #ff5a76, #ff8a00);
+            border-radius:8px; color:#0b0f19; font-weight:900;
+          }
+          /* Заголовок секции */
+          .cr-section {
+            margin: 10px 0 6px 0; 
+            font-size:12px; letter-spacing:.06em; 
+            color:rgba(255,255,255,0.55); text-transform:uppercase;
+          }
+          /* Группа */
+          .cr-group { margin: 8px 0 14px 0; }
+          .cr-group-title {
+            color: rgba(255,255,255,0.6);
+            font-size: 12px; letter-spacing: .03em;
+            margin: 8px 0 6px 0; text-transform: uppercase;
+          }
+          /* Элемент меню */
+          .cr-item {
+            display:flex; align-items:center; gap:10px;
+            text-decoration:none; padding:10px 12px; border-radius:10px;
+            color:#e5e7eb; font-weight:500; margin:4px 0;
+            transition: all .15s ease;
+            border: 1px solid transparent;
+          }
+          .cr-item:hover {
+            background: rgba(255,255,255,0.04);
+            border-color: rgba(255,255,255,0.08);
+            transform: translateY(-1px);
+          }
+          .cr-item .ico { width:22px; text-align:center; }
+          .cr-item.active {
+            background: linear-gradient(135deg, rgba(255,90,118,0.18), rgba(255,138,0,0.18));
+            border-color: rgba(255,255,255,0.12);
+            color:#fff;
+          }
+          .cr-sep { height:1px; background: rgba(255,255,255,0.06); margin:12px 0; border-radius:1px; }
+        </style>
         """, unsafe_allow_html=True)
 
-    # ==== Группы меню (PostHog-like: простые группы, без expanders) ====
-    st.markdown('<div class="cr-group">', unsafe_allow_html=True)
-    st.markdown('<div class="cr-group-title">Главное</div>', unsafe_allow_html=True)
-    nav_item("Главная страница", "🏠", "home")
-    st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("""
+          <div class="cr-brand">
+            <div class="logo">🏃</div>
+            <div>CapyRun</div>
+          </div>
+          <div class="cr-section">🧭 Навигация</div>
+        """, unsafe_allow_html=True)
 
-    st.markdown('<div class="cr-group">', unsafe_allow_html=True)
-    st.markdown('<div class="cr-group-title">Мои тренировки</div>', unsafe_allow_html=True)
-    nav_item("Список тренировок", "📋", "workouts", "list")
-    nav_item("Фильтры", "🔎", "workouts", "filters")
-    nav_item("Добавить тренировку", "➕", "workouts", "add")
-    st.markdown('</div>', unsafe_allow_html=True)
+        # Текущий маршрут (для подсветки активного пункта)
+        def _get_qp():
+            try: return dict(st.query_params)
+            except Exception: return st.experimental_get_query_params()
 
-    st.markdown('<div class="cr-group">', unsafe_allow_html=True)
-    st.markdown('<div class="cr-group-title">Цели</div>', unsafe_allow_html=True)
-    nav_item("Мои цели", "🎯", "goals", "overview")
-    st.markdown('</div>', unsafe_allow_html=True)
+        def _active(page, sub=None):
+            qp = _get_qp()
+            cur_p = (qp.get("page",[None])[0] if isinstance(qp.get("page"), list) else qp.get("page")) or "home"
+            cur_s = (qp.get("sub",[None])[0] if isinstance(qp.get("sub"), list) else qp.get("sub"))
+            return (cur_p == page) and ((cur_s or None) == (sub or None))
 
-    st.markdown('<div class="cr-group">', unsafe_allow_html=True)
-    st.markdown('<div class="cr-group-title">Тренировочный план</div>', unsafe_allow_html=True)
-    nav_item("План", "📅", "plan", "overview")
-    st.markdown('</div>', unsafe_allow_html=True)
+        def _href(page, sub=None, **extra):
+            base = f"?page={page}" + (f"&sub={sub}" if sub else "")
+            for k,v in extra.items():
+                base += f"&{k}={v}"
+            return base
 
-    st.markdown('<div class="cr-group">', unsafe_allow_html=True)
-    st.markdown('<div class="cr-group-title">Общение</div>', unsafe_allow_html=True)
-    nav_item("Чат с тренером", "💬", "coach", "chat")
-    st.markdown('</div>', unsafe_allow_html=True)
+        def nav_item(label, icon, page, sub=None, **extra):
+            active_cls = "active" if _active(page, sub) else ""
+            href = _href(page, sub, **extra)
+            st.markdown(f"""
+              <a class="cr-item {active_cls}" href="{href}">
+                <span class="ico">{icon}</span>
+                <span>{label}</span>
+              </a>
+            """, unsafe_allow_html=True)
 
-    st.markdown('<div class="cr-group">', unsafe_allow_html=True)
-    st.markdown('<div class="cr-group-title">Дневник питания</div>', unsafe_allow_html=True)
-    nav_item("История", "🍽️", "nutrition", "history")
-    nav_item("Калории", "🔥", "nutrition", "calories")
-    nav_item("Фильтры", "🧮", "nutrition", "filters")
-    nav_item("Добавить приём пищи", "➕", "nutrition", "add")
-    st.markdown('</div>', unsafe_allow_html=True)
+        # ==== Группы меню (PostHog-like: простые группы, без expanders) ====
+        st.markdown('<div class="cr-group">', unsafe_allow_html=True)
+        st.markdown('<div class="cr-group-title">Главное</div>', unsafe_allow_html=True)
+        nav_item("Главная страница", "🏠", "home")
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="cr-group">', unsafe_allow_html=True)
-    st.markdown('<div class="cr-group-title">Бейджи и рекорды</div>', unsafe_allow_html=True)
-    nav_item("Мои бейджи", "🥇", "badges", "overview")
-    st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('<div class="cr-group">', unsafe_allow_html=True)
+        st.markdown('<div class="cr-group-title">Мои тренировки</div>', unsafe_allow_html=True)
+        nav_item("Список тренировок", "📋", "workouts", "list")
+        nav_item("Фильтры", "🔎", "workouts", "filters")
+        nav_item("Добавить тренировку", "➕", "workouts", "add")
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="cr-sep"></div>', unsafe_allow_html=True)
+        st.markdown('<div class="cr-group">', unsafe_allow_html=True)
+        st.markdown('<div class="cr-group-title">Цели</div>', unsafe_allow_html=True)
+        nav_item("Мои цели", "🎯", "goals", "overview")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown('<div class="cr-group">', unsafe_allow_html=True)
+        st.markdown('<div class="cr-group-title">Тренировочный план</div>', unsafe_allow_html=True)
+        nav_item("План", "📅", "plan", "overview")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown('<div class="cr-group">', unsafe_allow_html=True)
+        st.markdown('<div class="cr-group-title">Общение</div>', unsafe_allow_html=True)
+        nav_item("Чат с тренером", "💬", "coach", "chat")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown('<div class="cr-group">', unsafe_allow_html=True)
+        st.markdown('<div class="cr-group-title">Дневник питания</div>', unsafe_allow_html=True)
+        nav_item("История", "🍽️", "nutrition", "history")
+        nav_item("Калории", "🔥", "nutrition", "calories")
+        nav_item("Фильтры", "🧮", "nutrition", "filters")
+        nav_item("Добавить приём пищи", "➕", "nutrition", "add")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown('<div class="cr-group">', unsafe_allow_html=True)
+        st.markdown('<div class="cr-group-title">Бейджи и рекорды</div>', unsafe_allow_html=True)
+        nav_item("Мои бейджи", "🥇", "badges", "overview")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown('<div class="cr-sep"></div>', unsafe_allow_html=True)
 
 # --- Если не залогинен — лендинг и выходим ---
 if not user:
@@ -287,7 +290,10 @@ else:
 # ====== PAGES ======
 
 def render_home_page(supabase, uid: str):
+    # (1) Перенесён заголовок и caption сюда:
     st.title("🏠 Главная")
+    st.subheader("🏃 CapyRun — FIT Analyzer")
+    st.caption("Загрузи один или несколько .fit → отчёт / прогресс / план + календарь (ICS) + Excel")
     st.subheader("Смешные мотивирующие цитаты")
     st.info("«Если сегодня не побежишь, завтра побежит кто-то другой… за твоей пиццей» 🍕🏃")
     st.button("Поделиться цитатой")
