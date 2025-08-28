@@ -33,19 +33,22 @@ def get_route():
         qp = dict(st.query_params)
     except Exception:
         qp = st.experimental_get_query_params()
-    page = qp.get("page", ["home"])[0] if isinstance(qp.get("page"), list) else qp.get("page", "home")
-    sub  = qp.get("sub",  [None])[0] if isinstance(qp.get("sub"),  list) else qp.get("sub",  None)
-    return page or "home", sub
+    page = qp.get("page")
+    sub  = qp.get("sub")
+    # qp значения могут быть списками — берём первый элемент
+    if isinstance(page, list): page = page[0]
+    if isinstance(sub, list):  sub  = sub[0]
+    # дефолты
+    page = page or "home"
+    sub  = sub or None
+    return page, sub
 
-def set_route(page: str, sub: str | None = None, extra: dict | None = None):
+def set_route(page: str, sub: str = None, **extra):
     params = {"page": page}
     if sub: params["sub"] = sub
     if extra: params.update(extra)
-    try:
-        st.query_params.clear()  # чтобы не копились хвосты
-        st.query_params.update(params)
-    except Exception:
-        st.experimental_set_query_params(**params)
+    # самый совместимый способ для Streamlit
+    st.experimental_set_query_params(**params)
 
 def _user_id(u: Any):
     return u.get("id") if isinstance(u, dict) else getattr(u, "id", None)
@@ -155,8 +158,8 @@ with st.sidebar:
         """, unsafe_allow_html=True)
 
         # ========= данные маршрута + определения меню =========
-        PAGE, SUB = get_route()
 
+        # 1-й уровень: (id, icon, label)
         L1 = [
             ("home",     "🏠", "Главная страница"),
             ("goals",    "🎯", "Цели"),
@@ -167,6 +170,11 @@ with st.sidebar:
             ("profile",  "👤", "Профиль"),
             ("badges",   "🥇", "Бейджи и рекорды"),
         ]
+        # быстрые структуры для проверок/заголовков
+        L1_KEYS   = {pid for pid, _, _ in L1}
+        L1_TITLES = {pid: label for pid, _, label in L1}
+
+        # 2-й уровень: id -> [(subid, label), ...]
         L2 = {
             "home":      [("quotes","Цитаты"), ("insights","Инсайты")],
             "goals":     [("overview","Обзор"), ("new","Новая цель")],
@@ -177,8 +185,14 @@ with st.sidebar:
             "profile":   [("data","Данные пользователя"), ("promo","Промо-код"), ("logout","Выйти")],
             "badges":    [("overview","Обзор")],
         }
-        if PAGE not in dict(L1):  # защита от мусорных ссылок
+
+        PAGE, SUB = get_route()
+        if PAGE not in L1_KEYS:
             PAGE, SUB = "home", None
+        # если sub не валидный — сбрасываем
+        valid_subs = {sid for sid, _ in L2.get(PAGE, [])}
+        if SUB not in valid_subs:
+            SUB = None
 
         # ========= рендер двух колонок =========
         st.markdown('<div class="cr-brand"><div class="cr-logo">🏃</div><div>CapyRun</div></div>', unsafe_allow_html=True)
@@ -197,7 +211,7 @@ with st.sidebar:
 
         # — правый столбец (уровень 2)
         st.markdown('<div class="cr-col2">', unsafe_allow_html=True)
-        st.markdown(f'<div class="cr-l2-title">{dict(L1).get(PAGE,"")}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="cr-l2-title">{L1_TITLES.get(PAGE,"")}</div>', unsafe_allow_html=True)
         for sid, label in L2.get(PAGE, []):
             active_cls = "cr-l2 active" if sid == (SUB or "") else "cr-l2"
             st.markdown(f'<div class="{active_cls}">', unsafe_allow_html=True)
@@ -208,22 +222,30 @@ with st.sidebar:
         st.markdown('</div>', unsafe_allow_html=True)  # /cr-col2
         st.markdown('</div>', unsafe_allow_html=True)  # /cr-flex
 
-        # ========= закреплённый профиль =========
+        # ========= закреплённый профиль + кнопка выхода =========
         uname = user_display(user)
         initials = (uname[:2] if uname else "U").upper()
-        st.markdown(f"""
-          <div class="cr-footer">
-            <div class="cr-ava">{initials}</div>
-            <div class="cr-uname">{uname}</div>
-            <div style="flex:1"></div>
-            <div class="cr-logout">
-              <form>
-                <button type="button">Выйти</button>
-              </form>
+
+        st.markdown(
+            f"""
+            <div class="cr-footer">
+              <div class="cr-ava">{initials}</div>
+              <div class="cr-uname">{uname}</div>
+              <div style="flex:1"></div>
             </div>
-          </div>
-        """, unsafe_allow_html=True)
-        # Примечание: действие «Выйти» подключим к твоей функции логаута, когда скажешь как она называется.
+            """,
+            unsafe_allow_html=True
+        )
+        # Кнопку рендерим обычным st.button, чтобы клик сработал
+        if st.button("🚪 Выйти", key="logout_btn"):
+            try:
+                # если у тебя есть явная функция — подставь её сюда
+                supabase.auth.sign_out()
+            except Exception:
+                pass
+            # уберём маршрут и перерисуем
+            st.experimental_set_query_params()
+            st.rerun()
 
 # --- Если не залогинен — лендинг и выходим ---
 if not user:
@@ -361,7 +383,7 @@ def render_workouts_list(supabase, uid: str):
             dm = r.get("distance_m"); st.write(f"{dm/1000:.2f} км" if dm else "—")
         with c5:
             if st.button("Открыть", key=f"open_{r.get('id')}"):
-                set_route("workouts", "detail", extra={"workout_id": r.get("id")})
+                set_route("workouts", "detail", workout_id=r.get("id"))
                 st.rerun()
 
 def render_workouts_filters(supabase, uid: str):
