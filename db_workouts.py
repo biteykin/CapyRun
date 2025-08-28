@@ -152,8 +152,6 @@ def save_workout(
         return False, str(e), None
 
 
-# db_workouts.py — вставь вместо текущего list_workouts
-
 def list_workouts(
     supabase,
     *,
@@ -219,3 +217,22 @@ def list_workouts(
         )
     rows.sort(key=_key, reverse=True)
     return rows
+
+def get_workout_by_id(supabase, *, workout_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Возвращает одну тренировку текущего пользователя по id.
+    Берём все колонки (*), чтобы точно получить fit_summary.
+    """
+    _ensure_auth(supabase)
+    resp = (
+        supabase.table("workouts")
+        .select("*")
+        .eq("id", workout_id)
+        .eq("user_id", user_id)  # защита от чужих данных при включённом RLS
+        .single()
+        .execute()
+    )
+    data, err = _extract_response(resp)
+    if err:
+        return None
+    return data
