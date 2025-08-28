@@ -2,7 +2,19 @@
 import streamlit as st
 from typing import Any
 import pandas as pd
-from db_workouts import list_workouts, save_workout, get_workout_by_id
+# вместо: from db_workouts import list_workouts, save_workout, get_workout_by_id
+try:
+    from db_workouts import list_workouts, save_workout, get_workout_by_id
+except Exception as e:
+    import os, sys, traceback, streamlit as st
+    st.error("Не удалось импортировать db_workouts — показываю подробности ниже.")
+    st.caption(f"cwd: {os.getcwd()}")
+    try:
+        st.caption("files: " + ", ".join(sorted(os.listdir(os.getcwd()))))
+    except Exception:
+        pass
+    st.code("".join(traceback.format_exception(type(e), e, e.__traceback__)))
+    st.stop()
 from datetime import datetime
 
 # наши модули
