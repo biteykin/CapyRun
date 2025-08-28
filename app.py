@@ -115,7 +115,7 @@ supabase = get_supabase()
 
 # --- Sidebar: ChatGPT-like navigation ---
 with st.sidebar:
-    # показываем форму логина только когда не залогинен
+    # 1) форма логина показывается только когда пользователь НЕ залогинен
     user = auth_sidebar(supabase, show_when_authed=False)
 
     if user:
@@ -123,43 +123,65 @@ with st.sidebar:
         st.markdown("""
         <style>
           :root{
-            --sb-bg:#0e0f13; --sb-border:rgba(255,255,255,.08);
-            --item-hover:rgba(255,255,255,.06); --item-active:rgba(255,255,255,.12);
-            --fg:#e6e6e6; --fg-dim:#a7a7a7;
+            --sb-bg:#0e0f13;
+            --sb-border:rgba(255,255,255,.08);
+            --fg:#e6e6e6;
+            --fg-dim:#a7a7a7;
+            --item-hover:rgba(255,255,255,.06);
+            --item-active:rgba(255,255,255,.12);
           }
           section[data-testid="stSidebar"]{
             background:var(--sb-bg);
             border-right:1px solid var(--sb-border);
-            font-size:14px;
+            font-size:14px; /* как в ChatGPT */
           }
-          .cr-brand{display:flex;gap:10px;align-items:center;margin:8px 0 12px;color:#fff;font-weight:700;}
-          .cr-logo{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;
-                   background:radial-gradient(100px 60px at 20% 20%,#ff7a7a44 10%,#ff9d5b33 40%,#ffffff10 70%);}
-          .cr-list{display:flex;flex-direction:column;gap:4px;margin-top:6px;}
-          .cr-item button{
-            width:100%; justify-content:flex-start;
-            background:transparent !important; color:var(--fg) !important;
-            border:1px solid transparent !important; border-radius:10px !important;
-            padding:8px 10px !important;
+          /* Брендовая строка сверху — как логотип/название в ChatGPT */
+          .gpt-brand{
+            display:flex; align-items:center; gap:10px;
+            font-weight:700; color:#fff; margin:8px 6px 10px;
           }
-          .cr-item button:hover{ background:var(--item-hover) !important; border-color:var(--sb-border) !important; }
-          .cr-item.active button{ background:var(--item-active) !important; color:#fff !important; border-color:var(--sb-border) !important; }
-          /* pinned footer profile */
-          .cr-footer{
+          .gpt-brand .logo{
+            width:28px; height:28px; border-radius:8px;
+            display:flex; align-items:center; justify-content:center;
+            background:radial-gradient(120px 60px at 20% 20%, #ffffff14 10%, #ffffff08 40%, #0000 70%);
+          }
+
+          /* Список ссылок (плоский) */
+          .gpt-list{ display:flex; flex-direction:column; gap:4px; margin:6px 4px; }
+
+          /* Элемент «как у ChatGPT»: лёгкий прямоугольник, ровные отступы, без рамок */
+          .gpt-item{
+            display:block; text-decoration:none; color:var(--fg);
+            padding:10px 12px; border-radius:10px;
+          }
+          .gpt-item:hover{ background:var(--item-hover); }
+          .gpt-item.active{ background:var(--item-active); color:#fff; }
+
+          /* Низ: закреплённый профиль, как у ChatGPT */
+          .gpt-footer{
             position:fixed; left:12px; right:12px; bottom:12px;
             display:flex; align-items:center; gap:10px;
             padding:10px; border-radius:12px;
             background:rgba(255,255,255,.03);
             border:1px solid var(--sb-border); color:var(--fg);
           }
-          .cr-ava{width:28px;height:28px;border-radius:50%;background:#202020;display:flex;align-items:center;justify-content:center;font-weight:700;}
-          .cr-name{font-weight:600;}
+          .gpt-ava{
+            width:28px; height:28px; border-radius:50%;
+            background:#202225; display:flex; align-items:center; justify-content:center;
+            font-weight:700;
+          }
+          .gpt-name{ font-weight:600; }
+          .gpt-logout button{
+            padding:6px 10px !important; border-radius:10px !important;
+            background:transparent !important; color:var(--fg) !important;
+            border:1px solid var(--sb-border) !important;
+          }
+          .gpt-logout button:hover{ background:var(--item-hover) !important; color:#fff !important; }
         </style>
         """, unsafe_allow_html=True)
 
+        # ===== данные маршрута и меню =====
         PAGE, SUB = get_route()
-
-        # 1-й уровень (ровно как просил)
         L1 = [
             ("home",     "🏠", "Главная страница"),
             ("goals",    "🎯", "Цели"),
@@ -171,35 +193,43 @@ with st.sidebar:
             ("badges",   "🥇", "Бейджи и рекорды"),
         ]
         L1_KEYS = {pid for pid,_,_ in L1}
-        if PAGE not in L1_KEYS: PAGE, SUB = "home", None
+        if PAGE not in L1_KEYS:
+            PAGE, SUB = "home", None
 
-        # бренд
-        st.markdown('<div class="cr-brand"><div class="cr-logo">🏃</div><div>CapyRun</div></div>', unsafe_allow_html=True)
+        # ===== бренд и список
+        st.markdown('<div class="gpt-brand"><div class="logo">🏃‍♂️</div><div>CapyRun</div></div>', unsafe_allow_html=True)
+        st.markdown('<div class="gpt-list">', unsafe_allow_html=True)
 
-        # список как у ChatGPT — плоский
-        st.markdown('<div class="cr-list">', unsafe_allow_html=True)
+        # Рендерим ссылки как <a href="?page=..."> — как у ChatGPT. Никаких новых вкладок.
         for pid, icon, label in L1:
-            cls = "cr-item active" if PAGE==pid else "cr-item"
-            st.markdown(f'<div class="{cls}">', unsafe_allow_html=True)
-            if st.button(f"{icon}  {label}", key=f"nav_{pid}"):
-                set_route(pid, None)
-                st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
+            active_cls = "active" if PAGE == pid else ""
+            href = f"?page={pid}"  # суброут сбрасываем
+            st.markdown(f'<a class="gpt-item {active_cls}" href="{href}">{icon}  {label}</a>', unsafe_allow_html=True)
+
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # закреплённый профиль снизу (как в ChatGPT)
+        # ===== закреплённый низ (имя + кнопка «Выйти») =====
         uname = user_display(user)
         initials = (uname[:2] if uname else "U").upper()
-        st.markdown(f"""
-          <div class="cr-footer">
-            <div class="cr-ava">{initials}</div>
-            <div class="cr-name">{uname}</div>
-            <div style="flex:1"></div>
-          </div>
-        """, unsafe_allow_html=True)
-        if st.button("🚪 Выйти", key="logout_btn"):
-            try: supabase.auth.sign_out()
-            except Exception: pass
+        st.markdown(
+            f'''
+            <div class="gpt-footer">
+              <div class="gpt-ava">{initials}</div>
+              <div class="gpt-name">{uname}</div>
+              <div style="flex:1;"></div>
+              <div class="gpt-logout">
+                <!-- Кнопку рендерим рядом обычным st.button, чтобы был обработчик клика -->
+              </div>
+            </div>
+            ''',
+            unsafe_allow_html=True
+        )
+        # кнопка «Выйти» отдельно (к HTML ниже её не воткнуть кликабельно)
+        if st.button("Выйти", key="logout_btn_sidebar"):
+            try:
+                supabase.auth.sign_out()
+            except Exception:
+                pass
             st.experimental_set_query_params()  # сброс маршрута
             st.rerun()
 
