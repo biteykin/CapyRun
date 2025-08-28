@@ -19,6 +19,14 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ===== Глобальные стили (немного воздуха и скругления) =====
+st.markdown("""
+<style>
+  .block-container { padding-top: 1.2rem; padding-bottom: 2rem; }
+  .stDataFrame { border-radius: 12px; overflow: hidden; }
+</style>
+""", unsafe_allow_html=True)
+
 # ===== Routing helpers =====
 def get_route():
     try:
@@ -41,10 +49,6 @@ def set_route(page: str, sub: str = None):
             st.experimental_set_query_params(page=page, sub=sub)
         else:
             st.experimental_set_query_params(page=page)
-
-# (1) Убраны глобальные заголовки:
-# st.title("🏃 CapyRun — FIT Analyzer")
-# st.caption("Загрузи один или несколько .fit → отчёт / прогресс / план + календарь (ICS) + Excel")
 
 def _user_id(u: Any):
     return u.get("id") if isinstance(u, dict) else getattr(u, "id", None)
@@ -80,146 +84,106 @@ def _fmt_pace_min_per_km(m_per_s):
 
 supabase = get_supabase()
 
-# --- Сайдбар: только навигация и авторизация, без профиля и аккаунта ---
+# --- Сайдбар: авторизация + минималистичное меню-кнопки ---
 with st.sidebar:
-    # Авторизация: форма видна, только если пользователь НЕ залогинен.
-    # Если залогинен — ничего не рисуем (как ты и хотел «убрать всё выше навигации»).
+    # Форма логина видно только когда пользователь не залогинен
     user = auth_sidebar(supabase, show_when_authed=False)
 
-    # (2) Навигация и бренд только если user:
     if user:
-        # ==== Бренд + стили (PostHog-like) ====
+        # ===== СТИЛИ (минималистично, не «кислотно») =====
         st.markdown("""
         <style>
-          /* Общий фон сайдбара — минимализм */
           section[data-testid="stSidebar"] {
-            background: #0b0f19;            /* тёмный, как у PostHog Cloud */
+            background: #0e1117;
             border-right: 1px solid rgba(255,255,255,0.06);
           }
-          /* Бренд-заголовок */
           .cr-brand {
-            display:flex; align-items:center; gap:10px;
-            font-weight:700; font-size:18px; color:#fff; margin:8px 0 4px 0;
+            display:flex; align-items:center; gap:10px; margin:6px 0 10px 0;
+            color:#fff; font-weight:700; font-size:18px;
           }
           .cr-brand .logo {
-            width:28px; height:28px; display:inline-flex; 
-            align-items:center; justify-content:center;
-            background: linear-gradient(135deg, #ff5a76, #ff8a00);
-            border-radius:8px; color:#0b0f19; font-weight:900;
+            width:28px; height:28px; border-radius:8px; display:flex; align-items:center; justify-content:center;
+            background: radial-gradient(120px 60px at 20% 20%, #ff7a7a44 10%, #ff9d5b33 40%, #ffffff08 70%);
           }
-          /* Заголовок секции */
-          .cr-section {
-            margin: 10px 0 6px 0; 
-            font-size:12px; letter-spacing:.06em; 
-            color:rgba(255,255,255,0.55); text-transform:uppercase;
+          .cr-group-title { 
+            color: rgba(255,255,255,0.55); 
+            font-size: 11px; letter-spacing: .08em; text-transform: uppercase; 
+            margin: 12px 0 6px 2px;
           }
-          /* Группа */
-          .cr-group { margin: 8px 0 14px 0; }
-          .cr-group-title {
-            color: rgba(255,255,255,0.6);
-            font-size: 12px; letter-spacing: .03em;
-            margin: 8px 0 6px 0; text-transform: uppercase;
+          .cr-item-btn button {
+            width: 100%; justify-content: flex-start;
+            border-radius: 10px !important;
+            background: transparent !important;
+            border: 1px solid transparent !important;
+            color: #e5e7eb !important;
+            padding: 8px 10px !important;
           }
-          /* Элемент меню */
-          .cr-item {
-            display:flex; align-items:center; gap:10px;
-            text-decoration:none; padding:10px 12px; border-radius:10px;
-            color:#e5e7eb; font-weight:500; margin:4px 0;
-            transition: all .15s ease;
-            border: 1px solid transparent;
+          .cr-item-btn button:hover {
+            background: rgba(255,255,255,0.05) !important;
+            border-color: rgba(255,255,255,0.08) !important;
           }
-          .cr-item:hover {
-            background: rgba(255,255,255,0.04);
-            border-color: rgba(255,255,255,0.08);
-            transform: translateY(-1px);
+          .cr-item-btn.active button {
+            background: linear-gradient(135deg, rgba(255,122,122,0.16), rgba(255,157,91,0.16)) !important;
+            border-color: rgba(255,255,255,0.12) !important;
+            color: #fff !important;
           }
-          .cr-item .ico { width:22px; text-align:center; }
-          .cr-item.active {
-            background: linear-gradient(135deg, rgba(255,90,118,0.18), rgba(255,138,0,0.18));
-            border-color: rgba(255,255,255,0.12);
-            color:#fff;
-          }
-          .cr-sep { height:1px; background: rgba(255,255,255,0.06); margin:12px 0; border-radius:1px; }
         </style>
         """, unsafe_allow_html=True)
 
-        st.markdown("""
-          <div class="cr-brand">
-            <div class="logo">🏃</div>
-            <div>CapyRun</div>
-          </div>
-          <div class="cr-section">🧭 Навигация</div>
-        """, unsafe_allow_html=True)
-
-        # Текущий маршрут (для подсветки активного пункта)
-        def _get_qp():
+        # helpers для активного пункта и перехода
+        def _qp_dict():
             try: return dict(st.query_params)
             except Exception: return st.experimental_get_query_params()
-
-        def _active(page, sub=None):
-            qp = _get_qp()
+        def _is_active(page, sub=None):
+            qp = _qp_dict()
             cur_p = (qp.get("page",[None])[0] if isinstance(qp.get("page"), list) else qp.get("page")) or "home"
-            cur_s = (qp.get("sub",[None])[0] if isinstance(qp.get("sub"), list) else qp.get("sub"))
+            cur_s = (qp.get("sub",[None])[0] if isinstance(qp.get("sub"), list) else qp.get("sub")
+                     if qp.get("sub") is not None else None)
             return (cur_p == page) and ((cur_s or None) == (sub or None))
+        def nav_btn(label, page, sub=None, key=None):
+            active = _is_active(page, sub)
+            cls = "cr-item-btn active" if active else "cr-item-btn"
+            with st.container():
+                st.markdown(f'<div class="{cls}">', unsafe_allow_html=True)
+                if st.button(label, key=key or f"nav_{page}_{sub or 'root'}"):
+                    set_route(page, sub)
+                    st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
 
-        def _href(page, sub=None, **extra):
-            base = f"?page={page}" + (f"&sub={sub}" if sub else "")
-            for k,v in extra.items():
-                base += f"&{k}={v}"
-            return base
+        # Бренд
+        st.markdown('<div class="cr-brand"><div class="logo">🏃</div><div>CapyRun</div></div>', unsafe_allow_html=True)
 
-        def nav_item(label, icon, page, sub=None, **extra):
-            active_cls = "active" if _active(page, sub) else ""
-            href = _href(page, sub, **extra)
-            st.markdown(f"""
-              <a class="cr-item {active_cls}" href="{href}">
-                <span class="ico">{icon}</span>
-                <span>{label}</span>
-              </a>
-            """, unsafe_allow_html=True)
-
-        # ==== Группы меню (PostHog-like: простые группы, без expanders) ====
-        st.markdown('<div class="cr-group">', unsafe_allow_html=True)
+        # Группы меню (без «🧭 НАВИГАЦИЯ»)
         st.markdown('<div class="cr-group-title">Главное</div>', unsafe_allow_html=True)
-        nav_item("Главная страница", "🏠", "home")
-        st.markdown('</div>', unsafe_allow_html=True)
+        nav_btn("🏠 Главная", "home")
 
-        st.markdown('<div class="cr-group">', unsafe_allow_html=True)
         st.markdown('<div class="cr-group-title">Мои тренировки</div>', unsafe_allow_html=True)
-        nav_item("Список тренировок", "📋", "workouts", "list")
-        nav_item("Фильтры", "🔎", "workouts", "filters")
-        nav_item("Добавить тренировку", "➕", "workouts", "add")
-        st.markdown('</div>', unsafe_allow_html=True)
+        nav_btn("📋 Список тренировок", "workouts", "list")
+        nav_btn("🔎 Фильтры", "workouts", "filters")
+        nav_btn("➕ Добавить тренировку", "workouts", "add")
 
-        st.markdown('<div class="cr-group">', unsafe_allow_html=True)
         st.markdown('<div class="cr-group-title">Цели</div>', unsafe_allow_html=True)
-        nav_item("Мои цели", "🎯", "goals", "overview")
-        st.markdown('</div>', unsafe_allow_html=True)
+        nav_btn("🎯 Мои цели", "goals", "overview")
 
-        st.markdown('<div class="cr-group">', unsafe_allow_html=True)
-        st.markdown('<div class="cr-group-title">Тренировочный план</div>', unsafe_allow_html=True)
-        nav_item("План", "📅", "plan", "overview")
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('<div class="cr-group-title">План</div>', unsafe_allow_html=True)
+        nav_btn("📅 Тренировочный план", "plan", "overview")
 
-        st.markdown('<div class="cr-group">', unsafe_allow_html=True)
         st.markdown('<div class="cr-group-title">Общение</div>', unsafe_allow_html=True)
-        nav_item("Чат с тренером", "💬", "coach", "chat")
-        st.markdown('</div>', unsafe_allow_html=True)
+        nav_btn("💬 Чат с тренером", "coach", "chat")
 
-        st.markdown('<div class="cr-group">', unsafe_allow_html=True)
-        st.markdown('<div class="cr-group-title">Дневник питания</div>', unsafe_allow_html=True)
-        nav_item("История", "🍽️", "nutrition", "history")
-        nav_item("Калории", "🔥", "nutrition", "calories")
-        nav_item("Фильтры", "🧮", "nutrition", "filters")
-        nav_item("Добавить приём пищи", "➕", "nutrition", "add")
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('<div class="cr-group-title">Питание</div>', unsafe_allow_html=True)
+        nav_btn("🍽️ История", "nutrition", "history")
+        nav_btn("🔥 Калории", "nutrition", "calories")
+        nav_btn("🧮 Фильтры", "nutrition", "filters")
+        nav_btn("➕ Добавить приём пищи", "nutrition", "add")
 
-        st.markdown('<div class="cr-group">', unsafe_allow_html=True)
-        st.markdown('<div class="cr-group-title">Бейджи и рекорды</div>', unsafe_allow_html=True)
-        nav_item("Мои бейджи", "🥇", "badges", "overview")
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('<div class="cr-group-title">Бейджи</div>', unsafe_allow_html=True)
+        nav_btn("🥇 Бейджи и рекорды", "badges", "overview")
 
-        st.markdown('<div class="cr-sep"></div>', unsafe_allow_html=True)
+        st.markdown('<div class="cr-group-title">Профиль</div>', unsafe_allow_html=True)
+        nav_btn("👤 Данные пользователя", "profile", "data")
+        nav_btn("🏷️ Промо-код", "profile", "promo")
+        nav_btn("🚪 Выйти", "profile", "logout")  # ← переименовали
 
 # --- Если не залогинен — лендинг и выходим ---
 if not user:
@@ -243,7 +207,6 @@ elif page == "workouts":
     elif sub == "filters":
         render_workouts_filters(supabase, uid)
     elif sub == "add":
-        # hr_rest, hr_max, zone_bounds_text не определены в новой схеме — можно передать None
         render_workouts_add(supabase, uid, None, None, None)
     elif sub == "detail":
         qp = dict(st.query_params)
@@ -274,8 +237,6 @@ elif page == "nutrition":
 elif page == "profile":
     if sub == "data" or sub is None:
         render_profile_data(supabase, uid)
-    elif sub == "login":
-        render_profile_login(supabase, uid)
     elif sub == "promo":
         render_profile_promo(supabase, uid)
     elif sub == "logout":
@@ -290,15 +251,57 @@ else:
 # ====== PAGES ======
 
 def render_home_page(supabase, uid: str):
-    # (1) Перенесён заголовок и caption сюда:
     st.title("🏠 Главная")
+
+    # Твой прежний «герой»-текст
     st.subheader("🏃 CapyRun — FIT Analyzer")
     st.caption("Загрузи один или несколько .fit → отчёт / прогресс / план + календарь (ICS) + Excel")
-    st.subheader("Смешные мотивирующие цитаты")
-    st.info("«Если сегодня не побежишь, завтра побежит кто-то другой… за твоей пиццей» 🍕🏃")
-    st.button("Поделиться цитатой")
-    st.subheader("Инсайты по тренировкам (ретро)")
-    st.caption("Тут появятся автоматические инсайты на основе ваших сохранённых тренировок.")
+    st.divider()
+
+    # Загрузка и отчёты (переносим из старого app.py)
+    uploaded_files = st.file_uploader("Загрузите FIT-файл(ы)", type=["fit"], accept_multiple_files=True)
+
+    # можно подхватить hr_rest/hr_max/zone_bounds_text, если они нужны твоим рендерам:
+    hr_rest = st.session_state.get("hr_rest")
+    hr_max = st.session_state.get("hr_max")
+    zone_bounds_text = st.session_state.get("zone_bounds_text")
+
+    if not uploaded_files:
+        st.info("Загрузи один или несколько .fit файлов, чтобы увидеть отчёт/прогресс.")
+        return
+
+    valid_files = [f for f in uploaded_files if f is not None and getattr(f, "size", 1) > 0]
+    if not valid_files:
+        st.warning("Файл(ы) не загружены или пусты. Пожалуйста, выберите корректные .fit файлы.")
+        return
+
+    # Если один файл — детальный отчёт, если несколько — сводный (как раньше)
+    if len(valid_files) == 1:
+        try:
+            render_single_workout(
+                file=valid_files[0],
+                supabase=supabase,
+                user_id=uid,
+                hr_rest=hr_rest,
+                hr_max=hr_max,
+                zone_bounds_text=zone_bounds_text,
+            )
+        except Exception as e:
+            st.error("Ошибка при построении отчёта."); st.code(str(e))
+    else:
+        try:
+            render_multi_workouts(
+                files=valid_files,
+                supabase=supabase,
+                user_id=uid,
+                hr_rest=hr_rest,
+                hr_max=hr_max,
+            )
+        except ValueError as e:
+            st.error(
+                "Ошибка при обработке тренировок. Возможно, в истории тренировок нет данных или они повреждены."
+            )
+            st.code(str(e))
 
 def render_workouts_list(supabase, uid: str):
     st.title("📋 Мои тренировки — список")
@@ -327,7 +330,7 @@ def render_workouts_list(supabase, uid: str):
 
 def render_workouts_filters(supabase, uid: str):
     st.title("🔎 Фильтры тренировок")
-    st.write("Здесь будут фильтры: по виду спорта, датам, дистанции, пульсу и т.д.")
+    st.info("Раздел в разработке.")
 
 def render_workouts_add(supabase, uid: str, hr_rest: int, hr_max: int, zone_bounds_text: str):
     st.title("➕ Добавить тренировку")
@@ -373,39 +376,49 @@ def render_workout_detail_view(supabase, user_id: str, workout_id: str):
     if st.button("← Назад"):
         set_route("workouts","list"); st.rerun()
 
-def render_goals_overview(supabase, uid: str):
-    st.title("🎯 Цели"); st.write("Здесь вы будете ставить цели и следить за прогрессом.")
-
-def render_plan_overview(supabase, uid: str):
-    st.title("📅 Тренировочный план"); st.write("Ваш персональный план тренировок появится здесь.")
-
-def render_coach_chat(supabase, uid: str):
-    st.title("💬 Общение с тренером"); st.write("Здесь будет чат с тренером.")
-
-def render_nutrition_history(supabase, uid: str):
-    st.title("🍽️ Дневник питания — История"); st.write("История приёмов пищи появится здесь.")
-
-def render_nutrition_calories(supabase, uid: str):
-    st.title("🔥 Калории"); st.write("Сводки по калориям.")
-
-def render_nutrition_filters(supabase, uid: str):
-    st.title("🧮 Фильтры питания"); st.write("Фильтры по датам, категориям, БЖУ…")
-
-def render_nutrition_add(supabase, uid: str):
-    st.title("➕ Добавить приём пищи"); st.write("В 1-й версии добавление вручную; телеграм-бот — позже.")
-
+# ---------- ПРОФИЛЬ (заглушки, чтобы не падало) ----------
 def render_profile_data(supabase, uid: str):
     st.title("👤 Профиль — Данные пользователя")
-    st.write("Возраст, пол, вес, пульс покоя, макс пульс (по возрасту), зоны, VO2max, результаты…")
-
-def render_profile_login(supabase, uid: str):
-    st.title("🔐 Профиль — Логин"); st.write("Управление входом.")
+    st.info("Раздел в разработке.")
 
 def render_profile_promo(supabase, uid: str):
-    st.title("🏷️ Профиль — Промо-код"); st.write("Активация промо-кодов.")
+    st.title("🏷️ Профиль — Промо-код")
+    st.info("Раздел в разработке.")
 
 def render_profile_logout(supabase, uid: str):
-    st.title("🚪 Профиль — Деавторизация"); st.write("Кнопка выхода.")
+    st.title("🚪 Выйти")
+    st.info("Здесь будет выход из аккаунта.")
+    # если у тебя есть функция логаута в auth, вызови её тут:
+    # auth_sign_out(supabase)
 
 def render_badges_overview(supabase, uid: str):
-    st.title("🥇 Бейджи и рекорды"); st.write("Ваши ачивки и PB.")
+    st.title("🥇 Бейджи и рекорды")
+    st.info("Раздел в разработке.")
+
+def render_goals_overview(supabase, uid: str):
+    st.title("🎯 Цели")
+    st.info("Раздел в разработке.")
+
+def render_plan_overview(supabase, uid: str):
+    st.title("📅 Тренировочный план")
+    st.info("Раздел в разработке.")
+
+def render_coach_chat(supabase, uid: str):
+    st.title("💬 Чат с тренером")
+    st.info("Раздел в разработке.")
+
+def render_nutrition_history(supabase, uid: str):
+    st.title("🍽️ Дневник питания — История")
+    st.info("Раздел в разработке.")
+
+def render_nutrition_calories(supabase, uid: str):
+    st.title("🔥 Калории")
+    st.info("Раздел в разработке.")
+
+def render_nutrition_filters(supabase, uid: str):
+    st.title("🧮 Фильтры питания")
+    st.info("Раздел в разработке.")
+
+def render_nutrition_add(supabase, uid: str):
+    st.title("➕ Добавить приём пищи")
+    st.info("Раздел в разработке.")
