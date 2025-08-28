@@ -27,31 +27,44 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ===== Routing helpers =====
+# ===== routing + user helpers =====
 def get_route():
     try:
         qp = dict(st.query_params)
     except Exception:
         qp = st.experimental_get_query_params()
     page = qp.get("page", ["home"])[0] if isinstance(qp.get("page"), list) else qp.get("page", "home")
-    sub = qp.get("sub", [None])[0] if isinstance(qp.get("sub"), list) else qp.get("sub", None)
+    sub  = qp.get("sub",  [None])[0] if isinstance(qp.get("sub"),  list) else qp.get("sub",  None)
     return page or "home", sub
 
-def set_route(page: str, sub: str = None):
+def set_route(page: str, sub: str | None = None, extra: dict | None = None):
+    params = {"page": page}
+    if sub: params["sub"] = sub
+    if extra: params.update(extra)
     try:
-        if sub:
-            st.query_params.update({"page": page, "sub": sub})
-        else:
-            st.query_params.update({"page": page})
-            st.query_params.pop("sub", None)
+        st.query_params.clear()  # чтобы не копились хвосты
+        st.query_params.update(params)
     except Exception:
-        if sub:
-            st.experimental_set_query_params(page=page, sub=sub)
-        else:
-            st.experimental_set_query_params(page=page)
+        st.experimental_set_query_params(**params)
 
 def _user_id(u: Any):
     return u.get("id") if isinstance(u, dict) else getattr(u, "id", None)
+
+def user_display(user) -> str:
+    # попробуем email/username/name/id — что найдём
+    for k in ("email","user_metadata","name","id"):
+        try:
+            if isinstance(user, dict):
+                if k=="user_metadata" and "full_name" in user.get(k, {}):
+                    return user[k]["full_name"]
+                if user.get(k): return str(user[k])
+            else:
+                v = getattr(user, k, None)
+                if isinstance(v, dict) and "full_name" in v: return v["full_name"]
+                if v: return str(v)
+        except Exception:
+            pass
+    return "Профиль"
 
 def _fmt_hhmmss(sec):
     try:
@@ -84,106 +97,133 @@ def _fmt_pace_min_per_km(m_per_s):
 
 supabase = get_supabase()
 
-# --- Сайдбар: авторизация + минималистичное меню-кнопки ---
+# --- Сайдбар: авторизация + двухколоночное меню ---
 with st.sidebar:
-    # Форма логина видно только когда пользователь не залогинен
+    # Форма логина показывается только когда пользователь НЕ залогинен
     user = auth_sidebar(supabase, show_when_authed=False)
 
     if user:
-        # ===== СТИЛИ (минималистично, не «кислотно») =====
+        # ========= CSS (двухколоночный сайдбар + закреплённый профиль) =========
         st.markdown("""
         <style>
+          :root {
+            --cr-fg: #e6e6e6;
+            --cr-fg-dim: #b7b7b7;
+            --cr-fg-muted: #9aa0a6;
+            --cr-bg: #0e1117;
+            --cr-bg-hover: rgba(255,255,255,0.06);
+            --cr-accent: linear-gradient(135deg, rgba(255,122,122,.22), rgba(255,157,91,.22));
+          }
           section[data-testid="stSidebar"] {
-            background: #0e1117;
+            background: var(--cr-bg);
             border-right: 1px solid rgba(255,255,255,0.06);
+            font-size: 14px; /* близко к ChatGPT */
           }
-          .cr-brand {
-            display:flex; align-items:center; gap:10px; margin:6px 0 10px 0;
-            color:#fff; font-weight:700; font-size:18px;
+          /* контейнер двух колонок */
+          .cr-flex { display:flex; gap:10px; }
+          .cr-col1 { width: 150px; min-width:150px; }
+          .cr-col2 { flex:1; }
+          /* бренд */
+          .cr-brand { display:flex; align-items:center; gap:10px; color:#fff; font-weight:700; font-size:18px; margin:6px 0 12px 0; }
+          .cr-logo  { width:28px; height:28px; border-radius:8px; display:flex; align-items:center; justify-content:center;
+                      background: radial-gradient(120px 60px at 20% 20%, #ff7a7a44 10%, #ff9d5b33 40%, #ffffff08 70%); }
+          /* кнопки 1 уровня */
+          .cr-l1 button { width:100%; justify-content:flex-start; padding:8px 10px !important; color: var(--cr-fg) !important;
+                          background: transparent !important; border:1px solid transparent !important; border-radius:10px !important; }
+          .cr-l1 button:hover { background: var(--cr-bg-hover) !important; border-color: rgba(255,255,255,0.08) !important; }
+          .cr-l1.active button { background: var(--cr-accent) !important; color:#fff !important; border-color: rgba(255,255,255,0.12) !important; }
+
+          /* заголовок 2 уровня */
+          .cr-l2-title { color: var(--cr-fg-dim); font-size:11px; letter-spacing:.08em; text-transform:uppercase; margin:8px 0 6px 2px; }
+          /* элементы 2 уровня */
+          .cr-l2 button { width:100%; justify-content:flex-start; padding:7px 10px !important; color: var(--cr-fg) !important;
+                          background: transparent !important; border:1px solid transparent !important; border-radius:8px !important; }
+          .cr-l2 button:hover { background: var(--cr-bg-hover) !important; border-color: rgba(255,255,255,0.08) !important; }
+          .cr-l2.active button { background: var(--cr-accent) !important; color:#fff !important; border-color: rgba(255,255,255,0.12) !important; }
+
+          /* pinned footer (профиль) */
+          .cr-footer {
+            position: fixed; left: 12px; right: 12px; bottom: 12px;
+            background: rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08);
+            border-radius: 12px; padding: 10px; display:flex; align-items:center; gap:10px;
+            color: var(--cr-fg);
           }
-          .cr-brand .logo {
-            width:28px; height:28px; border-radius:8px; display:flex; align-items:center; justify-content:center;
-            background: radial-gradient(120px 60px at 20% 20%, #ff7a7a44 10%, #ff9d5b33 40%, #ffffff08 70%);
-          }
-          .cr-group-title { 
-            color: rgba(255,255,255,0.55); 
-            font-size: 11px; letter-spacing: .08em; text-transform: uppercase; 
-            margin: 12px 0 6px 2px;
-          }
-          .cr-item-btn button {
-            width: 100%; justify-content: flex-start;
-            border-radius: 10px !important;
-            background: transparent !important;
-            border: 1px solid transparent !important;
-            color: #e5e7eb !important;
-            padding: 8px 10px !important;
-          }
-          .cr-item-btn button:hover {
-            background: rgba(255,255,255,0.05) !important;
-            border-color: rgba(255,255,255,0.08) !important;
-          }
-          .cr-item-btn.active button {
-            background: linear-gradient(135deg, rgba(255,122,122,0.16), rgba(255,157,91,0.16)) !important;
-            border-color: rgba(255,255,255,0.12) !important;
-            color: #fff !important;
-          }
+          .cr-ava { width:28px; height:28px; border-radius:50%; background:#222; display:flex; align-items:center; justify-content:center; font-weight:700; }
+          .cr-uname { font-weight:600; }
+          .cr-logout button { padding:4px 8px !important; border-radius:8px !important; }
         </style>
         """, unsafe_allow_html=True)
 
-        # helpers для активного пункта и перехода
-        def _qp_dict():
-            try: return dict(st.query_params)
-            except Exception: return st.experimental_get_query_params()
-        def _is_active(page, sub=None):
-            qp = _qp_dict()
-            cur_p = (qp.get("page",[None])[0] if isinstance(qp.get("page"), list) else qp.get("page")) or "home"
-            cur_s = (qp.get("sub",[None])[0] if isinstance(qp.get("sub"), list) else qp.get("sub")
-                     if qp.get("sub") is not None else None)
-            return (cur_p == page) and ((cur_s or None) == (sub or None))
-        def nav_btn(label, page, sub=None, key=None):
-            active = _is_active(page, sub)
-            cls = "cr-item-btn active" if active else "cr-item-btn"
-            with st.container():
-                st.markdown(f'<div class="{cls}">', unsafe_allow_html=True)
-                if st.button(label, key=key or f"nav_{page}_{sub or 'root'}"):
-                    set_route(page, sub)
-                    st.rerun()
-                st.markdown('</div>', unsafe_allow_html=True)
+        # ========= данные маршрута + определения меню =========
+        PAGE, SUB = get_route()
 
-        # Бренд
-        st.markdown('<div class="cr-brand"><div class="logo">🏃</div><div>CapyRun</div></div>', unsafe_allow_html=True)
+        L1 = [
+            ("home",     "🏠", "Главная страница"),
+            ("goals",    "🎯", "Цели"),
+            ("plan",     "📅", "Тренировочный план"),
+            ("coach",    "💬", "Общение с тренером"),
+            ("workouts", "📋", "Мои тренировки"),
+            ("nutrition","🍽️", "Дневник питания"),
+            ("profile",  "👤", "Профиль"),
+            ("badges",   "🥇", "Бейджи и рекорды"),
+        ]
+        L2 = {
+            "home":      [("quotes","Цитаты"), ("insights","Инсайты")],
+            "goals":     [("overview","Обзор"), ("new","Новая цель")],
+            "plan":      [("overview","Обзор"), ("import","Импорт"), ("export","Экспорт")],
+            "coach":     [("chat","Чат"), ("history","История диалогов")],
+            "workouts":  [("list","Список тренировок"), ("filters","Фильтры"), ("add","Добавить тренировку")],
+            "nutrition": [("history","История"), ("calories","Калории"), ("add","Добавить приём пищи")],
+            "profile":   [("data","Данные пользователя"), ("promo","Промо-код"), ("logout","Выйти")],
+            "badges":    [("overview","Обзор")],
+        }
+        if PAGE not in dict(L1):  # защита от мусорных ссылок
+            PAGE, SUB = "home", None
 
-        # Группы меню (без «🧭 НАВИГАЦИЯ»)
-        st.markdown('<div class="cr-group-title">Главное</div>', unsafe_allow_html=True)
-        nav_btn("🏠 Главная", "home")
+        # ========= рендер двух колонок =========
+        st.markdown('<div class="cr-brand"><div class="cr-logo">🏃</div><div>CapyRun</div></div>', unsafe_allow_html=True)
+        st.markdown('<div class="cr-flex">', unsafe_allow_html=True)
 
-        st.markdown('<div class="cr-group-title">Мои тренировки</div>', unsafe_allow_html=True)
-        nav_btn("📋 Список тренировок", "workouts", "list")
-        nav_btn("🔎 Фильтры", "workouts", "filters")
-        nav_btn("➕ Добавить тренировку", "workouts", "add")
+        # — левый столбец (уровень 1)
+        st.markdown('<div class="cr-col1">', unsafe_allow_html=True)
+        for pid, icon, label in L1:
+            active_cls = "cr-l1 active" if pid == PAGE else "cr-l1"
+            st.markdown(f'<div class="{active_cls}">', unsafe_allow_html=True)
+            if st.button(f"{icon}  {label}", key=f"l1_{pid}"):
+                set_route(pid, None)
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
-        st.markdown('<div class="cr-group-title">Цели</div>', unsafe_allow_html=True)
-        nav_btn("🎯 Мои цели", "goals", "overview")
+        # — правый столбец (уровень 2)
+        st.markdown('<div class="cr-col2">', unsafe_allow_html=True)
+        st.markdown(f'<div class="cr-l2-title">{dict(L1).get(PAGE,"")}</div>', unsafe_allow_html=True)
+        for sid, label in L2.get(PAGE, []):
+            active_cls = "cr-l2 active" if sid == (SUB or "") else "cr-l2"
+            st.markdown(f'<div class="{active_cls}">', unsafe_allow_html=True)
+            if st.button(label, key=f"l2_{PAGE}_{sid}"):
+                set_route(PAGE, sid)
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)  # /cr-col2
+        st.markdown('</div>', unsafe_allow_html=True)  # /cr-flex
 
-        st.markdown('<div class="cr-group-title">План</div>', unsafe_allow_html=True)
-        nav_btn("📅 Тренировочный план", "plan", "overview")
-
-        st.markdown('<div class="cr-group-title">Общение</div>', unsafe_allow_html=True)
-        nav_btn("💬 Чат с тренером", "coach", "chat")
-
-        st.markdown('<div class="cr-group-title">Питание</div>', unsafe_allow_html=True)
-        nav_btn("🍽️ История", "nutrition", "history")
-        nav_btn("🔥 Калории", "nutrition", "calories")
-        nav_btn("🧮 Фильтры", "nutrition", "filters")
-        nav_btn("➕ Добавить приём пищи", "nutrition", "add")
-
-        st.markdown('<div class="cr-group-title">Бейджи</div>', unsafe_allow_html=True)
-        nav_btn("🥇 Бейджи и рекорды", "badges", "overview")
-
-        st.markdown('<div class="cr-group-title">Профиль</div>', unsafe_allow_html=True)
-        nav_btn("👤 Данные пользователя", "profile", "data")
-        nav_btn("🏷️ Промо-код", "profile", "promo")
-        nav_btn("🚪 Выйти", "profile", "logout")  # ← переименовали
+        # ========= закреплённый профиль =========
+        uname = user_display(user)
+        initials = (uname[:2] if uname else "U").upper()
+        st.markdown(f"""
+          <div class="cr-footer">
+            <div class="cr-ava">{initials}</div>
+            <div class="cr-uname">{uname}</div>
+            <div style="flex:1"></div>
+            <div class="cr-logout">
+              <form>
+                <button type="button">Выйти</button>
+              </form>
+            </div>
+          </div>
+        """, unsafe_allow_html=True)
+        # Примечание: действие «Выйти» подключим к твоей функции логаута, когда скажешь как она называется.
 
 # --- Если не залогинен — лендинг и выходим ---
 if not user:
@@ -321,11 +361,7 @@ def render_workouts_list(supabase, uid: str):
             dm = r.get("distance_m"); st.write(f"{dm/1000:.2f} км" if dm else "—")
         with c5:
             if st.button("Открыть", key=f"open_{r.get('id')}"):
-                set_route("workouts", "detail")
-                try:
-                    st.query_params.update({"workout_id": r.get("id")})
-                except Exception:
-                    st.experimental_set_query_params(page="workouts", sub="detail", workout_id=r.get("id"))
+                set_route("workouts", "detail", extra={"workout_id": r.get("id")})
                 st.rerun()
 
 def render_workouts_filters(supabase, uid: str):
