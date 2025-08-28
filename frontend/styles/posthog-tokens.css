@@ -1,0 +1,62 @@
+:root {
+    /* Базовые нейтрали */
+    --color-bg-surface-primary: #ffffff;
+    --color-bg-fill-tertiary: #F5F6F0;      /* близко к .bg-gray-accent-light */
+    --border: #D0D1C9;                      /* как .bg-border */
+    --border-bold: #B7B9AE;
+  
+    /* Акцент и ховеры (семантика PostHog) */
+    --color-accent: #FFBA53;                /* gold */
+    --color-accent-hover: #DF8233;          /* burnt-orange */
+    --highlight: #FFD699;                   /* creamsicle */
+  
+    /* Текстовые */
+    --text-primary: #1D1F27;
+    --text-secondary: #515357;
+  
+    /* Тени */
+    --shadow-elevation-3000: 0 10px 30px rgba(0,0,0,.08);
+  }
+  
+  /* Типографика: заголовки MatterSQ, текст — системный sans */
+  html { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji","Segoe UI Emoji"; color: var(--text-primary); }
+  .h-display { font-family: "MatterSQ", ui-sans-serif, system-ui; letter-spacing: -0.02em; }
+  
+  /* Карточка/ховер как у PostHog */
+  .card {
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--color-bg-surface-primary);
+    transition: transform .2s ease, box-shadow .2s ease;
+  }
+  .card:hover { transform: translateY(-2px); box-shadow: var(--shadow-elevation-3000); }
+  
+  /* Кнопки в стиле PostHog */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+    height: 44px; padding: 0 16px; border-radius: 12px; font-weight: 600;
+    border: 1px solid transparent;
+    transition: transform .2s ease, background .2s ease, border-color .2s ease, box-shadow .2s ease;
+  }
+
+  /* Жёлтая — как была, с “нижним кантом” */
+  .btn-primary {
+    background: var(--color-accent); color: #1D1F27;
+    box-shadow: 0 2px 0 #CD8407; /* кант снизу */
+  }
+  .btn-primary:hover { background: var(--color-accent-hover); }
+
+  /* Светлая (ghost) — добавляем обводку и “нижний кант” в нейтрали */
+  .btn-ghost {
+    background: #fff; color: var(--text-primary);
+    border-color: var(--border);
+    box-shadow: 0 2px 0 var(--border-bold); /* кант снизу как у жёлтой, но серый */
+  }
+  .btn-ghost:hover {
+    background: var(--color-bg-fill-tertiary);
+    border-color: var(--border-bold);
+  }
+
+  /* Вспомогательная утилита для серых логотипов */
+  .logo-muted { filter: grayscale(100%); opacity: .6; transition: opacity .2s ease; }
+  .logo-muted:hover { opacity: 1; }

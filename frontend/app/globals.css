@@ -43,3 +43,6 @@
     border-color: hsl(var(--card-border));
     background: hsl(0 0% 100% / 1);
   }  
+  
+@import "../styles/posthog-fonts.css";
+@import "../styles/posthog-tokens.css";

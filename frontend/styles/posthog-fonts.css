@@ -1,0 +1,18 @@
+/* Заголовочный шрифт, как у PostHog */
+@font-face{
+    font-family: "MatterSQ";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("https://d1sdjtjk6xzm7.cloudfront.net/MatterSQ-SemiBold.woff2") format("woff2"),
+         url("https://d1sdjtjk6xzm7.cloudfront.net/MatterSQ-SemiBold.woff") format("woff");
+  }
+  @font-face{
+    font-family: "MatterSQ";
+    font-style: normal;
+    font-weight: 800;
+    font-display: swap;
+    src: url("https://d1sdjtjk6xzm7.cloudfront.net/MatterSQ-Bold.woff2") format("woff2"),
+         url("https://d1sdjtjk6xzm7.cloudfront.net/MatterSQ-Bold.woff") format("woff");
+  }
+  /* Текст — системный sans; моно не подключаем на лендинг */
