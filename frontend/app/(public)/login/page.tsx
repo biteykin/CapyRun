@@ -98,8 +98,9 @@ export default function LoginPage() {
           </label>
 
           {error && (
-            <div className="rounded-xl border border-red-300/40 bg-red-50/70 px-3 py-2 text-sm text-red-700 dark:border-red-400/30 dark:bg-red-900/20 dark:text-red-200">
-              {error}
+            <div className="alert alert-error" role="alert" aria-live="assertive">
+              <span className="alert-icon" aria-hidden="true">⚠️</span>
+              <div>{error}</div>
             </div>
           )}
 

@@ -60,3 +60,23 @@
   /* Вспомогательная утилита для серых логотипов */
   .logo-muted { filter: grayscale(100%); opacity: .6; transition: opacity .2s ease; }
   .logo-muted:hover { opacity: 1; }
+
+  /* Alerts — мягкий фон, чёрный текст */
+.alert {
+    display: flex; align-items: flex-start; gap: .5rem;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: #FFF6DE;           /* creamsicle */
+    color: #1D1F27;                /* ЧЁРНЫЙ текст */
+    /* без нижнего канта */
+    box-shadow: none;
+  }
+  .alert-error {
+    background: #FFE8E5;           /* светло-красный */
+    border-color: #F3C1BB;
+    color: #1D1F27;                /* чёрный текст */
+    /* просил убрать нижний кант под красным блоком */
+    box-shadow: none;
+  }
+  .alert-icon { margin-top: 2px; opacity: .9; }  
