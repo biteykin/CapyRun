@@ -1,7 +1,45 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
 * { scrollbar-width: thin; }
 ::-webkit-scrollbar { height: 8px; width: 8px; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 999px; }
+
+/* Цветовые токены (светлая/тёмная темы) */
+:root {
+    --brand: 212 100% 50%;
+    --bg: 0 0% 100%;
+    --bg-subtle: 210 20% 98%;
+    --text: 220 15% 15%;
+    --text-muted: 220 8% 46%;
+    --card: 0 0% 100%;
+    --card-border: 220 13% 91%;
+  }
+  .dark {
+    --brand: 201 100% 50%;
+    --bg: 224 19% 12%;
+    --bg-subtle: 224 19% 9%;
+    --text: 0 0% 98%;
+    --text-muted: 230 5% 65%;
+    --card: 224 19% 14%;
+    --card-border: 220 8% 22%;
+  }
+  
+  html, body, :root { height: 100%; }
+  body { background: hsl(var(--bg)); color: hsl(var(--text)); }
+  
+  /* Базовые компоненты */
+  .btn {
+    @apply inline-flex items-center gap-2 rounded-2xl px-4 py-2 text-sm font-medium transition focus:outline-none;
+  }
+  .btn-primary { background: hsl(var(--brand)); color: white; }
+  .btn-outline { @apply border; border-color: hsl(var(--card-border)); }
+  .btn-ghost { @apply hover:bg-gray-50/60 dark:hover:bg-white/5; }
+  
+  .card { @apply rounded-2xl border shadow; border-color: hsl(var(--card-border)); background: hsl(var(--card)); }
+  .card-body { @apply p-5; }
+  
+  .input {
+    @apply w-full rounded-xl border px-3 py-2 text-sm focus:outline-none;
+    border-color: hsl(var(--card-border));
+    background: hsl(0 0% 100% / 1);
+  }  
