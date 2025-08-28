@@ -183,6 +183,8 @@ def list_workouts(
     rows.sort(key=_key, reverse=True)
     return rows
 
+from typing import Optional, Dict, Any
+
 def get_workout_by_id(supabase, *, workout_id: str, user_id: str) -> Optional[Dict[str, Any]]:
     """Возвращает одну тренировку (включая fit_summary) текущего пользователя."""
     _ensure_auth(supabase)
