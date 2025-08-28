@@ -120,84 +120,84 @@ with st.sidebar:
     if user:
         # ===== ChatGPT-like, компактный, белые ссылки, меню наверху, профиль в самом низу слева =====
         st.markdown("""
-        <style>
-          :root{
-            --sb-bg:#0e0f13; --sb-border:rgba(255,255,255,.08);
-            --fg:#e6e6e6; --fg-dim:#b0b0b0;
-            --item-hover:rgba(255,255,255,.06); --item-active:rgba(255,255,255,.12);
-          }
-          section[data-testid="stSidebar"]{
-            background:var(--sb-bg);
-            border-right:1px solid var(--sb-border);
-            font-size:14px;
-          }
-          /* бренд/логотип */
-          .gpt-brand{ display:flex; align-items:center; gap:10px; color:#fff;
-                      font-weight:700; margin:6px 8px 6px; }
-          .gpt-logo{ width:26px; height:26px; border-radius:8px; display:flex; align-items:center; justify-content:center;
-                     background:radial-gradient(120px 60px at 20% 20%, #ffffff12 10%, #ffffff08 40%, #0000 70%); }
+<style>
+  :root{
+    --sb-bg:#0e0f13; --sb-border:rgba(255,255,255,.08);
+    --fg:#e6e6e6; --fg-dim:#b0b0b0;
+    --item-hover:rgba(255,255,255,.06); --item-active:rgba(255,255,255,.12);
+  }
+  section[data-testid="stSidebar"]{
+    background:var(--sb-bg);
+    border-right:1px solid var(--sb-border);
+    font-size:14px;
+  }
 
-          /* список пунктов — как в ChatGPT: плоский, плотный, БЕЗ подчёркиваний/синих цветов */
-          .gpt-list{ display:flex; flex-direction:column; gap:2px; margin:0 4px; padding-top:2px; }
-          .gpt-item{
-            display:flex; align-items:center; gap:8px;
-            padding:7px 10px; border-radius:10px;
-            text-decoration:none !important;
-            color:var(--fg) !important;
-            background:transparent;
-          }
-          .gpt-item:visited, .gpt-item:hover, .gpt-item:active{
-            text-decoration:none !important; color:var(--fg) !important;
-          }
-          .gpt-item:hover{ background:var(--item-hover); }
-          .gpt-item.active{ background:var(--item-active); color:#fff !important; }
+  /* ===== ВЕРХНИЙ СТИКИ-ХЕДЕР (рядом с иконкой сворачивания) ===== */
+  .gpt-header{
+    position: sticky; top: 0; z-index: 5;
+    background: var(--sb-bg);
+    padding: 8px 6px 6px;
+    border-bottom: 1px solid var(--sb-border);
+  }
+  .gpt-brand{
+    display:flex; align-items:center; gap:10px;
+    color:#fff; font-weight:700; margin:0; /* без лишних отступов */
+  }
+  .gpt-logo{
+    width:26px; height:26px; border-radius:8px;
+    display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(120px 60px at 20% 20%, #ffffff12 10%, #ffffff08 40%, #0000 70%);
+  }
 
-          /* маленький профиль в самом-низу слева (без кнопки «Выйти») */
-          .gpt-profile-bottom{
-            position:fixed; left:12px; bottom:10px;
-            display:flex; align-items:center; gap:8px;
-            color:var(--fg-dim); font-size:13px;
-          }
-          .gpt-ava-sm{ width:22px; height:22px; border-radius:50%; background:#202225;
-                       display:flex; align-items:center; justify-content:center; font-weight:700; }
-        </style>
-        """, unsafe_allow_html=True)
+  /* ===== СПИСОК МЕНЮ — плотный, без подчёркиваний ===== */
+  .gpt-list{ display:flex; flex-direction:column; gap:2px; margin:8px 4px 0; } /* небольшой отступ после хедера */
+  .gpt-item{
+    display:flex; align-items:center; gap:8px;
+    padding:7px 10px; border-radius:10px;
+    text-decoration:none !important; color:var(--fg) !important; background:transparent;
+  }
+  .gpt-item:visited, .gpt-item:hover, .gpt-item:active{
+    text-decoration:none !important; color:var(--fg) !important;
+  }
+  .gpt-item:hover{ background:var(--item-hover); }
+  .gpt-item.active{ background:var(--item-active); color:#fff !important; }
 
-        # текущий маршрут
-        PAGE, SUB = get_route()
+  /* Нижняя маленькая подпись профиля слева */
+  .gpt-profile-bottom{
+    position:fixed; left:12px; bottom:10px;
+    display:flex; align-items:center; gap:8px;
+    color:var(--fg-dim); font-size:13px;
+  }
+  .gpt-ava-sm{ width:22px; height:22px; border-radius:50%; background:#202225;
+               display:flex; align-items:center; justify-content:center; font-weight:700; }
+</style>
+""", unsafe_allow_html=True)
 
-        # 1-й уровень (ровный список)
-        L1 = [
-            ("home",     "🏠", "Главная страница"),
-            ("goals",    "🎯", "Цели"),
-            ("plan",     "📅", "Тренировочный план"),
-            ("coach",    "💬", "Общение с тренером"),
-            ("workouts", "📋", "Мои тренировки"),
-            ("nutrition","🍽️", "Дневник питания"),
-            ("profile",  "👤", "Профиль"),
-            ("badges",   "🥇", "Бейджи и рекорды"),
-        ]
-        L1_KEYS = {pid for pid,_,_ in L1}
-        if PAGE not in L1_KEYS:
-            PAGE, SUB = "home", None  # безопасный дефолт
+        # — ВЕРХ: бренд в стик-хедере (ровно под иконкой сворачивания)
+        st.markdown(
+            '<div class="gpt-header"><div class="gpt-brand"><div class="gpt-logo">🏃‍♂️</div><div>CapyRun</div></div></div>',
+            unsafe_allow_html=True
+        )
 
-        # бренд и МЕНЮ СРАЗУ ПОД НИМ (без лишних отступов)
-        st.markdown('<div class="gpt-brand"><div class="gpt-logo">🏃‍♂️</div><div>CapyRun</div></div>', unsafe_allow_html=True)
+        # — МЕНЮ: сразу под брендом, компактный список
         st.markdown('<div class="gpt-list">', unsafe_allow_html=True)
-
-        # ссылки якорями → открываются в этой же вкладке; белый текст, без подчёркиваний
-        for pid, icon, label in L1:
-            active_cls = "active" if PAGE == pid else ""
+        for pid, icon, label in [
+            ("home","🏠","Главная страница"),
+            ("goals","🎯","Цели"),
+            ("plan","📅","Тренировочный план"),
+            ("coach","💬","Общение с тренером"),
+            ("workouts","📋","Мои тренировки"),
+            ("nutrition","🍽️","Дневник питания"),
+            ("profile","👤","Профиль"),
+            ("badges","🥇","Бейджи и рекорды"),
+        ]:
+            active_cls = "active" if get_route()[0] == pid else ""
             href = f"?page={pid}"
             st.markdown(f'<a class="gpt-item {active_cls}" href="{href}"><span>{icon}</span><span>{label}</span></a>',
                         unsafe_allow_html=True)
-
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # маленькая строка аккаунта — В САМОМ НИЗУ СЛЕВА (никаких кнопок «Выйти»)
-        uname = user_display(user)
-        initials = (uname[:1] if uname else "U").upper()
-        st.markdown(
-            f'<div class="gpt-profile-bottom"><div class="gpt-ava-sm">{initials}</div><div>{uname}</div></div>',
-            unsafe_allow_html=True
-        )
+        # — НИЗ: маленькая строка аккаунта слева (без кнопки «Выйти»)
+        uname = user_display(user); initials = (uname[:1] if uname else "U").upper()
+        st.markdown(f'<div class="gpt-profile-bottom"><div class="gpt-ava-sm">{initials}</div><div>{uname}</div></div>',
+                    unsafe_allow_html=True)
