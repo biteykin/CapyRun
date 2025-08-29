@@ -31,5 +31,11 @@
     "eslint-config-next": "15.5.2",
     "tailwindcss": "^4.1.12",
     "typescript": "^5"
+  },
+  "heroku": {
+    "scripts": {
+      "build": "next build",
+      "start": "next start -p $PORT"
+    }
   }
 }
