@@ -11,8 +11,8 @@ export default function NavbarPublic() {
           <span className="h-display text-base font-semibold">CapyRun</span>
         </Link>
         <nav className="flex items-center gap-2">
-          <Link href="/login" className="btn btn-ghost">Войти</Link>
-          <Link href="/login" className="btn btn-primary">Попробовать бесплатно</Link>
+          <Link href="/login?mode=login" className="btn btn-ghost">Войти</Link>
+          <Link href="/login?mode=signup" className="btn btn-primary">Попробовать бесплатно</Link>
         </nav>
       </div>
     </header>

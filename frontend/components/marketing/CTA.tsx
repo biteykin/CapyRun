@@ -7,8 +7,8 @@ export default function CTA() {
         <h2 className="h-display text-3xl md:text-5xl font-extrabold">Готов бежать быстрее?</h2>
         <p className="mt-3 text-[var(--text-secondary)]">Подключай Supabase-аккаунт и загружай свои .fit</p>
         <div className="mt-6 flex items-center justify-center gap-3">
-          <Link href="/login" className="btn btn-primary">Начать</Link>
-          <Link href="/login" className="btn btn-ghost">У меня есть аккаунт</Link>
+          <Link href="/login?mode=signup" className="btn btn-primary">Начать</Link>
+          <Link href="/login?mode=login" className="btn btn-ghost">У меня есть аккаунт</Link>
         </div>
       </div>
     </section>

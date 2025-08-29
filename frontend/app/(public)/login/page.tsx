@@ -3,6 +3,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseBrowser";
 import { Eye, EyeOff } from "lucide-react";
+import posthog from "posthog-js";
+
+console.log("SUPABASE ENV", {
+  url: process.env.NEXT_PUBLIC_SUPABASE_URL,
+  keyStartsWith: (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "").slice(0,3)
+});
 
 type Mode = "login" | "signup";
 
@@ -25,6 +31,17 @@ export default function LoginPage() {
     });
   }, [router]);
 
+  // синхронизируем локальное состояние с ?mode= в URL
+  useEffect(() => {
+    const m = (qs.get("mode") as Mode) || "login";
+    setMode(m);
+  }, [qs]);
+
+  // 🔸 Трекинг просмотров страниц login/signup
+  useEffect(() => {
+    posthog.capture(mode === "signup" ? "signup_page_viewed" : "login_page_viewed");
+  }, [mode]);
+
   const title = useMemo(
     () => (mode === "login" ? "Войти в CapyRun" : "Создать аккаунт"),
     [mode]
@@ -36,15 +53,23 @@ export default function LoginPage() {
     setLoading(true);
     try {
       if (mode === "login") {
+        // 🔸 нажатие "Войти"
+        posthog.capture("login_submitted", { email_domain: email.split("@")[1] || null });
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+        posthog.capture("login_succeeded");
       } else {
+        // 🔸 нажатие "Зарегистрироваться"
+        posthog.capture("signup_submitted", { email_domain: email.split("@")[1] || null });
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
+        // если сессия не выдаётся сразу (email confirm включён) — всё равно считаем отправку формы
+        posthog.capture("signup_succeeded");
       }
       router.replace("/home");
     } catch (err: any) {
       setError(err?.message ?? "Ошибка авторизации");
+      posthog.capture("auth_error", { mode, message: String(err?.message || "") });
     } finally {
       setLoading(false);
     }
@@ -112,14 +137,28 @@ export default function LoginPage() {
             {mode === "login" ? (
               <>
                 Нет аккаунта?{" "}
-                <button type="button" className="underline" onClick={() => setMode("signup")}>
+                <button
+                  type="button"
+                  className="underline"
+                  onClick={() => {
+                    setMode("signup");
+                    router.replace("/login?mode=signup");
+                  }}
+                >
                   Зарегистрироваться
                 </button>
               </>
             ) : (
               <>
                 Уже есть аккаунт?{" "}
-                <button type="button" className="underline" onClick={() => setMode("login")}>
+                <button
+                  type="button"
+                  className="underline"
+                  onClick={() => {
+                    setMode("login");
+                    router.replace("/login?mode=login");
+                  }}
+                >
                   Войти
                 </button>
               </>

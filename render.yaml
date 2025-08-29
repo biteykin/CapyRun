@@ -1,0 +1,25 @@
+# render.yaml — деплой только фронтенда из монорепо
+services:
+  - type: web
+    name: capyrun-frontend
+    runtime: node
+    plan: free
+    region: frankfurt
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start -- -p $PORT
+    envVars:
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY   # твой Publishable Key (новый формат sb_publishable_…)
+        sync: false
+      - key: SUPABASE_URL                    # дублируем для server-клиента, если он читает не из NEXT_PUBLIC
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: NEXT_PUBLIC_POSTHOG_KEY
+        sync: false
+      - key: NEXT_PUBLIC_POSTHOG_HOST        # если используешь us.i.posthog.com или свой
+        sync: false
+      - key: NEXT_PUBLIC_SITE_URL
+        value: "https://capyrun.com"

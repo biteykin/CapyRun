@@ -15,8 +15,8 @@ export default function Hero() {
             Импортируй <code>.fit</code>, смотри понятные графики темпа и пульса, получай умные подсказки — и становись быстрее.
           </p>
           <div className="mt-6 flex gap-3">
-            <Link href="/login" className="btn btn-primary">Попробовать бесплатно</Link>
-            <Link href="/login" className="btn btn-ghost">Войти</Link>
+            <Link href="/login?mode=signup" className="btn btn-primary">Попробовать бесплатно</Link>
+            <Link href="/login?mode=login" className="btn btn-ghost">Войти</Link>
           </div>
           <p className="mt-3 text-sm text-[var(--text-secondary)]">Без карты. Авторизация — Supabase.</p>
         </div>

@@ -3,15 +3,16 @@ import { createServerClient } from "@supabase/ssr";
 
 export function createSupabaseServerClient() {
   const cookieStore = cookies();
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get: (name: string) => cookieStore.get(name)?.value,
-        set: (name, value, options) => { try { cookieStore.set({ name, value, ...options }); } catch {} },
-        remove: (name, options) => { try { cookieStore.delete({ name, ...options }); } catch {} },
-      },
-    }
-  );
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const key =
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+  return createServerClient(url, key, {
+    cookies: {
+      get: (name: string) => cookieStore.get(name)?.value,
+      set: (name, value, options) => { try { cookieStore.set({ name, value, ...options }); } catch {} },
+      remove: (name, options) => { try { cookieStore.delete({ name, ...options }); } catch {} },
+    },
+  });
 }
