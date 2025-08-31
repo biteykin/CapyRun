@@ -7,10 +7,10 @@ import { supabase } from "@/lib/supabaseBrowser";
 
 const NAV = [
   { href: "/home", icon: "🏠", label: "Главная страница" },
+  { href: "/workouts", icon: "📋", label: "Мои тренировки" },
   { href: "/goals", icon: "🎯", label: "Цели" },
   { href: "/plan", icon: "📅", label: "Тренировочный план" },
   { href: "/coach", icon: "💬", label: "Общение с тренером" },
-  { href: "/workouts", icon: "📋", label: "Мои тренировки" },
   { href: "/nutrition", icon: "🍽️", label: "Дневник питания" },
   { href: "/profile", icon: "👤", label: "Профиль" },
   { href: "/badges", icon: "🥇", label: "Бейджи и рекорды" },

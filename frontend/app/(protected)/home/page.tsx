@@ -1,43 +1,29 @@
-// в компоненте страницы /app/(protected)/home/page.tsx
 "use client";
-
-import Link from "next/link";
-import { supabase } from "@/lib/supabaseBrowser";
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import PHTrack from '@/components/analytics/PHTrack';
+import { useEffect } from "react";
+import { useSearchParams } from "next/navigation";
+import posthog from "posthog-js";
+import PHTrack from "@/components/analytics/PHTrack";
+import UploadFits from "@/components/fit/UploadFits";
 
 export default function HomePage() {
-  const r = useRouter();
-  const [ready, setReady] = useState(false);
+  const qs = useSearchParams();
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (!data?.user) r.push("/login");
-      else setReady(true);
-    });
-  }, [r]);
-
-  if (!ready) return null;
+    // фиксируем «первый вход после регистрации», если нужно (как делали ранее)
+    const fromQuery = qs.get("just_signed_up") === "1";
+    const fromSession =
+      typeof window !== "undefined" && sessionStorage.getItem("capy.just_signed_up") === "1";
+    if ((fromQuery || fromSession) && typeof window !== "undefined" && !localStorage.getItem("capy.first_dashboard_tracked")) {
+      posthog.capture("first_dashboard_after_signup");
+      localStorage.setItem("capy.first_dashboard_tracked", "1");
+      try { sessionStorage.removeItem("capy.just_signed_up"); } catch {}
+    }
+  }, [qs]);
 
   return (
-    <>
+    <main className="space-y-8">
       <PHTrack event="dashboard_viewed" />
-      <div>
-        <h1 className="text-2xl font-semibold mb-2">🏃 CapyRun — FIT Analyzer</h1>
-        <p className="text-neutral-400 mb-4">
-          Загрузите .fit → отчёт / прогресс / план.
-        </p>
-
-        <div className="flex gap-3">
-          <Link href="/workouts" className="rounded-lg bg-white/10 hover:bg-white/20 px-3 py-2">
-            Мои тренировки
-          </Link>
-          <Link href="/workouts" className="rounded-lg bg-white/10 hover:bg-white/20 px-3 py-2">
-            Загрузить тренировку (скоро)
-          </Link>
-        </div>
-      </div>
-    </>
+      <UploadFits />
+    </main>
   );
 }
