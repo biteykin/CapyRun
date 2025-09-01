@@ -1,8 +1,8 @@
 "use client";
 
-import AddWorkoutButton from "../../../components/workouts/AddWorkoutButton";
-import WorkoutsTable from "../../../components/workouts/WorkoutsTable";
-import WorkoutsAnalytics from "../../../components/workouts/WorkoutsAnalytics";
+import AddWorkoutButton from "@/components/workouts/AddWorkoutButton";
+import WorkoutsTable from "@/components/workouts/WorkoutsTable";
+import WorkoutsAnalytics from "@/components/workouts/WorkoutsAnalytics";
 
 export default function WorkoutsPage() {
   return (
