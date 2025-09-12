@@ -1,7 +1,7 @@
 "use client";
 
+import AddWorkoutMenu from "./workouts/AddWorkoutMenu";
 import { usePathname } from "next/navigation";
-import Link from "next/link";
 
 const TITLES: Record<string, string> = {
   "/home": "Главная",
@@ -25,7 +25,7 @@ export function Topbar() {
       <div className="mx-auto max-w-6xl px-4 h-14 flex items-center justify-between">
         <h1 className="h-display text-base font-semibold">{title}</h1>
         <div className="flex items-center gap-2">
-          <Link href="/upload" className="btn btn-ghost">Загрузить .fit</Link>
+          <AddWorkoutMenu />
         </div>
       </div>
     </header>

@@ -1,16 +1,32 @@
-import { createBrowserClient } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js";
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const key =
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!; // fallback на случай переезда
+const URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-// В dev подстрахуемся от случайного secret
-if (process.env.NODE_ENV !== "production") {
-  if (key.startsWith("sb_secret_")) {
-    // не кидаем исключение, но сделаем заметным
-    console.error("❌ Supabase: в браузер попал SECRET. Нужен publishable/anon.");
+// Жёсткая диагностика env в браузере
+if (typeof window !== "undefined") {
+  if (!URL || !KEY) {
+    console.error("[Supabase] ENV missing. Put NEXT_PUBLIC_SUPABASE_URL / _ANON_KEY in frontend/.env.local");
+  } else {
+    console.log("[Supabase] URL:", URL, "| ANON:", KEY.slice(0, 6) + "…" + KEY.slice(-6));
   }
 }
 
-export const supabase = createBrowserClient(url, key);
+export const supabase = createClient(URL, KEY, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    storageKey: "capyrun.auth",
+  },
+});
+
+// Временный dev-пинг (можно удалить после проверки)
+export async function __devPingSupabase() {
+  try {
+    const r = await fetch(`${URL}/auth/v1/health`, { headers: { apikey: KEY } });
+    console.log("[Supabase] auth/v1/health =", r.status);
+  } catch (e) {
+    console.error("[Supabase] health fetch failed:", e);
+  }
+}
