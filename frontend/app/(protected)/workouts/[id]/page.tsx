@@ -8,6 +8,8 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from "recharts";
 import WorkoutCharts from "@/components/workouts/WorkoutCharts";
+import NoteInline from "@/components/workouts/NoteInline";
+import DeviceFileBlock from "@/components/workouts/DeviceFileBlock";
 
 // ===== helpers: форматирование =====
 const MONTHS_RU = ["янв","фев","мар","апр","май","июн","июл","авг","сент","окт","ноя","дек"];
@@ -62,14 +64,6 @@ function fmtSpeedKmh(distance_m?: number | null, time_sec?: number | null) {
   const decimals = kmh >= 100 ? 0 : kmh >= 10 ? 1 : 2;
   return `${kmh.toFixed(decimals).replace(".", ",")} км/ч`;
 }
-function bytesHuman(b?: number | null) {
-  if (!b) return "—";
-  const u = ["Б","КБ","МБ","ГБ"];
-  let i = 0; let v = b;
-  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
-  const dec = v >= 100 ? 0 : v >= 10 ? 1 : 2;
-  return `${v.toFixed(dec)} ${u[i]}`;
-}
 function humanSport(s?: string | null) {
   const k = (s || "").toLowerCase();
   const map: Record<string, string> = {
@@ -84,7 +78,6 @@ function Badge({ children }: { children: React.ReactNode }) {
 
 // --- presence helpers ---
 const isNum = (v: any) => typeof v === "number" && !Number.isNaN(v);
-const isBool = (v: any) => typeof v === "boolean";
 const isStr = (v: any) => typeof v === "string" && v.trim().length > 0;
 const isObjNonEmpty = (v: any) => v && typeof v === "object" && Object.keys(v).length > 0;
 
@@ -115,7 +108,6 @@ const DEFAULT_HINTS: Record<string, { title: string; content: string }> = {
   hr_zone_time: { title: "HR-зоны", content: "Суммарное время в ЧСС-зонах, мин." },
   weather: { title: "Погода", content: "Температура, ветер, влажность, и др. на момент тренировки." },
   device_info: { title: "Устройства", content: "Источник данных: часы, датчики, файл FIT." },
-  fit_summary: { title: "FIT-сводка", content: "Техническая сводка парсинга FIT/импорта." },
 };
 
 // --- hints from DB (optional) ---
@@ -204,35 +196,17 @@ export default function WorkoutDetailPage() {
   useEffect(() => {
     (async () => {
       try {
-        const { data: u } = await supabase.auth.getUser();
-        const uid = u.user?.id || null;
-        const { data, error } = await supabase
+        const { data } = await supabase
           .from("hints")
-          .select("key,title,content,lang,user_id,visibility")
+          .select("key,title,content,lang,visibility")
           .in("visibility", ["public"])
           .eq("lang", "ru");
-        if (!error && data) {
+        if (data) {
           const map: Record<string, { title: string; content: string }> = { ...DEFAULT_HINTS };
           for (const h of data as any as HintRow[]) {
             map[h.key] = { title: h.title, content: h.content };
           }
           setHints(map);
-        }
-        // (опционально) затем подтянуть персональные override:
-        if (uid) {
-          const { data: mine } = await supabase
-            .from("hints")
-            .select("key,title,content,lang,user_id,visibility")
-            .eq("lang", "ru")
-            .eq("user_id", uid)
-            .in("visibility", ["private"]);
-          if (mine) {
-            setHints(prev => {
-              const m = { ...prev };
-              for (const h of mine as any as HintRow[]) m[h.key] = { title: h.title, content: h.content };
-              return m;
-            });
-          }
         }
       } catch { /* no-op */ }
     })();
@@ -241,7 +215,6 @@ export default function WorkoutDetailPage() {
   const zonesData = useMemo(() => {
     const z = row?.hr_zone_time || null;
     if (!z || typeof z !== "object") return [];
-    // в минутах
     return Object.entries(z).map(([k, v]) => ({
       zone: String(k),
       min: Math.round(Number(v as any) / 60),
@@ -339,18 +312,11 @@ export default function WorkoutDetailPage() {
         );
       })()}
 
-      {/* HR ZONES + WEATHER/DEVICE */}
+      {/* HR ZONES + WEATHER (без старого блока Device/File) */}
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* HR Zones */}
         {zonesData.length > 0 && (
           <div className="card p-4 relative group overflow-visible">
-            {/* тултип при наведении на карточку */}
-            {hints.hr_zone_time && (
-              <div className="pointer-events-none absolute right-3 top-3 z-50 hidden w-72 rounded-xl border bg-white p-2 text-xs text-[var(--text)] shadow group-hover:block">
-                <div className="font-semibold mb-1">{hints.hr_zone_time.title}</div>
-                <div className="opacity-80">{hints.hr_zone_time.content}</div>
-              </div>
-            )}
             <div className="mb-3 font-semibold">Время в HR-зонах</div>
             <div className="h-52">
               <ResponsiveContainer width="100%" height="100%">
@@ -368,12 +334,6 @@ export default function WorkoutDetailPage() {
         {/* Weather */}
         {isObjNonEmpty(row.weather) && (
           <div className="card p-4 relative group overflow-visible">
-            {hints.weather && (
-              <div className="pointer-events-none absolute right-3 top-3 z-50 hidden w-72 rounded-xl border bg-white p-2 text-xs text-[var(--text)] shadow group-hover:block">
-                <div className="font-semibold mb-1">{hints.weather.title}</div>
-                <div className="opacity-80">{hints.weather.content}</div>
-              </div>
-            )}
             <div className="mb-3 font-semibold">Погода</div>
             <div className="text-sm grid grid-cols-2 gap-2">
               {"temp_c" in row.weather && <KV k="Температура" v={`${row.weather.temp_c} °C`} />}
@@ -384,52 +344,15 @@ export default function WorkoutDetailPage() {
             </div>
           </div>
         )}
-
-        {/* Device / File */}
-        {(isObjNonEmpty(row.device_info) || isStr(row.filename) || isNum(row.size_bytes) || isStr(row.storage_path) || isStr(row.uploaded_at)) && (
-          <div className="card p-4 relative group overflow-visible">
-            {hints.device_info && (
-              <div className="pointer-events-none absolute right-3 top-3 z-50 hidden w-72 rounded-xl border bg-white p-2 text-xs text-[var(--text)] shadow group-hover:block">
-                <div className="font-semibold mb-1">{hints.device_info.title}</div>
-                <div className="opacity-80">{hints.device_info.content}</div>
-              </div>
-            )}
-            <div className="mb-3 font-semibold">Устройство и файл</div>
-            <div className="text-sm grid grid-cols-2 gap-2">
-              {row.device_info?.watch && <KV k="Устройство" v={row.device_info.watch} />}
-              {row.device_info?.hrm && <KV k="HRM" v={row.device_info.hrm} />}
-              {row.uploaded_at && <KV k="Загружено" v={new Date(row.uploaded_at).toLocaleString()} />}
-              {row.filename && <KV k="Файл" v={row.filename} />}
-              {isNum(row.size_bytes) && <KV k="Размер" v={bytesHuman(row.size_bytes)} />}
-              {row.storage_path && <KV k="Путь" v={row.storage_path} />}
-            </div>
-          </div>
-        )}
       </section>
 
-      {/* Description / Notes / FIT summary */}
+      {/* Заметка + Устройство и файл (на месте бывшей FIT-сводки) */}
       <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="card p-4">
-          <div className="mb-2 font-semibold">Заметка</div>
-          <div className="text-sm whitespace-pre-wrap">{row.description || "—"}</div>
-        </div>
-        {isObjNonEmpty(row.fit_summary) && (
-          <div className="card p-4 relative group">
-            {hints.fit_summary && (
-              <div className="pointer-events-none absolute right-3 top-3 z-10 hidden w-72 rounded-xl border bg-white p-2 text-xs text-[var(--text)] shadow group-hover:block">
-                <div className="font-semibold mb-1">{hints.fit_summary.title}</div>
-                <div className="opacity-80">{hints.fit_summary.content}</div>
-              </div>
-            )}
-            <div className="mb-2 font-semibold">FIT / сводка импорта</div>
-            <pre className="text-xs overflow-auto max-h-64 bg-[var(--color-bg-fill-tertiary)] rounded-xl p-3">
-              {JSON.stringify(row.fit_summary, null, 2)}
-            </pre>
-          </div>
-        )}
+        <NoteInline workoutId={workoutId} initial={row.description} />
+        <DeviceFileBlock workoutId={workoutId} />
       </section>
 
-      {/* WorkoutCharts block */}
+      {/* Графики в самом низу */}
       <WorkoutCharts workoutId={workoutId} />
 
       {/* Delete modal */}
@@ -450,6 +373,7 @@ export default function WorkoutDetailPage() {
     </main>
   );
 }
+
 // ===== мелкие компоненты =====
 function Metric({
   label,
@@ -462,7 +386,6 @@ function Metric({
 }) {
   return (
     <div className="group relative rounded-xl border p-3 overflow-visible">
-      {/* тултип появляется РЯДОМ с блоком при наведении на блок */}
       {hint && (
         <div className="pointer-events-none absolute left-full top-1/2 z-50 hidden w-64 -translate-y-1/2 ml-2 rounded-xl border bg-white p-2 text-xs text-[var(--text)] shadow group-hover:block">
           <div className="font-semibold mb-1">{hint.title}</div>
