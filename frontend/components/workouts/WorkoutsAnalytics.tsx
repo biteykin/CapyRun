@@ -1,72 +1,69 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabaseBrowser";
+import { useMemo } from "react";
 
-type W = { id: string; date?: string | null; calories?: number | null; duration_min?: number | null };
+type WorkoutRow = {
+  id: string;
+  start_time: string;
+  sport: string | null;
+  duration_sec: number | null;
+  distance_m: number | null;
+  avg_hr: number | null;
+};
 
-export default function WorkoutsAnalytics() {
-  const [rows, setRows] = useState<W[]>([]);
-  const [loading, setLoading] = useState(true);
+type FileRow = {
+  id: string;
+  filename: string | null;
+  uploaded_at: string;
+};
 
-  useEffect(() => {
-    (async () => {
-      const { data: u } = await supabase.auth.getUser();
-      const uid = u.user?.id;
-      if (!uid) { setRows([]); setLoading(false); return; }
-      // последние ~60 дней
-      const since = new Date(); since.setDate(since.getDate() - 60);
-      const { data } = await supabase
-        .from("workouts")
-        .select("*")
-        .eq("user_id", uid)
-        .gte("date", since.toISOString())
-        .order("date", { ascending: true });
-      setRows((data as W[]) || []);
-      setLoading(false);
-    })();
-  }, []);
-
-  const weeks = useMemo(() => bucketWeeks(rows), [rows]);
-  const calories = sumBy(rows, r => r.calories ?? 0);
-  const minutes = sumBy(rows, r => r.duration_min ?? 0);
-
-  if (loading) return <div className="card p-6 text-sm text-[var(--text-secondary)]">Аналитика загружается…</div>;
+export default function WorkoutsAnalytics({
+  workouts,
+  files,
+}: {
+  workouts: WorkoutRow[];
+  files: FileRow[];
+}) {
+  const weeks = useMemo(() => bucketWeeks(workouts), [workouts]);
+  const totalDuration = sumBy(workouts, r => r.duration_sec ?? 0);
+  const totalDistance = sumBy(workouts, r => r.distance_m ?? 0);
 
   return (
-    <section className="grid gap-4 md:grid-cols-3">
-      <div className="card p-5">
-        <div className="h-display font-semibold">Общее</div>
-        <div className="mt-2 text-sm text-[var(--text-secondary)]">
-          Последние 60 дней: {rows.length} тренировок
-          {minutes ? <> · {minutes} мин</> : null}
-          {calories ? <> · {calories} ккал</> : null}
+    <section className="rounded-xl border p-4">
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="card p-5">
+          <div className="h-display font-semibold">Общее</div>
+          <div className="mt-2 text-sm text-[var(--text-secondary)]">
+            {workouts.length} тренировок
+            {totalDuration ? <> · {Math.round(totalDuration / 60)} мин</> : null}
+            {totalDistance ? <> · {Math.round(totalDistance / 1000)} км</> : null}
+          </div>
+          <MiniBars data={weeks.map(w => ({ label: w.label, value: w.count }))} unit="трен." />
         </div>
-        <MiniBars data={weeks.map(w => ({ label: w.label, value: w.count }))} unit="трен." />
-      </div>
 
-      <div className="card p-5">
-        <div className="h-display font-semibold">Мини-прогресс</div>
-        <div className="mt-2 text-sm text-[var(--text-secondary)]">Неделя за неделей</div>
-        <MiniBars data={weeks.map(w => ({ label: w.label, value: w.count }))} />
-      </div>
+        <div className="card p-5">
+          <div className="h-display font-semibold">Мини-прогресс</div>
+          <div className="mt-2 text-sm text-[var(--text-secondary)]">Неделя за неделей</div>
+          <MiniBars data={weeks.map(w => ({ label: w.label, value: w.count }))} />
+        </div>
 
-      <div className="card p-5">
-        <div className="h-display font-semibold">Фокус</div>
-        <div className="mt-2 text-sm text-[var(--text-secondary)]">
-          Дальше подключим VO₂max, пульс и силовые метрики из файлов <code>.fit</code>
+        <div className="card p-5">
+          <div className="h-display font-semibold">Фокус</div>
+          <div className="mt-2 text-sm text-[var(--text-secondary)]">
+            Дальше подключим VO₂max, пульс и силовые метрики из файлов <code>.fit</code>
+          </div>
         </div>
       </div>
     </section>
   );
 }
 
-function bucketWeeks(rows: W[]) {
+function bucketWeeks(rows: WorkoutRow[]) {
   // группируем по понедельникам
   const map = new Map<string,{label:string,count:number}>();
   rows.forEach(r => {
-    if (!r.date) return;
-    const d = new Date(r.date);
+    if (!r.start_time) return;
+    const d = new Date(r.start_time);
     const monday = startOfISOWeek(d); // YYYY-MM-DD
     const label = fmtWeekLabel(new Date(monday));
     const prev = map.get(monday)?.count ?? 0;

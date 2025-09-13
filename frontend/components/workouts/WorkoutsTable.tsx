@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseBrowser";
 import { createPortal } from "react-dom";
+// import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"; // removed, not needed
 
 type Workout = {
   id: string;
@@ -89,11 +90,11 @@ function iconColor(s?: string | null) {
 const PAGE_SIZES = [5, 10, 20, 50];
 const LS_KEY_PAGE_SIZE = "capyrun.workouts.pageSize";
 
-export default function WorkoutsTable() {
+export default function WorkoutsTable({ setTotalCount }: { setTotalCount?: (n: number) => void } = {}) {
   const router = useRouter();
 
   // data
-  const [userId, setUserId] = useState<string | null>(null);
+  // const [userId, setUserId] = useState<string | null>(null); // not needed for new effect
   const [rows, setRows] = useState<Workout[]>([]);
   const [count, setCount] = useState<number>(0);
 
@@ -102,7 +103,8 @@ export default function WorkoutsTable() {
   const [error, setError] = useState<string | null>(null);
 
   // paging/sorting/filtering
-  const [page, setPage] = useState(1);
+  // --- REWRITE: use pageIndex (0-based) instead of page (1-based) ---
+  const [pageIndex, setPageIndex] = useState(0);
   const [pageSize, setPageSize] = useState<number>(() => {
     if (typeof window === "undefined") return 5;
     try {
@@ -123,7 +125,7 @@ export default function WorkoutsTable() {
     kcal: "calories_kcal",
   };
   function toggleSort(col: typeof sortBy) {
-    setPage(1);
+    setPageIndex(0);
     setSortBy(col);
     setSortDir(prev => (sortBy === col ? (prev === "asc" ? "desc" : "asc") : "desc"));
   }
@@ -135,23 +137,59 @@ export default function WorkoutsTable() {
   // request race guard
   const rqRef = useRef(0);
 
-  // first mount: get user & sports only (без двойного fetch Page)
+  // first mount: fetch workouts via RPC (with fallback)
   useEffect(() => {
-    (async () => {
-      const { data } = await supabase.auth.getUser();
-      const uid = data.user?.id ?? null;
-      setUserId(uid);
-      if (uid) await fetchSports(uid);
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    let cancelled = false;
 
-  // (re)fetch page on dependencies
-  useEffect(() => {
-    if (!userId) return;
-    fetchPage(userId, page, pageSize);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize, userId, sportFilter, sortBy, sortDir]);
+    (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // 1) Пробуем public.list_dashboard RPC (без getUser, RLS ограничит строки)
+        const { data, error, status } = await supabase.rpc("list_dashboard", {
+          limit_files: 0,
+          limit_workouts: 200,
+        });
+
+        if (error) {
+          console.warn("RPC list_dashboard failed", { status, error });
+          throw error;
+        }
+
+        const rows = (Array.isArray(data?.workouts) ? data?.workouts : []) as any[];
+        if (!cancelled) {
+          setRows(rows);
+          setTotalCount?.(rows.length); // после setRows(rows);
+        }
+      } catch {
+        // 2) Фолбэк на прямой select (лёгкие поля и без getUser)
+        try {
+          const { data: rows2, error: err2 } = await supabase
+            .from("workouts")
+            .select(
+              "id,start_time,local_date,uploaded_at,sport,sub_sport,duration_sec,distance_m,avg_hr,name,visibility,weekday_iso"
+            )
+            .order("start_time", { ascending: false })
+            .limit(200);
+
+          if (err2) throw err2;
+          if (!cancelled) {
+            setRows((rows2 ?? []) as any[]);
+            setTotalCount?.((rows2 ?? []).length); // …и в фолбэке после rows2 — тоже setTotalCount?.(rows2.length)
+          }
+        } catch (e2: any) {
+          if (!cancelled) setError(e2?.message || "Не удалось загрузить тренировки");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [setTotalCount]);
 
   // сохраняем выбор pageSize в localStorage при изменении
   useEffect(() => {
@@ -160,58 +198,15 @@ export default function WorkoutsTable() {
     } catch {}
   }, [pageSize]);
 
-  async function fetchSports(uid: string) {
-    const { data, error } = await supabase
-      .from("workouts")
-      .select("sport")
-      .eq("user_id", uid)
-      .not("sport", "is", null)
-      .limit(1000);
-    if (!error && data) {
-      const uniq = Array.from(new Set(data.map(x => (x as any).sport).filter(Boolean)));
-      uniq.sort((a, b) => humanSport(a).localeCompare(humanSport(b), "ru", { sensitivity: "base" }));
-      setSports(uniq);
-    }
-  }
-
-  async function fetchPage(uid: string, p: number, ps: number) {
-    setError(null);
-    setLoading(true);
-
-    const rid = ++rqRef.current;
-    const from = (p - 1) * ps;
-    const to = from + ps - 1;
-    const col = SORT_MAP[sortBy];
-
-    // данные
-    const dataQ = supabase
-      .from("workouts")
-      .select("id, name, sport, start_time, local_date, weekday_iso, distance_m, duration_sec, calories_kcal")
-      .eq("user_id", uid)
-      .order(col, { ascending: sortDir === "asc", nullsFirst: false })
-      .range(from, to);
-    if (sportFilter !== "all") dataQ.eq("sport", sportFilter);
-
-    // точный count для корректной пагинации
-    const countQ = supabase
-      .from("workouts")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", uid);
-    if (sportFilter !== "all") countQ.eq("sport", sportFilter);
-
-    const [dataRes, countRes] = await Promise.all([dataQ, countQ]);
-
-    if (rqRef.current !== rid) return; // устаревший ответ — игнор
-
-    if (dataRes.error) setError(dataRes.error.message);
-    setRows((dataRes.data as Workout[]) ?? []);
-    setCount(countRes.count ?? 0);
-    setLoading(false);
-  }
-
-  const totalPages = Math.max(1, Math.ceil(count / pageSize));
-  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [totalPages, page]);
+  // --- REWRITE: pagination logic with pageIndex ---
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  useEffect(() => { if (pageIndex > totalPages - 1) setPageIndex(Math.max(0, totalPages - 1)); }, [totalPages, pageIndex]);
   const empty = useMemo(() => !loading && rows.length === 0, [loading, rows]);
+
+  // Calculate visibleRows for current page
+  const start = pageIndex * pageSize;
+  const end = start + pageSize;
+  const visibleRows = useMemo(() => rows.slice(start, end), [rows, start, end, pageSize]);
 
   // delete modal
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
@@ -230,7 +225,7 @@ export default function WorkoutsTable() {
       <section className="card overflow-visible">
         {/* header controls */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
-          <div className="text-sm text-[var(--text-secondary)]">Тренировок: {count}</div>
+          <div className="text-sm text-[var(--text-secondary)]">Тренировок: {rows.length}</div>
 
           <div className="flex items-center gap-3">
             {/* sport filter */}
@@ -239,7 +234,7 @@ export default function WorkoutsTable() {
               <select
                 className="input h-9 w-44"
                 value={sportFilter}
-                onChange={(e) => { setPage(1); setSportFilter(e.target.value as any); }}
+                onChange={(e) => { setPageIndex(0); setSportFilter(e.target.value as any); }}
               >
                 <option value="all">Все</option>
                 {sports.map(s => <option key={s} value={s}>{humanSport(s)}</option>)}
@@ -252,7 +247,7 @@ export default function WorkoutsTable() {
               <select
                 className="input h-9 w-28"
                 value={pageSize}
-                onChange={(e)=>{ setPage(1); setPageSize(parseInt(e.target.value,10)); }}
+                onChange={(e)=>{ setPageIndex(0); setPageSize(parseInt(e.target.value,10)); }}
               >
                 {PAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
@@ -281,7 +276,7 @@ export default function WorkoutsTable() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {rows.map((r) => (
+                {visibleRows.map((r) => (
                   <tr
                     key={r.id}
                     className="group hover:bg-[var(--color-bg-fill-tertiary)]/60 hover:cursor-pointer hover:[&>td]:cursor-pointer"
@@ -315,9 +310,23 @@ export default function WorkoutsTable() {
 
         {/* pager */}
         <div className="flex items-center justify-between gap-3 border-t border-[var(--border)] px-4 py-3">
-          <button className="btn btn-ghost h-9" disabled={page<=1} onClick={()=>setPage(p=>Math.max(1,p-1))}>Назад</button>
-          <div className="text-sm text-[var(--text-secondary)]">Стр. {page} из {totalPages}</div>
-          <button className="btn btn-ghost h-9" disabled={page>=totalPages} onClick={()=>setPage(p=>Math.min(totalPages,p+1))}>Вперёд</button>
+          <button
+            className="btn btn-ghost h-9"
+            disabled={pageIndex <= 0}
+            onClick={() => setPageIndex(p => Math.max(0, p - 1))}
+          >
+            Назад
+          </button>
+          <div className="text-sm text-[var(--text-secondary)]">
+            Стр. {totalPages === 0 ? 1 : pageIndex + 1} из {totalPages}
+          </div>
+          <button
+            className="btn btn-ghost h-9"
+            disabled={pageIndex >= totalPages - 1}
+            onClick={() => setPageIndex(p => Math.min(totalPages - 1, p + 1))}
+          >
+            Вперёд
+          </button>
         </div>
 
         {error && (

@@ -1,14 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 export default function AddWorkoutMenu() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const router = useRouter();
 
-  // Закрытие по клику вне/ESC
   useEffect(() => {
     const onDown = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
     const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
@@ -19,7 +17,6 @@ export default function AddWorkoutMenu() {
 
   return (
     <div className="relative" ref={ref}>
-      {/* Триггер — «как у PostHog»: меньше скругление, жёлтый фон и нижняя тень */}
       <button
         type="button"
         onClick={() => setOpen(v => !v)}
@@ -38,30 +35,31 @@ export default function AddWorkoutMenu() {
         </svg>
       </button>
 
-      {/* Выпадающее меню в стиле PostHog */}
       {open && (
         <div
           role="menu"
           className="absolute right-0 z-50 mt-2 w-64 rounded-xl border border-[var(--border)] bg-white p-1
                      shadow-[0_8px_24px_rgba(0,0,0,.08)]"
         >
-          <button
+          <Link
+            href="/workouts/upload"
+            onClick={() => setOpen(false)}
             role="menuitem"
-            className="w-full rounded-lg px-3 py-2 text-left hover:bg-[var(--color-bg-fill-tertiary)]"
-            onClick={() => { setOpen(false); router.push("/home"); }}  // здесь аплоад .fit
+            className="block w-full rounded-lg px-3 py-2 text-left no-underline text-foreground hover:bg-[var(--color-bg-fill-tertiary)]"
           >
             Загрузить файл
             <div className="text-xs text-[var(--text-secondary)]">Импорт .fit и других форматов</div>
-          </button>
+          </Link>
 
-          <button
+          <Link
+            href="/workouts/new"
+            onClick={() => setOpen(false)}
             role="menuitem"
-            className="w-full rounded-lg px-3 py-2 text-left hover:bg-[var(--color-bg-fill-tertiary)]"
-            onClick={() => { setOpen(false); router.push("/workouts/new"); }}
+            className="block w-full rounded-lg px-3 py-2 text-left no-underline text-foreground hover:bg-[var(--color-bg-fill-tertiary)]"
           >
             Добавить вручную
             <div className="text-xs text-[var(--text-secondary)]">Дата, тип, дистанция, время…</div>
-          </button>
+          </Link>
         </div>
       )}
     </div>

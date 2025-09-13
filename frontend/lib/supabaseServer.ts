@@ -1,3 +1,4 @@
+// lib/supabaseServer.ts
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
@@ -11,8 +12,9 @@ export function createSupabaseServerClient() {
   return createServerClient(url, key, {
     cookies: {
       get: (name: string) => cookieStore.get(name)?.value,
-      set: (name, value, options) => { try { cookieStore.set({ name, value, ...options }); } catch {} },
-      remove: (name, options) => { try { cookieStore.delete({ name, ...options }); } catch {} },
+      // в Server Components менять куки нельзя — оставляем заглушки
+      set: () => {},
+      remove: () => {},
     },
   });
 }

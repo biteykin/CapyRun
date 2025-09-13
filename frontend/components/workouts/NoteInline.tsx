@@ -15,7 +15,6 @@ export default function NoteInline({ workoutId, initial }: Props) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedRef = useRef<string>(initial ?? "");
 
-  // если initial пришёл позже первой отрисовки
   useEffect(() => {
     if ((initial ?? "") !== lastSavedRef.current && status === "idle") {
       setText(initial ?? "");
@@ -25,12 +24,13 @@ export default function NoteInline({ workoutId, initial }: Props) {
   }, [initial]);
 
   async function saveNow(v: string) {
-    if (v === lastSavedRef.current) return; // нечего сохранять
+    if (v === lastSavedRef.current) return;
     setStatus("saving");
     setError(null);
+
     const { error } = await supabase
       .from("workouts")
-      .update({ description: v })
+      .update({ description: v }) // сохраняем в description
       .eq("id", workoutId)
       .select("id")
       .maybeSingle();
@@ -45,7 +45,6 @@ export default function NoteInline({ workoutId, initial }: Props) {
     setTimeout(() => setStatus("idle"), 1500);
   }
 
-  // автосейв через 5 сек после остановки ввода
   useEffect(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => void saveNow(text), 5000);
@@ -72,6 +71,7 @@ export default function NoteInline({ workoutId, initial }: Props) {
           {status === "saved" && "Сохранено"}
           {status === "error" && <span className="text-red-600">Ошибка сохранения</span>}
         </div>
+
       </div>
       {error && <div className="text-xs text-red-600 mb-2">{error}</div>}
       <textarea
