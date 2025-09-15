@@ -3,7 +3,6 @@
 import { useEffect } from "react";
 import { useSearchParams /*, useRouter */ } from "next/navigation";
 import posthog from "posthog-js";
-import Breadcrumbs from "@/components/navigation/Breadcrumbs";
 import PHTrack from "@/components/analytics/PHTrack";
 import UploadFits from "@/components/fit/UploadFits";
 // Если нужен безопасный импорт без SSR:
@@ -22,16 +21,7 @@ export default function WorkoutUploadPage() {
   }, [qs]);
 
   return (
-    <main className="space-y-8">
-      <div className="flex items-center justify-between gap-3">
-        <Breadcrumbs
-          items={[
-            { label: "Тренировки", href: "/workouts" },
-            { label: "Загрузка файла" },
-          ]}
-        />
-      </div>
-
+    <main>
       {/* Унифицированный трекинг через твой компонент */}
       <PHTrack event="workout_upload_viewed" />
 

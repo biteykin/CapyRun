@@ -8,6 +8,7 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from "recha
 import WorkoutCharts from "@/components/workouts/WorkoutCharts";
 import NoteInline from "@/components/workouts/NoteInline";
 import DeviceFileBlock from "@/components/workouts/DeviceFileBlock";
+import { AppTooltip } from "@/components/ui/AppTooltip";
 
 /* ================= helpers & types ================= */
 
@@ -67,6 +68,7 @@ type Workout = {
   swim_swolf_avg: number | null;
   weather: Weather | null;
   hr_zone_time: HRZones;
+  perceived_exertion: number | null; // <- добавлено для RPE
   created_at: string;
   updated_at: string;
 };
@@ -231,48 +233,52 @@ export default function WorkoutDetailPage() {
       {(() => {
         const showRunPace = (row.sport || "").toLowerCase() === "run" || (row.sport || "").toLowerCase() === "walk";
         const computedSpeed = fmtSpeedKmh(row.distance_m, row.moving_time_sec ?? row.duration_sec);
-        const items: Array<{ label: string; value: React.ReactNode; present: boolean }> = [
-          { label: "Дистанция", value: fmtKm(row.distance_m), present: isNum(row.distance_m) },
-          { label: "Время", value: fmtDuration(row.duration_sec), present: isNum(row.duration_sec) },
-          { label: "В движении", value: fmtDuration(row.moving_time_sec), present: isNum(row.moving_time_sec) },
-          {
-            label: showRunPace ? "Темп" : "Скорость",
-            value: showRunPace ? fmtPace(row.avg_pace_s_per_km) : computedSpeed,
-            present: showRunPace ? isNum(row.avg_pace_s_per_km) : computedSpeed !== "—",
-          },
-          { label: "Подъём", value: fmtM(row.elev_gain_m), present: isNum(row.elev_gain_m) },
-          { label: "Спуск", value: fmtM(row.elev_loss_m), present: isNum(row.elev_loss_m) },
-          { label: "Ккал", value: isNum(row.calories_kcal) ? row.calories_kcal : "—", present: isNum(row.calories_kcal) },
+
+        type MetricItem = { label: string; value: React.ReactNode; present: boolean; hint?: string };
+
+        const items: Array<MetricItem> = [
+          { label: "Дистанция", value: fmtKm(row.distance_m), present: isNum(row.distance_m), hint: "Преодолённое расстояние по GPS/датчикам. Единицы: километры." },
+          { label: "Время", value: fmtDuration(row.duration_sec), present: isNum(row.duration_sec), hint: "Общее время от старта до финиша, включая паузы." },
+          { label: "В движении", value: fmtDuration(row.moving_time_sec), present: isNum(row.moving_time_sec), hint: "Сумма интервалов, когда устройство фиксировало движение (без пауз)." },
+          showRunPace
+            ? { label: "Темп", value: fmtPace(row.avg_pace_s_per_km), present: isNum(row.avg_pace_s_per_km), hint: "Средний темп: мин/км. Рассчитан по времени в движении." }
+            : { label: "Скорость", value: computedSpeed, present: computedSpeed !== "—", hint: "Средняя скорость: км/ч. По дистанции и времени в движении." },
+          { label: "Подъём", value: fmtM(row.elev_gain_m), present: isNum(row.elev_gain_m), hint: "Суммарный набор высоты по данным альтиметра/GPS." },
+          { label: "Спуск", value: fmtM(row.elev_loss_m), present: isNum(row.elev_loss_m), hint: "Суммарная потеря высоты." },
+          { label: "Ккал", value: isNum(row.calories_kcal) ? row.calories_kcal : "—", present: isNum(row.calories_kcal), hint: "Оценка энергозатрат по ЧСС/мощности/модели устройства." },
           {
             label: "Пульс ср/макс",
             value: `${isNum(row.avg_hr) ? row.avg_hr : "—"} / ${isNum(row.max_hr) ? row.max_hr : "—"} bpm`,
             present: isNum(row.avg_hr) || isNum(row.max_hr),
+            hint: "Средняя и максимальная частота сердечных сокращений (уд/мин)."
           },
           {
             label: "Мощность ср/NP/макс",
             value: `${isNum(row.avg_power_w) ? row.avg_power_w : "—"} / ${isNum(row.np_power_w) ? row.np_power_w : "—"} / ${isNum(row.max_power_w) ? row.max_power_w : "—"} W`,
             present: isNum(row.avg_power_w) || isNum(row.np_power_w) || isNum(row.max_power_w),
+            hint: "Средняя мощность, Normalized Power (NP) и максимальная мощность (Вт)."
           },
-          { label: "Каденс (шаг)", value: isNum(row.avg_cadence_spm) ? row.avg_cadence_spm : "—", present: isNum(row.avg_cadence_spm) },
-          { label: "Каденс (rpm)", value: isNum(row.avg_cadence_rpm) ? row.avg_cadence_rpm : "—", present: isNum(row.avg_cadence_rpm) },
-          { label: "SWOLF ср", value: isNum(row.swim_swolf_avg) ? row.swim_swolf_avg : "—", present: isNum(row.swim_swolf_avg) },
-          { label: "Плав. темп", value: fmtSwimPace(row.avg_swim_pace_s_per_100m), present: isNum(row.avg_swim_pace_s_per_100m) },
-          { label: "Бассейн", value: isNum(row.swim_pool_length_m) ? `${row.swim_pool_length_m} м` : "—", present: isNum(row.swim_pool_length_m) },
-          { label: "Стиль", value: isStr(row.swim_stroke_primary) ? row.swim_stroke_primary : "—", present: isStr(row.swim_stroke_primary) },
-          { label: "RPE", value: isNum(row.perceived_exertion) ? row.perceived_exertion : "—", present: isNum(row.perceived_exertion) },
-          { label: "TRIMP", value: isNum(row.trimp) ? row.trimp : "—", present: isNum(row.trimp) },
-          { label: "EF", value: isNum(row.ef) ? row.ef : "—", present: isNum(row.ef) },
-          { label: "PA:HR", value: isNum(row.pa_hr_pct) ? `${row.pa_hr_pct}%` : "—", present: isNum(row.pa_hr_pct) },
-          { label: "IF", value: isNum(row.intensity_factor) ? row.intensity_factor : "—", present: isNum(row.intensity_factor) },
-          { label: "Нагрузка", value: isNum(row.training_load_score) ? row.training_load_score : "—", present: isNum(row.training_load_score) },
+          { label: "Каденс (шаг)", value: isNum(row.avg_cadence_spm) ? row.avg_cadence_spm : "—", present: isNum(row.avg_cadence_spm), hint: "Средний шаговый каденс: шагов в минуту (SPM)." },
+          { label: "Каденс (rpm)", value: isNum(row.avg_cadence_rpm) ? row.avg_cadence_rpm : "—", present: isNum(row.avg_cadence_rpm), hint: "Средний каденс педалирования: оборотов в минуту (RPM)." },
+          { label: "SWOLF ср", value: isNum(row.swim_swolf_avg) ? row.swim_swolf_avg : "—", present: isNum(row.swim_swolf_avg), hint: "SWOLF = время за дорожку + число гребков. Ниже — лучше." },
+          { label: "Плав. темп", value: fmtSwimPace(row.avg_swim_pace_s_per_100m), present: isNum(row.avg_swim_pace_s_per_100m), hint: "Средний темп плавания: мин/100м." },
+          { label: "Бассейн", value: isNum(row.swim_pool_length_m) ? `${row.swim_pool_length_m} м` : "—", present: isNum(row.swim_pool_length_m), hint: "Длина бассейна, использованная для расчётов." },
+          { label: "Стиль", value: isStr(row.swim_stroke_primary) ? row.swim_stroke_primary : "—", present: isStr(row.swim_stroke_primary), hint: "Основной стиль плавания, распознанный устройством." },
+          { label: "RPE", value: isNum(row.perceived_exertion) ? row.perceived_exertion : "—", present: isNum(row.perceived_exertion), hint: "Rating of Perceived Exertion (1–10) — субъективная тяжесть тренировки." },
+          { label: "TRIMP", value: isNum(row.trimp) ? row.trimp : "—", present: isNum(row.trimp), hint: "Training Impulse — нагрузка на основе времени и ЧСС." },
+          { label: "EF", value: isNum(row.ef) ? row.ef : "—", present: isNum(row.ef), hint: "Efficiency Factor — соотношение скорости/мощности к ЧСС; рост EF = лучшая экономичность." },
+          { label: "PA:HR", value: isNum(row.pa_hr_pct) ? `${row.pa_hr_pct}%` : "—", present: isNum(row.pa_hr_pct), hint: "Декуплинг темпа/мощности и ЧСС; >~5% может указывать на падение устойчивости." },
+          { label: "IF", value: isNum(row.intensity_factor) ? row.intensity_factor : "—", present: isNum(row.intensity_factor), hint: "Intensity Factor: отношение интенсивности к порогу (≈ NP/FTP). 0.6 восстановл., 0.85–0.95 темповая, ~1.0 соревновательная." },
+          { label: "Нагрузка", value: isNum(row.training_load_score) ? row.training_load_score : "—", present: isNum(row.training_load_score), hint: "Training Load Score / TSS-подобная метрика суммарной нагрузки." },
         ];
+
         const visible = items.filter(i => i.present);
         if (visible.length === 0) return null;
         return (
           <section className="card p-4 overflow-visible">
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
               {visible.map((i, idx) => (
-                <Metric key={`${i.label}-${idx}`} label={i.label} value={i.value} />
+                <Metric key={`${i.label}-${idx}`} label={i.label} value={i.value} hint={i.hint} />
               ))}
             </div>
           </section>
@@ -311,13 +317,13 @@ export default function WorkoutDetailPage() {
         )}
       </section>
 
-      {/* Note + Device/File (замена старой FIT-сводки; путь к файлу НЕ показываем — компонент его не рендерит) */}
+      {/* Note + Device/File */}
       <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <NoteInline workoutId={workoutId} initial={row.description} />
         <DeviceFileBlock workoutId={workoutId} />
       </section>
 
-      {/* Charts в самом низу */}
+      {/* Charts */}
       <WorkoutCharts workoutId={workoutId} />
 
       {/* Delete modal */}
@@ -340,12 +346,14 @@ export default function WorkoutDetailPage() {
 }
 
 /* ============ tiny ui parts ============ */
-function Metric({ label, value }: { label: string; value: React.ReactNode }) {
+function Metric({ label, value, hint }: { label: string; value: React.ReactNode; hint?: React.ReactNode }) {
   return (
-    <div className="group relative rounded-xl border p-3 overflow-visible">
-      <div className="text-xs text-[var(--text-secondary)]">{label}</div>
-      <div className="mt-1 text-base font-semibold">{value}</div>
-    </div>
+    <AppTooltip content={hint || label}>
+      <div className="group relative rounded-xl border p-3 overflow-visible cursor-help">
+        <div className="text-xs text-[var(--text-secondary)]">{label}</div>
+        <div className="mt-1 text-base font-semibold">{value}</div>
+      </div>
+    </AppTooltip>
   );
 }
 function KV({ k, v }: { k: string; v: React.ReactNode }) {

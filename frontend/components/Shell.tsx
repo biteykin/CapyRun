@@ -1,27 +1,99 @@
+// components/Shell.tsx
 "use client";
 
-import { useEffect, useState } from "react";
-import Sidebar from "./Sidebar";
-import { Topbar } from "./Topbar";
+import * as React from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
+import Sidebar from "@/components/Sidebar";
+import AddWorkoutMenu from "@/components/workouts/AddWorkoutMenu";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 
-export function Shell({ children }: { children: React.ReactNode }) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+const HOME_HREF = "/home";
+
+function buildCrumbs(pathname: string) {
+  const path = (pathname || "/").split("#")[0].split("?")[0];
+  const parts = path.split("/").filter(Boolean);
+  const crumbs: { href?: string; label: string }[] = [{ href: HOME_HREF, label: "Главная" }];
+
+  if (parts.length === 0 || parts[0] === "home") return crumbs;
+
+  const root = parts[0];
+  if (root === "workouts") {
+    crumbs.push({ href: "/workouts", label: "Тренировки" });
+    const second = parts[1];
+    if (second === "upload") crumbs.push({ label: "Загрузка файла" });
+    else if (second === "new") crumbs.push({ label: "Новая тренировка" });
+    else if (second) {
+      crumbs.push({ label: "Тренировка" });
+      if (parts[2] === "edit") crumbs.push({ label: "Редактировать" });
+    }
+  } else if (root === "goals") crumbs.push({ label: "Цели" });
+  else if (root === "plan") crumbs.push({ label: "План" });
+  else if (root === "coach") crumbs.push({ label: "Coach" });
+  else if (root === "nutrition") crumbs.push({ label: "Питание" });
+  else if (root === "profile") crumbs.push({ label: "Профиль" });
+  else if (root === "badges") crumbs.push({ label: "Бейджи" });
+  else crumbs.push({ label: "CapyRun" });
+
+  return crumbs;
+}
+
+export default function Shell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname() || "/";
+  const items = React.useMemo(() => buildCrumbs(pathname), [pathname]);
 
   return (
-    <div className="grid min-h-[100svh] md:h-dvh w-full grid-cols-1 md:grid-cols-[280px_1fr]">
-      <aside
-        className="hidden md:block border-r border-[var(--border)] bg-[var(--color-bg-surface-primary)]
-                   sticky top-0 h-[100svh] md:h-dvh overflow-y-auto"
-      >
-        <Sidebar />
-      </aside>
-      <main className="flex min-w-0 flex-col">
-        <Topbar />
-        <div className="mx-auto w-full max-w-6xl px-4 pb-12 pt-6">
-          <div className={mounted ? "" : "opacity-0"}>{children}</div>
+    <SidebarProvider>
+      {/* Левый сайдбар — фиксированный/стики внутри компонента Sidebar.tsx */}
+      <Sidebar />
+
+      {/* Правая колонка с контентом: занимает всю высоту и скроллится сама */}
+      <SidebarInset className="flex min-h-svh flex-1 flex-col">
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
+          <SidebarTrigger className="-ml-1" />
+          <div className="h-display text-base font-semibold text-foreground">
+            <Breadcrumb>
+              <BreadcrumbList>
+                {items.map((c, i) => {
+                  const last = i === items.length - 1;
+                  return (
+                    <React.Fragment key={`${c.label}-${i}`}>
+                      <BreadcrumbItem>
+                        {last || !c.href ? (
+                          <BreadcrumbPage>{c.label}</BreadcrumbPage>
+                        ) : (
+                          <BreadcrumbLink asChild>
+                            <Link className="no-underline hover:no-underline focus:no-underline" href={c.href}>
+                              {c.label}
+                            </Link>
+                          </BreadcrumbLink>
+                        )}
+                      </BreadcrumbItem>
+                      {i < items.length - 1 && <BreadcrumbSeparator />}
+                    </React.Fragment>
+                  );
+                })}
+              </BreadcrumbList>
+            </Breadcrumb>
+          </div>
+          <div className="ml-auto">
+            <AddWorkoutMenu />
+          </div>
+        </header>
+
+        {/* ВАЖНО: именно этот блок скроллится, не вся страница */}
+        <div className="flex flex-1 flex-col gap-4 p-4 overflow-y-auto">
+          {children}
         </div>
-      </main>
-    </div>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }

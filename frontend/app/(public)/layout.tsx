@@ -1,12 +1,14 @@
-import type { ReactNode } from "react";
-import "@/app/globals.css";
-import NavbarPublic from "@/components/marketing/NavbarPublic";
+import PublicTopbar from "@/components/PublicTopbar";
 
-export default function PublicLayout({ children }: { children: ReactNode }) {
+export default function PublicLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-dvh bg-[var(--color-bg-surface-primary)]">
-      <NavbarPublic />
-      {children}
+    <div className="flex min-h-[100svh] flex-col">
+      <header className="sticky top-0 z-40 border-b bg-background">
+        <PublicTopbar />
+      </header>
+      <main className="flex-1">
+        {children}
+      </main>
     </div>
   );
 }

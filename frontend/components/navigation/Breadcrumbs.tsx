@@ -16,12 +16,11 @@ export default function Breadcrumbs({
   className?: string;
 }) {
   return (
-    <nav aria-label="Хлебные крошки" className={clsx("text-sm", className)}>
+    <nav aria-label="Хлебные крошки" className={clsx(className)}>
       <ol className="flex flex-wrap items-center">
         {items.map((it, idx) => {
           const isLast = idx === items.length - 1;
           const content = it.href && !isLast ? (
-            // Кликабельно, но визуально — как обычный текст
             <Link
               href={it.href}
               className="text-foreground no-underline hover:no-underline focus:no-underline active:no-underline"

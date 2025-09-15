@@ -67,7 +67,6 @@ export default function WorkoutEditPage() {
 
     // 1) пробуем вашу справочную таблицу подтипов
     try {
-      // 👇 если у вас другое имя — поменяйте 'sport_subtypes' один раз тут
       const { data, error } = await supabase
         .from("sport_subtypes")
         .select("*")
@@ -84,21 +83,20 @@ export default function WorkoutEditPage() {
           return { value: String(value), label: String(label) };
         }).filter(o => o.value);
       }
-    } catch { /* no-op */ }
-
-    // 2) если справочник пуст, берём distinct из ваших тренировок
-    if (!opts.length) {
-      const { data } = await supabase
-        .from("workouts")
-        .select("sub_sport")
-        .eq("sport", s)
-        .not("sub_sport", "is", null)
-        .limit(1000);
-      if (data) {
-        const uniq = Array.from(new Set((data as any[]).map((x) => x.sub_sport).filter(Boolean)));
-        opts = uniq.map((v) => ({ value: String(v), label: String(v) }));
+      // 2) если справочник пуст, берём distinct из ваших тренировок
+      if (!opts.length) {
+        const { data } = await supabase
+          .from("workouts")
+          .select("sub_sport")
+          .eq("sport", s)
+          .not("sub_sport", "is", null)
+          .limit(1000);
+        if (data) {
+          const uniq = Array.from(new Set((data as any[]).map((x) => x.sub_sport).filter(Boolean)));
+          opts = uniq.map((v) => ({ value: String(v), label: String(v) }));
+        }
       }
-    }
+    } catch { /* no-op */ }
 
     // 3) дефолты на всякий
     if (!opts.length && SUB_FALLBACKS[s]) {
