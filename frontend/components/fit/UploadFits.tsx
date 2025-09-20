@@ -5,7 +5,6 @@ import { supabase } from "@/lib/supabaseBrowser";
 import posthog from "posthog-js";
 // ⚠️ относительный импорт исключает проблемы алиаса `@` в сборках Sentry/CI
 import { uploadWorkoutFile } from "../../lib/uploadWorkoutFile";
-import { __devPingSupabase } from "../../lib/supabaseBrowser";
 
 type Wf = {
   id: string;
@@ -38,10 +37,6 @@ export default function UploadFits() {
       if (uid) await refresh(uid);
       setLoading(false);
     })();
-  }, []);
-
-  useEffect(() => {
-    if (process.env.NODE_ENV === "development") __devPingSupabase();
   }, []);
 
   async function refresh(uid: string) {

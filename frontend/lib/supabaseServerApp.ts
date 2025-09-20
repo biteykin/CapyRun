@@ -1,10 +1,10 @@
 // lib/supabaseServerApp.ts
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
+import { cookies } from "next/headers";
 
 export async function createSupabaseServerClient() {
-  // ⬇️ ЛЕНИВЫЙ импорт, чтобы pages/ бандл не падал на top-level import
-  const { cookies } = await import("next/headers");
-  const cookieStore = await cookies();
+  const cookieStore = await cookies(); // Next.js 15: cookies() — async
+
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -13,12 +13,12 @@ export async function createSupabaseServerClient() {
         get(name: string) {
           return cookieStore.get(name)?.value;
         },
-        // В RSC модификация cookies запрещена — тихо игнорируем
         set(name: string, value: string, options: CookieOptions) {
-          try { cookieStore.set({ name, value, ...options }); } catch {}
+          // запись cookie допустима в Route Handler / Server Action / (иногда Server Component в dev)
+          cookieStore.set({ name, value, ...options });
         },
         remove(name: string, options: CookieOptions) {
-          try { cookieStore.delete({ name, ...options }); } catch {}
+          cookieStore.set({ name, value: "", ...options, expires: new Date(0) });
         },
       },
     }

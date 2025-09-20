@@ -5,6 +5,10 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseBrowser";
 
+// NEW: общий конфиг/компонент спорта
+import { humanSport } from "@/components/ui/sport-theme";
+import { SportPill } from "@/components/ui/sport-badge";
+
 import {
   ColumnDef,
   flexRender,
@@ -86,14 +90,7 @@ function fmtDateRu(row: Workout) {
   const yearStr = year === now.getFullYear() ? String(year).slice(2) : String(year);
   return `${day} ${mon} ${yearStr}`;
 }
-function humanSport(s?: string | null) {
-  const k = (s || "").toLowerCase();
-  const map: Record<string, string> = {
-    run: "Бег", ride: "Вело", swim: "Плавание", walk: "Ходьба", hike: "Хайк", row: "Гребля",
-    strength: "Силовая", yoga: "Йога", aerobics: "Аэробика", crossfit: "Кроссфит", pilates: "Пилатес", other: "Другая",
-  };
-  return map[k] || "Другая";
-}
+// humanSport и цвета вынесены в components/ui/sport-theme.ts
 function fmtKm(distance_m?: number | null) {
   if (distance_m == null) return "—";
   const km = distance_m / 1000;
@@ -107,31 +104,23 @@ function fmtDurationMinSec(duration_sec?: number | null) {
   const m = totalMin % 60;
   return h > 0 ? `${h} ч ${m} мин` : `${m} мин`;
 }
-function iconColor(s?: string | null) {
-  const k = (s || "").toLowerCase();
-  if (k === "run") return "#DF6133";
-  if (k === "ride") return "#FFBA53";
-  if (k === "swim") return "#4FA3FF";
-  if (k === "walk") return "#16A34A";
-  if (k === "hike") return "#0E7490";
-  if (k === "row") return "#2563EB";
-  if (k === "strength") return "#6B7280";
-  if (k === "yoga") return "#10B981";
-  if (k === "aerobics") return "#F59E0B";
-  if (k === "crossfit") return "#9333EA";
-  if (k === "pilates") return "#22D3EE";
-  return "#B7B9AE";
-}
 
-const LS_KEY_PAGE_SIZE = "capyrun.workouts.pageSize.v2";
-const PAGE_SIZES = [5, 10, 20, 50]; // финальный набор по ТЗ
+const PAGE_SIZES = [5, 10, 20, 50];
 
 export default function WorkoutsTable({
   initialRows = [],
   setTotalCount,
+  showEmptyState = true,
+  initialPageSize = 10,
+  disableAutoFetch = false,    // 🔒 не фетчить на клиенте
+  userId,                      // 🔒 чей список показываем
 }: {
   initialRows?: Workout[];
   setTotalCount?: (n: number) => void;
+  showEmptyState?: boolean;
+  initialPageSize?: number;
+  disableAutoFetch?: boolean;
+  userId?: string;            // обязателен, если disableAutoFetch=false
 } = {}) {
   const router = useRouter();
 
@@ -147,9 +136,16 @@ export default function WorkoutsTable({
     return uniq;
   }, [rows]);
 
-  // ── fetch on mount (only if no initialRows)
+  // ── fetch on mount (можно полностью заглушить; если включён — жёстко фильтруем по userId)
   React.useEffect(() => {
+    if (disableAutoFetch) return;
     if (initialRows.length > 0) return;
+    if (!userId) {
+      // без userId на клиенте не имеем права тянуть что-либо (избегаем public-чужих)
+      setRows([]);
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -166,7 +162,9 @@ export default function WorkoutsTable({
           throw error;
         }
 
-        const arr = (Array.isArray(data?.workouts) ? data?.workouts : []) as Workout[];
+        // страховка: фильтруем по owner
+        const arr0 = (Array.isArray(data?.workouts) ? data?.workouts : []) as Workout[];
+        const arr = arr0.filter((r: any) => r.user_id === userId);
         if (!cancelled) {
           setRows(arr);
           setTotalCount?.(arr.length);
@@ -176,15 +174,17 @@ export default function WorkoutsTable({
           const { data: rows2, error: err2 } = await supabase
             .from("workouts")
             .select(
-              "id,start_time,local_date,uploaded_at,sport,sub_sport,duration_sec,distance_m,avg_hr,calories_kcal,name,visibility,weekday_iso"
+              "id,start_time,local_date,uploaded_at,sport,sub_sport,duration_sec,distance_m,avg_hr,calories_kcal,name,visibility,weekday_iso,user_id"
             )
+            .eq("user_id", userId)  // ← ТОЛЬКО свои
             .order("start_time", { ascending: false })
             .limit(200);
 
           if (err2) throw err2;
           if (!cancelled) {
-            setRows((rows2 ?? []) as Workout[]);
-            setTotalCount?.((rows2 ?? []).length);
+            const arr = (rows2 ?? []) as Workout[];
+            setRows(arr);
+            setTotalCount?.(arr.length);
           }
         } catch (e: any) {
           if (!cancelled) setError(e?.message || "Не удалось загрузить тренировки");
@@ -194,42 +194,24 @@ export default function WorkoutsTable({
       }
     })();
     return () => { cancelled = true; };
-  }, [setTotalCount, initialRows.length]);
+  }, [setTotalCount, initialRows.length, disableAutoFetch, userId]);
 
   // ── table state (tanstack)
   const [sorting, setSorting] = React.useState<SortingState>([{ id: "start_time", desc: true }]);
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
-  // фильтр по виду спорта
+  // простой фильтр по виду спорта
   const [sportFilter, setSportFilter] = React.useState<string>("all");
-  // Фиксированные стартовые 5 — так SSR == 1-й клиентский рендер (без гидрации)
-  const [pageSize, setPageSize] = React.useState<number>(5);
+  // поиск по названию
+  const [searchQuery, setSearchQuery] = React.useState<string>("");
+  // ВАЖНО: фиксированный стартовый размер (без чтения localStorage) — чтобы SSR == 1-й клиентский рендер
+  const [pageSize, setPageSize] = React.useState<number>(initialPageSize);
   // явное состояние пагинации
   const [pagination, setPagination] = React.useState<PaginationState>({
     pageIndex: 0,
-    pageSize,
+    pageSize: initialPageSize,
   });
   // синхронизация pageSize в state таблицы
   React.useEffect(() => { setPagination((p) => ({ ...p, pageSize })); }, [pageSize]);
-
-  // после монтирования применяем сохранённый размер из localStorage (без гидрации)
-  React.useEffect(() => {
-    try {
-      const raw = typeof window !== "undefined" ? localStorage.getItem(LS_KEY_PAGE_SIZE) : null;
-      const saved = raw ? parseInt(raw, 10) : NaN;
-      if (PAGE_SIZES.includes(saved) && saved !== pageSize) {
-        setPageSize(saved);
-        setPagination({ pageIndex: 0, pageSize: saved });
-      }
-    } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // сохраняем выбор пользователя
-  React.useEffect(() => {
-    try {
-      if (typeof window !== "undefined") localStorage.setItem(LS_KEY_PAGE_SIZE, String(pageSize));
-    } catch {}
-  }, [pageSize]);
 
   // колбэк для удаления строки (используется в RowActions)
   const handleDeleted = React.useCallback((id: string) => {
@@ -263,12 +245,7 @@ export default function WorkoutsTable({
     {
       accessorKey: "sport",
       header: ({ column }) => <SortHeader column={column} label="Тип" />,
-      cell: ({ row }) => (
-        <div className="flex items-center gap-2">
-          <span className="inline-flex h-2.5 w-2.5 rounded-full" style={{ background: iconColor(row.original.sport) }} />
-          <span className="font-medium">{humanSport(row.original.sport)}</span>
-        </div>
-      ),
+      cell: ({ row }) => <SportPill sport={row.original.sport} />,
       sortingFn: "alphanumeric",
     },
     {
@@ -310,12 +287,32 @@ export default function WorkoutsTable({
     },
   ], [router, handleDeleted]);
 
-  // данные для таблицы с учётом фильтра вида спорта
+  // данные для таблицы с учётом всех фильтров: поиск, вид спорта
   const dataForTable = React.useMemo(() => {
-    if (sportFilter === "all" || !sportFilter) return rows;
-    return rows.filter((r) => (r.sport || "").toLowerCase() === sportFilter.toLowerCase());
-  }, [rows, sportFilter]);
+    let arr = rows;
+    // 1) Поиск по названию
+    const q = searchQuery.trim().toLowerCase();
+    if (q) {
+      arr = arr.filter((r) => (r.name || "").toLowerCase().includes(q));
+    }
+    // 2) Вид спорта
+    if (!(sportFilter === "all" || !sportFilter)) {
+      const sf = sportFilter.toLowerCase();
+      arr = arr.filter((r) => (r.sport || "").toLowerCase() === sf);
+    }
+    return arr;
+  }, [rows, searchQuery, sportFilter]);
   const filteredCount = dataForTable.length;
+
+  // При изменении любого фильтра — на первую страницу
+  React.useEffect(() => {
+    setPagination((p) => ({ ...p, pageIndex: 0 }));
+  }, [searchQuery, sportFilter]);
+
+  // небольшая телеметрия (можно удалить после проверки)
+  React.useEffect(() => {
+    console.debug("WT counts → rows:", rows.length, "filtered:", dataForTable.length, "pageIndex:", pagination.pageIndex);
+  }, [rows, dataForTable.length, pagination.pageIndex]);
 
   const table = useReactTable({
     data: dataForTable,
@@ -353,17 +350,19 @@ export default function WorkoutsTable({
     return pages;
   }
 
+  // SSR/CSR пустое состояние (используется только если showEmptyState === true)
+  if (!loading && rows.length === 0 && showEmptyState) {
+    return (
+      <section className="card">
+        <div className="p-6 text-sm text-[var(--text-secondary)]">Пока нет тренировок. Добавь первую.</div>
+      </section>
+    );
+  }
+
   if (loading) {
     return (
       <section className="card">
         <div className="p-6 text-sm text-[var(--text-secondary)]">Загружаем…</div>
-      </section>
-    );
-  }
-  if (!loading && rows.length === 0) {
-    return (
-      <section className="card">
-        <div className="p-6 text-sm text-[var(--text-secondary)]">Пока нет тренировок. Добавь первую.</div>
       </section>
     );
   }
@@ -373,20 +372,28 @@ export default function WorkoutsTable({
       <section className="card overflow-visible">
         {/* header controls */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
-          {/* Левый верхний угол: счётчик тренировок (учитывает фильтр) */}
+          {/* Левый край: счётчик */}
           <div className="text-sm text-[var(--text-secondary)]">Тренировок: {filteredCount}</div>
 
-          {/* Правый верхний угол: Вид спорта (слева) + На странице (справа) */}
-          <div className="flex items-center gap-3">
-            {/* Вид спорта */}
+          {/* Правый край: Поиск → Вид спорта → На странице */}
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Поиск */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm">Поиск</span>
+              <input
+                type="text"
+                className="input h-9 w-64"
+                placeholder="Поиск по названию…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+            {/* Вид спорта (shadcn Select) */}
             <div className="flex items-center gap-2">
               <span className="text-sm">Вид спорта</span>
               <Select
                 value={sportFilter}
-                onValueChange={(v) => {
-                  setPagination((p) => ({ ...p, pageIndex: 0 }));
-                  setSportFilter(v);
-                }}
+                onValueChange={(v) => setSportFilter(v)}
               >
                 <SelectTrigger className="h-9 w-44">
                   <SelectValue placeholder="Все" />
@@ -401,8 +408,7 @@ export default function WorkoutsTable({
                 </SelectContent>
               </Select>
             </div>
-
-            {/* На странице */}
+            {/* На странице (shadcn Select) */}
             <div className="flex items-center gap-2">
               <span className="text-sm">На странице</span>
               <Select
@@ -411,9 +417,13 @@ export default function WorkoutsTable({
                   const n = parseInt(v, 10);
                   setPageSize(n);
                   setPagination({ pageIndex: 0, pageSize: n });
+                  try {
+                    // 1 год
+                    document.cookie = `wt_page_size=${n}; path=/; max-age=31536000; samesite=lax`;
+                  } catch {}
                 }}
               >
-                <SelectTrigger className="h-9 w-[80px]">
+                <SelectTrigger className="h-9 w-[90px]">
                   <SelectValue placeholder={pagination.pageSize} />
                 </SelectTrigger>
                 <SelectContent side="top">
@@ -460,7 +470,8 @@ export default function WorkoutsTable({
               {table.getRowModel().rows.length === 0 && dataForTable.length === 0 && (
                 <tr>
                   <td className="px-4 py-6 text-[var(--text-secondary)]" colSpan={columns.length}>
-                    Ничего не найдено{sportFilter !== "all" ? " для выбранного вида спорта" : ""}.
+                    Ничего не найдено
+                    {(searchQuery || (sportFilter !== "all" && sportFilter)) ? " по выбранным фильтрам" : ""}.
                   </td>
                 </tr>
               )}

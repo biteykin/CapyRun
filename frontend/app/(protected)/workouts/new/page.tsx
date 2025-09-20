@@ -3,6 +3,15 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseBrowser";
 
+// используем ВАШ рабочий shadcn select
+import {
+  Select,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+  SelectValue,
+} from "@/components/ui/select";
+
 type SubOpt = { value: string; label: string };
 
 const SUB_FALLBACKS: Record<string, string[]> = {
@@ -24,6 +33,10 @@ const SPORT_LABEL: Record<string,string> = {
   run:"Бег", ride:"Вело", swim:"Плавание", walk:"Ходьба", hike:"Хайк", row:"Гребля",
   strength:"Силовая", yoga:"Йога", aerobics:"Аэробика", crossfit:"Кроссфит", pilates:"Пилатес", other:"Другая",
 };
+
+// Radix запрещает пустую строку в value у SelectItem
+// используем служебный маркер и мапим его <-> "" в состоянии
+const NONE_VALUE = "__none__";
 
 function localInputToISO(v: string) {
   if (!v) return null;
@@ -235,10 +248,10 @@ export default function NewWorkoutPage() {
   }
 
   return (
-    <main className="max-w-2xl space-y-5">
+    <main className="w-full space-y-5">
       <h1 className="h-display text-2xl font-extrabold">Новая тренировка</h1>
 
-      <form onSubmit={save} className="card p-5 space-y-4">
+      <form onSubmit={save} className="card p-5 space-y-4 w-full">
         {/* Title */}
         <label className="block space-y-1">
           <span className="text-sm">Название</span>
@@ -246,26 +259,47 @@ export default function NewWorkoutPage() {
         </label>
 
         {/* Date and sport */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <label className="block space-y-1">
             <span className="text-sm">Дата и время начала</span>
             <input className="input" type="datetime-local" value={date} onChange={e=>setDate(e.target.value)} required />
           </label>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <label className="block space-y-1">
               <span className="text-sm">Вид спорта</span>
-              <select className="input" value={sport} onChange={(e)=>setSport(e.target.value)}>
-                {Object.keys(SPORT_LABEL).map(k => <option key={k} value={k}>{SPORT_LABEL[k]}</option>)}
-              </select>
+              {/* стиль как в фильтре: h-9 w-44 + side="top" */}
+              <Select value={sport} onValueChange={(v)=>setSport(v)}>
+                <SelectTrigger className="h-9 w-44" aria-label="Вид спорта">
+                  <SelectValue placeholder="Выберите вид спорта" />
+                </SelectTrigger>
+                <SelectContent side="top">
+                  {Object.keys(SPORT_LABEL).map((k) => (
+                    <SelectItem key={k} value={k}>
+                      {SPORT_LABEL[k]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </label>
 
             <label className="block space-y-1">
               <span className="text-sm">Подтип</span>
-              <select className="input" value={subSport} onChange={(e)=>setSubSport(e.target.value)}>
-                <option value="">— Не указан —</option>
-                {subOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
+              {/* стиль как в фильтре: h-9 w-44 + side="top" + безопасный NONE_VALUE */}
+              <Select
+                value={subSport === "" ? NONE_VALUE : subSport}
+                onValueChange={(v)=>setSubSport(v === NONE_VALUE ? "" : v)}
+              >
+                <SelectTrigger className="h-9 w-44" aria-label="Подтип">
+                  <SelectValue placeholder="— Не указан —" />
+                </SelectTrigger>
+                <SelectContent side="top">
+                  <SelectItem value={NONE_VALUE}>— Не указан —</SelectItem>
+                  {subOptions.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               {subsLoading && <div className="text-xs text-[var(--text-secondary)]">Загружаем подтипы…</div>}
             </label>
           </div>

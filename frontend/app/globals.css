@@ -1,255 +1,381 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
 @import "tailwindcss";
 
+/* ===== Scrollbar ===== */
 * { scrollbar-width: thin; }
 ::-webkit-scrollbar { height: 8px; width: 8px; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 999px; }
 
-/* Принудительно устанавливаем правильную ширину collapsed сайдбара */
-[data-collapsible="icon"] {
-  width: 3.5rem !important;
-}
-
-/* Центрируем иконки в collapsed режиме */
-[data-collapsible="icon"] [data-sidebar="menu-button"] {
-  width: 2rem;
-  height: 2rem;
-  padding: 0;
-  justify-content: center;
-}
-
-/* Цветовые токены (светлая/тёмная темы) */
+/* ===== Sidebar layout helpers ===== */
+/* Default collapsed sidebar width token (used in .app-inset padding) */
 :root {
-    --brand: 212 100% 50%;
-    --bg: 0 0% 100%;
-    --bg-subtle: 210 20% 98%;
-    --text: 220 15% 15%;
-    --text-muted: 220 8% 46%;
-    --card: oklch(1 0 0);
-    --card-border: 220 13% 91%;
-    --radius: 0.625rem;
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-    --card-foreground: oklch(0.145 0 0);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-    --chart-1: oklch(0.646 0.222 41.116);
-    --chart-2: oklch(0.6 0.118 184.704);
-    --chart-3: oklch(0.398 0.07 227.392);
-    --chart-4: oklch(0.828 0.189 84.429);
-    --chart-5: oklch(0.769 0.188 70.08);
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
-  }
-  .dark {
-    --brand: 201 100% 50%;
-    --bg: 224 19% 12%;
-    --bg-subtle: 224 19% 9%;
-    --text: 0 0% 98%;
-    --text-muted: 230 5% 65%;
-    --card: oklch(0.205 0 0);
-    --card-border: 220 8% 22%;
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.488 0.243 264.376);
-    --chart-2: oklch(0.696 0.17 162.48);
-    --chart-3: oklch(0.769 0.188 70.08);
-    --chart-4: oklch(0.627 0.265 303.9);
-    --chart-5: oklch(0.645 0.246 16.439);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
-  }
+  --sidebar-width-icon: 3.5rem;
 
-  html, body, :root { height: 100%; }
-  body { background: hsl(var(--bg)); color: hsl(var(--text)); }
+  /* Brand & legacy tokens */
+  --brand: 212 100% 50%;
+  --bg: 0 0% 100%;
+  --bg-subtle: 210 20% 98%;
+  --text: 220 15% 15%;
+  --text-muted: 220 8% 46%;
 
-  /* Базовые компоненты */
-  .btn {
-    @apply inline-flex items-center gap-2 rounded-2xl px-4 py-2 text-sm font-medium transition focus:outline-none;
-  }
-  .btn-primary { background: hsl(var(--brand)); color: white; }
-  .btn-outline { @apply border; border-color: hsl(var(--card-border)); }
-  .btn-ghost { @apply hover:bg-gray-50/60 dark:hover:bg-white/5; }
+  /* Shadcn-compatible palette */
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
 
-  .card { @apply rounded-2xl border shadow; border-color: hsl(var(--card-border)); background: hsl(var(--card)); }
-  .card-body { @apply p-5; }
+  /* Charts */
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
 
-  .input {
-    @apply w-full rounded-xl border px-3 py-2 text-sm focus:outline-none;
-    border-color: hsl(var(--card-border));
-    background: hsl(0 0% 100% / 1);
-  }  
+  /* Sidebar palette */
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
 
+  /* Radii */
+  --radius: 0.625rem;
+
+  /* CTA tokens */
+  --cta-from: #FFE08A;
+  --cta-to:   #FFB200;
+  --cta-text: 0 0% 10%;
+
+  /* ===== Custom UI tokens ===== */
+
+  /* кнопка с жёлтой обводкой */
+  --btn-light-bg: 0 0% 99%;             /* почти белая заливка */
+  --btn-light-border: 43 100% 50%;       /* жёлтая обводка (#DC9300) */
+  --btn-light-hover-bg: 45 100% 94%;     /* светло‑жёлтая при наведении */
+  --btn-light-text: 0 0% 8%;             /* почти чёрный */
+
+  /* яркая CTA‑кнопка (желтая) */
+  --btn-yellow-from: #FFE08A;  /* градиент от */
+  --btn-yellow-to:   #FFB200;  /* градиент до */
+  --btn-yellow-border: 43 100% 50%; /* обводка */
+
+  /* кнопка с иконкой */
+  --btn-icon-bg: 0 0% 100%;
+  --btn-icon-border: 220 13% 91%;        /* #D0D1C9 */
+  --btn-icon-hover-bg: 210 20% 97%;
+
+  /* кнопка удаления */
+  --btn-delete-bg: 13 90% 50%;           /* rgb(239,55,7) → hsl(13, 90%, 50%) */
+  --btn-delete-hover-bg: 13 90% 70%;     /* rgb(243,146,116) → hsl(13, 90%, 70%) */
+  --btn-delete-text: 0 0% 100%;
+
+  /* таблицы */
+  --table-header-bg: 0 0% 96%;           /* #F5F5F5 */
+  --table-row-bg: 0 0% 100%;
+  --table-row-alt-bg: 0 0% 98%;
+  --table-row-hover-bg: 210 20% 97%;
+
+  /* селекты */
+  --select-bg: 0 0% 100%;
+  --select-border: 220 13% 91%;
+  --select-hover-bg: 210 20% 97%;
+  --select-item-hover-bg: 210 20% 95%;
+  --select-item-selected-bg: 50 100% 95%; /* бледно‑жёлтый */
+
+  /* инпуты */
+  --input-bg: 0 0% 100%;
+  --input-border: 220 13% 91%;
+  --input-placeholder: 220 8% 46%;       /* #6C6D76 */
+}
+
+.dark {
+  --brand: 201 100% 50%;
+  --bg: 224 19% 12%;
+  --bg-subtle: 224 19% 9%;
+  --text: 0 0% 98%;
+  --text-muted: 230 5% 65%;
+
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.439 0 0);
+
+  --cta-from: #FFCC66;
+  --cta-to:   #FF9F1A;
+  --cta-text: 0 0% 10%;
+
+  /* ===== Custom UI tokens (dark theme) ===== */
+
+  /* кнопка с жёлтой обводкой */
+  --btn-light-bg: 220 13% 16%;             /* тёмно-серый */
+  --btn-light-border: 43 100% 50%;         /* жёлтая обводка (#DC9300) */
+  --btn-light-hover-bg: 45 100% 24%;       /* чуть светлее при наведении */
+  --btn-light-text: 0 0% 98%;              /* почти белый */
+
+  /* яркая CTA‑кнопка (желтая) */
+  --btn-yellow-from: #FFCC66;  /* градиент от */
+  --btn-yellow-to:   #FF9F1A;  /* градиент до */
+  --btn-yellow-border: 43 100% 50%; /* обводка */
+
+  /* кнопка с иконкой */
+  --btn-icon-bg: 224 19% 18%;               /* чуть светлее фон */
+  --btn-icon-border: 220 13% 26%;           /* тёмно-серый */
+  --btn-icon-hover-bg: 220 13% 22%;
+
+  /* кнопка удаления */
+  --btn-delete-bg: 13 90% 45%;              /* чуть темнее красный */
+  --btn-delete-hover-bg: 13 90% 55%;        /* чуть светлее при наведении */
+  --btn-delete-text: 0 0% 100%;
+
+  /* таблицы */
+  --table-header-bg: 220 13% 16%;           /* тёмно-серый */
+  --table-row-bg: 224 19% 12%;              /* основной фон */
+  --table-row-alt-bg: 224 19% 14%;          /* чуть светлее */
+  --table-row-hover-bg: 220 13% 18%;
+
+  /* селекты */
+  --select-bg: 224 19% 12%;
+  --select-border: 220 13% 26%;
+  --select-hover-bg: 220 13% 18%;
+  --select-item-hover-bg: 220 13% 22%;
+  --select-item-selected-bg: 50 100% 24%;   /* бледно‑жёлтый, но тёмный */
+
+  /* инпуты */
+  --input-bg: 224 19% 12%;
+  --input-border: 220 13% 26%;
+  --input-placeholder: 220 8% 46%;          /* #6C6D76 */
+}
+
+/* ===== External assets ===== */
 @import "../styles/posthog-fonts.css";
 @import "../styles/posthog-tokens.css";
 @import "tw-animate-css";
 
+/* ===== Tailwind v4 helpers ===== */
 @custom-variant dark (&:is(.dark *));
 
-@layer components {
-  /* Базовая кнопка в стиле PostHog */
-  .ph-btn {
-    @apply inline-flex items-center gap-2 font-semibold leading-none
-           px-3 py-2 rounded-md border border-black/10
-           transition-all select-none;
-  }
+/* Map tokens to Tailwind utilities */
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 
-  /* Жёлтая вариация (brand yellow #f9bd2b) с нижней тенью */
-  .ph-btn--yellow {
-    background: #f9bd2b;              /* PostHog yellow */
-    color: #111;
-    box-shadow: 0 2px 0 0 rgba(0,0,0,0.25); /* «подкладка» снизу */
-  }
-  .ph-btn--yellow:hover {
-    filter: brightness(0.98);
-    transform: translateY(-0.5px);
-  }
-  .ph-btn--yellow:active {
-    transform: translateY(1px);
-    box-shadow: 0 1px 0 0 rgba(0,0,0,0.30);
-  }
-
-  /* Иконка-стрелка в триггере */
-  .ph-btn__chev {
-    @apply -mr-1 opacity-70;
-  }
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
 }
 
-@theme inline { --radius-sm: calc(var(--radius) - 4px); --radius-md: calc(var(--radius) - 2px); --radius-lg: var(--radius); --radius-xl: calc(var(--radius) + 4px); --color-background: var(--background); --color-foreground: var(--foreground); --color-card: var(--card); --color-card-foreground: var(--card-foreground); --color-popover: var(--popover); --color-popover-foreground: var(--popover-foreground); --color-primary: var(--primary); --color-primary-foreground: var(--primary-foreground); --color-secondary: var(--secondary); --color-secondary-foreground: var(--secondary-foreground); --color-muted: var(--muted); --color-muted-foreground: var(--muted-foreground); --color-accent: var(--accent); --color-accent-foreground: var(--accent-foreground); --color-destructive: var(--destructive); --color-border: var(--border); --color-input: var(--input); --color-ring: var(--ring); --color-chart-1: var(--chart-1); --color-chart-2: var(--chart-2); --color-chart-3: var(--chart-3); --color-chart-4: var(--chart-4); --color-chart-5: var(--chart-5); --color-sidebar: var(--sidebar); --color-sidebar-foreground: var(--sidebar-foreground); --color-sidebar-primary: var(--sidebar-primary); --color-sidebar-primary-foreground: var(--sidebar-primary-foreground); --color-sidebar-accent: var(--sidebar-accent); --color-sidebar-accent-foreground: var(--sidebar-accent-foreground); --color-sidebar-border: var(--sidebar-border); --color-sidebar-ring: var(--sidebar-ring); }
-
+/* ===== Base layer ===== */
 @layer base {
-  * {
-    @apply border-border outline-ring/50; }
-  body {
-    @apply bg-background text-foreground; } 
+  html, body, :root { height: 100%; }
 
-  :root {
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
-  }
-  .dark {
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.439 0 0);
-  }
+  /* Global defaults: border & outline colors from tokens */
+  * { @apply border-border outline-ring/50; }
+
+  body { @apply bg-background text-foreground; }
 }
 
-/* Убираем спейсер у shadcn sidebar на десктопе */
+/* ===== Layout: shadcn sidebar tweaks ===== */
+/* Remove spacer next to sidebar on desktop */
 @media (min-width: 768px) {
-  [data-sidebar="sidebar"] ~ div:first-of-type {
-    display: none !important;
-  }
+  [data-sidebar="sidebar"] ~ div:first-of-type { display: none !important; }
 }
+/* When sidebar is collapsed, shift content by icon width */
+[data-collapsible-state="collapsed"] .app-inset { padding-left: var(--sidebar-width-icon); }
+/* On mobile, disable left inset shift */
+@media (max-width: 1024px) { .app-inset { padding-left: 0; } }
 
-[data-collapsible-state="collapsed"] .app-inset {
-  padding-left: var(--sidebar-width-icon);
-}
-
-/* мобильный off-canvas: сдвиг отключаем */
-@media (max-width: 1024px) {
-  .app-inset { 
-    padding-left: 0; 
-  }
-}
-
+/* ===== Components layer ===== */
 @layer components {
-  .app-tooltip {
-    @apply z-50 rounded-md border border-border bg-popover text-popover-foreground shadow-md
-           px-2 py-1 text-xs leading-snug max-w-64;
-  }
-  .app-tooltip[data-state="delayed-open"] {
-    transition: transform 120ms ease, opacity 120ms ease;
-    opacity: 1; transform: translateY(0) scale(1);
-  }
-  .app-tooltip[data-state="closed"] {
-    opacity: 0; transform: translateY(2px) scale(0.98);
-  }
-}
-
-/* === CTA tokens and button styles === */
-@layer base {
-  :root {
-    /* брендовые токены CTA — поправишь один раз и везде поменяется */
-    --cta-from: #FFE08A;  /* мягкий жёлтый */
-    --cta-to:   #FFB200;  /* насыщенный жёлтый/оранжевый */
-    --cta-text: 0 0% 10%; /* HSL для текста на жёлтом фоне */
-  }
-  .dark {
-    --cta-from: #FFCC66;
-    --cta-to:   #FF9F1A;
-    --cta-text: 0 0% 10%;
-  }
-}
-
-@layer components {
-  /* базовая кнопка (если уже есть своя .btn — не дублируй) */
+  /* Базовая кнопка */
   .btn {
-    @apply inline-flex items-center justify-center rounded-md border px-3 py-2 text-sm font-medium
-           transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
-           disabled:pointer-events-none disabled:opacity-50;
+    @apply inline-flex items-center justify-center font-medium transition-colors;
+    @apply text-sm px-4 py-2 rounded-[var(--radius)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:pointer-events-none;
   }
-  .btn-ghost { @apply border-transparent hover:bg-muted; }
 
-  /* CTA — жёлтая как на лендинге */
-  .btn-cta {
-    background: linear-gradient(135deg, var(--cta-from), var(--cta-to));
-    color: hsl(var(--cta-text));
-    @apply border-transparent shadow;
+  /* Светлая кнопка (Install with AI) */
+  .btn-light {
+    background: hsl(var(--btn-light-bg));
+    color: hsl(var(--btn-light-text));
+    border: 1px solid hsl(var(--btn-light-border));
   }
-  .btn-cta:hover {
+  .btn-light:hover {
+    background: hsl(var(--btn-light-hover-bg));
+  }
+
+  /* Яркая жёлтая CTA (Get started – free) */
+  .btn-yellow {
+    background: linear-gradient(135deg, var(--btn-yellow-from), var(--btn-yellow-to));
+    color: hsl(var(--cta-text));
+    border: 1px solid hsl(var(--btn-yellow-border));
+  }
+  .btn-yellow:hover {
     filter: brightness(0.97);
+  }
+
+  /* Кнопка с иконкой слева (Shuffle companies) */
+  .btn-icon {
+    background: hsl(var(--btn-icon-bg));
+    color: hsl(var(--text));
+    border: 1px solid hsl(var(--btn-icon-border));
+    @apply inline-flex items-center gap-2 px-4 py-2;
+  }
+  .btn-icon:hover {
+    background: hsl(var(--btn-icon-hover-bg));
+  }
+
+  /* Кнопка удаления */
+  .btn-delete {
+    background: hsl(var(--btn-delete-bg));
+    color: hsl(var(--btn-delete-text));
+    border: 1px solid hsl(var(--btn-delete-bg));
+  }
+  .btn-delete:hover {
+    background: hsl(var(--btn-delete-hover-bg));
+    border-color: hsl(var(--btn-delete-hover-bg));
+  }
+
+  /* Таблица */
+  .table {
+    width: 100%;
+    border: 1px solid hsl(var(--table-border, var(--border)));
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .table thead {
+    background: hsl(var(--table-header-bg));
+  }
+  .table th {
+    @apply text-left font-medium px-4 py-3 border-b;
+    border-color: hsl(var(--table-border, var(--border)));
+  }
+  .table tbody tr:nth-child(even) { background: hsl(var(--table-row-alt-bg)); }
+  .table tbody tr:nth-child(odd) { background: hsl(var(--table-row-bg)); }
+  .table tbody tr:hover { background: hsl(var(--table-row-hover-bg)); }
+  .table td {
+    @apply px-4 py-3 border-b;
+    border-color: hsl(var(--table-border, var(--border)));
+  }
+
+  /* Селект */
+  .select-trigger {
+    @apply flex items-center justify-between w-full text-sm px-3 py-2 border rounded-[var(--radius)];
+    background: hsl(var(--select-bg));
+    border-color: hsl(var(--select-border));
+  }
+  .select-trigger:hover { background: hsl(var(--select-hover-bg)); }
+  .select-trigger:focus-visible {
+    outline: none;
+    border-color: hsl(var(--primary));
+    box-shadow: 0 0 0 2px hsl(var(--ring));
+  }
+  .select-content {
+    margin-top: 0.25rem;
+    background: hsl(var(--select-bg));
+    border: 1px solid hsl(var(--select-border));
+    border-radius: var(--radius);
+    @apply shadow-md;
+  }
+  .select-item {
+    @apply px-3 py-2 cursor-pointer text-sm;
+  }
+  .select-item:hover {
+    background: hsl(var(--select-item-hover-bg));
+  }
+  .select-item[data-state="checked"] {
+    background: hsl(var(--select-item-selected-bg));
+  }
+
+  /* Инпут */
+  .input {
+    @apply w-full px-3 py-2 text-sm border rounded-[var(--radius)];
+    background: hsl(var(--input-bg));
+    border-color: hsl(var(--input-border));
+    color: hsl(var(--text));
+  }
+  .input::placeholder {
+    color: hsl(var(--input-placeholder));
+  }
+  .input:hover {
+    border-color: hsl(var(--select-border));
+  }
+  .input:focus-visible {
+    outline: none;
+    border-color: hsl(var(--primary));
+    box-shadow: 0 0 0 2px hsl(var(--ring));
   }
 }

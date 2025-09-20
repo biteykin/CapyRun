@@ -1,11 +1,16 @@
 import "./globals.css";
-import PHProvider from "./providers"; // default импорт
+import PHProvider from "./providers";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
   return (
-    <html lang="ру" suppressHydrationWarning>
-      <body className="min-h-[100svh]">
+    <html lang="en">
+      <body>
         <TooltipProvider delayDuration={250} skipDelayDuration={150}>
           <PHProvider>
             {children}

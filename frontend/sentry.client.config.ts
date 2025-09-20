@@ -1,3 +1,4 @@
+// sentry.client.config.ts
 import * as Sentry from "@sentry/nextjs";
 
 const isProd = process.env.NODE_ENV === "production";
@@ -8,4 +9,6 @@ Sentry.init({
   tracesSampleRate: 1.0,
   replaysSessionSampleRate: isProd ? 0.1 : 0,
   replaysOnErrorSampleRate: isProd ? 1.0 : 0,
+  enableLogs: true,
+  debug: false,
 });
