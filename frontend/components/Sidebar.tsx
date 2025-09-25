@@ -20,6 +20,8 @@ import {
 } from "@/components/ui/sidebar";
 import { Home, Activity, Target, Calendar, User } from "lucide-react";
 
+import SidebarProfile from "./sidebar/SidebarProfile";
+
 type Item = {
   href: string;
   label: string;
@@ -34,10 +36,6 @@ const TOP: Item[] = [
   { href: "/coach",    label: "Coach",           icon: User },
 ];
 
-const BOTTOM: Item[] = [
-  { href: "/profile",  label: "Профиль",         icon: User },
-];
-
 function NavItem({
   item,
   active,
@@ -49,7 +47,6 @@ function NavItem({
 }) {
   const Icon = item.icon;
 
-  // В коллапсе оставляем только иконку по центру — без лишних отступов
   const btnClass = collapsed ? "justify-center px-2 w-8 h-8" : "gap-3";
 
   const Btn = (
@@ -89,10 +86,9 @@ export default function Sidebar() {
       side="left"
       variant="sidebar"
       collapsible="icon"
-      /* фиксируем сайдбар во вьюпорте, высота = высоте экрана */
       className="sticky top-0 h-svh"
     >
-      {/* Шапка сайдбара: логотип + CapyRun; клик всегда ведёт на /home */}
+      {/* Header */}
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
@@ -116,7 +112,7 @@ export default function Sidebar() {
         </SidebarMenu>
       </SidebarHeader>
 
-      {/* навигация получает свой скролл; хедер/футер остаются на месте */}
+      {/* Content */}
       <SidebarContent className="flex-1 overflow-y-auto">
         <SidebarGroup>
           <SidebarGroupLabel>Навигация</SidebarGroupLabel>
@@ -135,21 +131,12 @@ export default function Sidebar() {
         </SidebarGroup>
       </SidebarContent>
 
-      {/* футер всегда внизу */}
+      {/* Footer - профиль снизу */}
       <SidebarFooter className="mt-auto border-t">
-        <SidebarMenu>
-          {BOTTOM.map((it) => (
-            <NavItem
-              key={it.href}
-              item={it}
-              active={isActive(it.href)}
-              collapsed={collapsed}
-            />
-          ))}
-        </SidebarMenu>
+        <SidebarProfile />
       </SidebarFooter>
 
-      {/* Rail (область у края для hover/click) — стандарт shadcn */}
+      {/* Rail */}
       <SidebarRail />
     </UISidebar>
   );
