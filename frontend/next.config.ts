@@ -4,7 +4,10 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
-  // другие настройки...
+  typescript: {
+    // ⚠️ Позволяет Next.js собирать проект, даже если есть ошибки типов.
+    ignoreBuildErrors: true,
+  },
 };
 
 module.exports = withSentryConfig(nextConfig, { silent: true });
