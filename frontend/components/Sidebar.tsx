@@ -20,7 +20,8 @@ import {
 } from "@/components/ui/sidebar";
 import { Home, Activity, Target, Calendar, User } from "lucide-react";
 
-import SidebarProfile from "./sidebar/SidebarProfile";
+// скорректируй путь
+import SidebarProfile from "./sidebar/SidebarProfile"; 
 
 type Item = {
   href: string;
@@ -132,6 +133,7 @@ export default function Sidebar() {
       </SidebarContent>
 
       {/* Footer - профиль снизу */}
+      {/* в теге <SidebarFooter> */}
       <SidebarFooter className="mt-auto border-t">
         <SidebarProfile />
       </SidebarFooter>
