@@ -5,11 +5,6 @@ import { supabase } from "@/lib/supabaseBrowser";
 import { Eye, EyeOff } from "lucide-react";
 import posthog from "posthog-js";
 
-console.log("SUPABASE ENV", {
-  url: process.env.NEXT_PUBLIC_SUPABASE_URL,
-  keyStartsWith: (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "").slice(0,3)
-});
-
 type Mode = "login" | "signup";
 
 export default function LoginPage() {
@@ -24,23 +19,17 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Уже залогинен? На /home
   useEffect(() => {
+    // Если уже есть сессия — редирект
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) router.replace("/home");
+      if (data?.session) router.replace("/home");
     });
   }, [router]);
 
-  // синхронизируем локальное состояние с ?mode= в URL
   useEffect(() => {
     const m = (qs.get("mode") as Mode) || "login";
     setMode(m);
   }, [qs]);
-
-  // 🔸 Трекинг просмотров страниц login/signup
-  useEffect(() => {
-    posthog.capture(mode === "signup" ? "signup_page_viewed" : "login_page_viewed");
-  }, [mode]);
 
   const title = useMemo(
     () => (mode === "login" ? "Войти в CapyRun" : "Создать аккаунт"),
@@ -51,23 +40,55 @@ export default function LoginPage() {
     e.preventDefault();
     setError(null);
     setLoading(true);
+
     try {
       if (mode === "login") {
-        // 🔸 нажатие "Войти"
         posthog.capture("login_submitted", { email_domain: email.split("@")[1] || null });
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-        posthog.capture("login_succeeded");
+        const { data, error: signErr } = await supabase.auth.signInWithPassword({ email, password });
+
+        console.log("signInWithPassword ->", { data, signErr });
+
+        if (signErr) throw signErr;
+
+        // Если сервер вернул session — редиректим сразу
+        if (data?.session) {
+          console.log("Session present after signInWithPassword:", data.session);
+          router.replace("/home");
+          return;
+        }
+
+        // Иногда cookie/сессия ставится асинхронно (magic link flow или redirect). Делаем короткий retry getSession
+        for (let i = 0; i < 3; i++) {
+          const { data: sessData } = await supabase.auth.getSession();
+          console.log("retry getSession", i, sessData);
+          if (sessData?.session) {
+            router.replace("/home");
+            return;
+          }
+          // небольшая пауза
+          await new Promise((res) => setTimeout(res, 300));
+        }
+
+        // если всё ещё нет сессии — показываем уведомление пользователю
+        setError("Вход не завершён: сессия не найдена. Проверьте почту или повторите попытку.");
       } else {
-        // 🔸 нажатие "Зарегистрироваться"
         posthog.capture("signup_submitted", { email_domain: email.split("@")[1] || null });
-        const { error } = await supabase.auth.signUp({ email, password });
-        if (error) throw error;
-        // если сессия не выдаётся сразу (email confirm включён) — всё равно считаем отправку формы
-        posthog.capture("signup_succeeded");
+        const { data, error: signErr } = await supabase.auth.signUp({ email, password });
+        console.log("signUp ->", { data, signErr });
+
+        if (signErr) throw signErr;
+
+        // После signUp поведение может быть разным (подтверждение по email). Попробуем взять сессию
+        const { data: sessData } = await supabase.auth.getSession();
+        if (sessData?.session) {
+          router.replace("/home");
+          return;
+        }
+
+        setError("Аккаунт создан. Если требуется подтверждение — проверьте почту.");
       }
-      router.replace("/home");
     } catch (err: any) {
+      console.error("Auth error:", err);
       setError(err?.message ?? "Ошибка авторизации");
       posthog.capture("auth_error", { mode, message: String(err?.message || "") });
     } finally {
