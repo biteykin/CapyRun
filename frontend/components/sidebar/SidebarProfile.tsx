@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { supabase } from "@/lib/supabaseBrowser"; // <-- импортируем из supabaseBrowser.ts
+import { supabase } from "@/lib/supabaseBrowser";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,

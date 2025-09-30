@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { supabase } from "@/lib/supabaseBrowser";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -17,7 +17,6 @@ type Props = {
 };
 
 export default function SidebarProfileClient({ initialUser }: Props) {
-  const supabase = createClientComponentClient();
   const [user, setUser] = useState<any | null>(initialUser ?? null);
   const [profile, setProfile] = useState<any | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
