@@ -29,11 +29,11 @@ export async function updateSession(request: NextRequest) {
   // Перенаправление на правильный путь входа
   if (
     !user &&
-    !request.nextUrl.pathname.startsWith('/signin') &&
+    !request.nextUrl.pathname.startsWith('/login') &&
     !request.nextUrl.pathname.startsWith('/auth')
   ) {
     const url = request.nextUrl.clone()
-    url.pathname = '/signin'
+    url.pathname = '/login'
     return NextResponse.redirect(url)
   }
 

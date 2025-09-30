@@ -52,7 +52,7 @@ export default function SidebarProfile() {
       <SidebarMenuButton asChild className="w-full">
         <button
           className="w-full px-3 py-2 flex items-center gap-2 hover:bg-muted rounded-md"
-          onClick={() => (window.location.href = "/signin")}
+          onClick={() => (window.location.href = "/login")}
         >
           <Avatar className="h-8 w-8">
             <AvatarFallback>U</AvatarFallback>
@@ -111,7 +111,7 @@ export default function SidebarProfile() {
           onClick={async () => {
             await supabase.auth.signOut();
             setUser(null);
-            window.location.href = "/signin";
+            window.location.href = "/login";
           }}
         >
           Выйти
