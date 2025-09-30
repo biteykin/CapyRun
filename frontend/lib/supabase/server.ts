@@ -5,7 +5,7 @@ import { cookies } from 'next/headers'
  * If using Fluid compute: Don't put this client in a global variable. Always create a new client within each
  * function when using it.
  */
-export async function createClient() {
+export async function createClientWithCookies() {
   const cookieStore = await cookies()
 
   return createServerClient(
@@ -31,3 +31,9 @@ export async function createClient() {
     }
   )
 }
+
+export const createClient = () =>
+  createServerClient({
+    supabaseUrl: process.env.SUPABASE_URL!,
+    supabaseKey: process.env.service_role_key!, // или SUPABASE_ANON_KEY
+  });
