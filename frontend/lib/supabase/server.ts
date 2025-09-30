@@ -35,5 +35,5 @@ export async function createClientWithCookies() {
 export const createClient = () =>
   createServerClient({
     supabaseUrl: process.env.SUPABASE_URL!,
-    supabaseKey: process.env.service_role_key!, // или SUPABASE_ANON_KEY
+    supabaseKey: process.env.SUPABASE_SERVICE_ROLE_KEY!, // или SUPABASE_ANON_KEY
   });
