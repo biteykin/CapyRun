@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { supabase } from "@/lib/supabaseBrowser"; // <-- импортируем из supabaseBrowser.ts
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -13,18 +13,9 @@ import {
 import { SidebarMenuButton } from "@/components/ui/sidebar";
 import { useAppUser } from "@/app/providers";
 
-/**
- * Компонент профиля в сайдбаре.
- * - Берёт пользователя из контекста PHProvider (useAppUser)
- * - Загружает актуального пользователя через Supabase, если контекст пуст
- * - Подписывается на изменения сессии Supabase, чтобы обновлять контекст
- */
 export default function SidebarProfile() {
-  const supabase = createClientComponentClient();
   const { user, setUser } = useAppUser();
 
-  // При первом рендере получаем пользователя, если его нет в контексте
-  // и подписываемся на изменения auth-состояния
   useEffect(() => {
     let ignore = false;
 
@@ -54,9 +45,8 @@ export default function SidebarProfile() {
       ignore = true;
       subscription?.subscription.unsubscribe();
     };
-  }, [supabase, user, setUser]);
+  }, [user, setUser]);
 
-  // Неавторизованный пользователь — показываем кнопку "Войти"
   if (!user) {
     return (
       <SidebarMenuButton asChild className="w-full">
@@ -76,7 +66,6 @@ export default function SidebarProfile() {
     );
   }
 
-  // Авторизованный пользователь — отображаем аватар и меню
   const displayName =
     user.user_metadata?.full_name || user.email;
   const avatarUrl = user.user_metadata?.avatar_url || null;
@@ -120,7 +109,6 @@ export default function SidebarProfile() {
         </DropdownMenuItem>
         <DropdownMenuItem
           onClick={async () => {
-            // Выходим из аккаунта и обнуляем пользователя в контексте
             await supabase.auth.signOut();
             setUser(null);
             window.location.href = "/signin";
