@@ -64,7 +64,7 @@ export default function WorkoutUploadPage() {
           window.location.href = `/api/auth/upgrade?returnTo=${encodeURIComponent("/workouts/upload")}`;
           return;
         }
-        router.replace("/signin");
+        router.replace("/login");
         return;
       }
 

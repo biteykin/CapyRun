@@ -95,7 +95,7 @@ export default async function EditWorkoutPage({ params }: PageProps) {
         )}`
       );
     }
-    redirect("/signin");
+    redirect("/login");
   }
 
   const workoutId = params.id;

@@ -1,7 +1,7 @@
 'use client'
 
 import { cn } from '@/lib/utils'
-import { createClient } from '@/components/clients/nextjs/lib/supabase/client'
+import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -36,7 +36,7 @@ export function LoginForm({ className, ...props }: React.ComponentPropsWithoutRe
       })
       if (error) throw error
       // Update this route to redirect to an authenticated route. The user already has an active session.
-      router.push('/protected')
+      router.push('/home')
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : 'An error occurred')
     } finally {

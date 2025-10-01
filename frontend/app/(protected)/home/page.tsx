@@ -19,7 +19,7 @@ export default async function ProtectedHomePage() {
     if (legacy) {
       redirect(`/api/auth/upgrade?returnTo=${encodeURIComponent("/")}`);
     }
-    redirect("/signin"); // или твой путь логина
+    redirect("/login"); // или твой путь логина
   }
 
   return (
