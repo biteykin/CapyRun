@@ -1,9 +1,20 @@
 "use client";
+
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseBrowser";
 import { Eye, EyeOff } from "lucide-react";
 import posthog from "posthog-js";
+
+// shadcn-ui контейнеры (оформление полей/кнопок НЕ трогаем)
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+  CardFooter,
+} from "@/components/ui/card";
 
 type Mode = "login" | "signup";
 
@@ -43,42 +54,46 @@ export default function LoginPage() {
 
     try {
       if (mode === "login") {
-        posthog.capture("login_submitted", { email_domain: email.split("@")[1] || null });
-        const { data, error: signErr } = await supabase.auth.signInWithPassword({ email, password });
+        posthog.capture("login_submitted", {
+          email_domain: email.split("@")[1] || null,
+        });
 
-        console.log("signInWithPassword ->", { data, signErr });
+        const { data, error: signErr } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
 
         if (signErr) throw signErr;
 
         // Если сервер вернул session — редиректим сразу
         if (data?.session) {
-          console.log("Session present after signInWithPassword:", data.session);
           router.replace("/home");
           return;
         }
 
-        // Иногда cookie/сессия ставится асинхронно (magic link flow или redirect). Делаем короткий retry getSession
+        // Иногда кука ставится асинхронно — короткий retry
         for (let i = 0; i < 3; i++) {
           const { data: sessData } = await supabase.auth.getSession();
-          console.log("retry getSession", i, sessData);
           if (sessData?.session) {
             router.replace("/home");
             return;
           }
-          // небольшая пауза
           await new Promise((res) => setTimeout(res, 300));
         }
 
-        // если всё ещё нет сессии — показываем уведомление пользователю
-        setError("Вход не завершён: сессия не найдена. Проверьте почту или повторите попытку.");
+        setError(
+          "Вход не завершён: сессия не найдена. Проверьте почту или повторите попытку."
+        );
       } else {
-        posthog.capture("signup_submitted", { email_domain: email.split("@")[1] || null });
-        const { data, error: signErr } = await supabase.auth.signUp({ email, password });
-        console.log("signUp ->", { data, signErr });
-
+        posthog.capture("signup_submitted", {
+          email_domain: email.split("@")[1] || null,
+        });
+        const { data, error: signErr } = await supabase.auth.signUp({
+          email,
+          password,
+        });
         if (signErr) throw signErr;
 
-        // После signUp поведение может быть разным (подтверждение по email). Попробуем взять сессию
         const { data: sessData } = await supabase.auth.getSession();
         if (sessData?.session) {
           router.replace("/home");
@@ -88,7 +103,6 @@ export default function LoginPage() {
         setError("Аккаунт создан. Если требуется подтверждение — проверьте почту.");
       }
     } catch (err: any) {
-      console.error("Auth error:", err);
       setError(err?.message ?? "Ошибка авторизации");
       posthog.capture("auth_error", { mode, message: String(err?.message || "") });
     } finally {
@@ -98,62 +112,76 @@ export default function LoginPage() {
 
   return (
     <div className="mx-auto grid min-h-[70dvh] max-w-md place-items-center px-4">
-      <form onSubmit={onSubmit} className="card w-full">
-        <div className="card-body space-y-5">
-          <div className="text-center">
-            <h2 className="text-xl font-semibold">{title}</h2>
-            <p className="mt-1 text-sm text-[var(--text-secondary)]">
-              {mode === "login"
-                ? "Введи email и пароль, чтобы продолжить."
-                : "Укажи email и пароль — мы создадим аккаунт."}
-            </p>
-          </div>
+      <Card className="w-full">
+        <CardHeader className="text-center">
+          <CardTitle className="text-xl font-semibold">{title}</CardTitle>
+          <CardDescription className="mt-1 text-sm">
+            {mode === "login"
+              ? "Введи email и пароль, чтобы продолжить."
+              : "Укажи email и пароль — мы создадим аккаунт."}
+          </CardDescription>
+        </CardHeader>
 
-          <label className="space-y-2 block">
-            <span className="text-sm">Email</span>
-            <input
-              className="input"
-              type="email"
-              placeholder="yourname@email.com"
-              value={email}
-              onChange={(e)=>setEmail(e.target.value)}
-              required
-            />
-          </label>
-
-          <label className="space-y-2 block">
-            <span className="text-sm">Пароль</span>
-            <div className="relative">
+        <CardContent>
+          <form onSubmit={onSubmit} className="space-y-5">
+            <label className="space-y-2 block">
+              <span className="text-sm">Email</span>
+              {/* инпуты оставляем как есть */}
               <input
-                className="input pr-10"
-                type={showPass ? "text" : "password"}
-                placeholder="••••••••"
-                value={password}
-                onChange={(e)=>setPassword(e.target.value)}
+                className="input"
+                type="email"
+                placeholder="yourname@email.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 required
               />
-              <button
-                type="button"
-                onClick={()=>setShowPass((s)=>!s)}
-                aria-label={showPass ? "Скрыть пароль" : "Показать пароль"}
-                className="absolute inset-y-0 right-2 my-auto inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-[var(--color-bg-fill-tertiary)]"
-              >
-                {showPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
-            </div>
-          </label>
+            </label>
 
-          {error && (
-            <div className="alert alert-error" role="alert" aria-live="assertive">
-              <span className="alert-icon" aria-hidden="true">⚠️</span>
-              <div>{error}</div>
-            </div>
-          )}
+            <label className="space-y-2 block">
+              <span className="text-sm">Пароль</span>
+              <div className="relative">
+                {/* инпуты оставляем как есть */}
+                <input
+                  className="input pr-10"
+                  type={showPass ? "text" : "password"}
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPass((s) => !s)}
+                  aria-label={showPass ? "Скрыть пароль" : "Показать пароль"}
+                  className="absolute inset-y-0 right-2 my-auto inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-[var(--color-bg-fill-tertiary)]"
+                >
+                  {showPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </label>
 
-          <button className="btn btn-primary w-full" disabled={loading}>
-            {loading ? "Подождите…" : (mode === "login" ? "Войти" : "Зарегистрироваться")}
-          </button>
+            {error && (
+              // оставляем вашу текущую разметку алерта
+              <div className="alert alert-error" role="alert" aria-live="assertive">
+                <span className="alert-icon" aria-hidden="true">
+                  ⚠️
+                </span>
+                <div>{error}</div>
+              </div>
+            )}
 
+            {/* кнопка оставлена как есть */}
+            <button className="btn btn-primary w-full" disabled={loading}>
+              {loading
+                ? "Подождите…"
+                : mode === "login"
+                ? "Войти"
+                : "Зарегистрироваться"}
+            </button>
+          </form>
+        </CardContent>
+
+        <CardFooter className="justify-center">
           <div className="text-sm text-center text-[var(--text-secondary)]">
             {mode === "login" ? (
               <>
@@ -185,8 +213,8 @@ export default function LoginPage() {
               </>
             )}
           </div>
-        </div>
-      </form>
+        </CardFooter>
+      </Card>
     </div>
   );
 }
