@@ -1,7 +1,7 @@
 // frontend/components/sidebar/SidebarProfile.tsx
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseBrowser";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -11,42 +11,103 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { SidebarMenuButton } from "@/components/ui/sidebar";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useAppUser } from "@/app/providers";
+
+type ProfileRow = {
+  display_name?: string | null;
+  username?: string | null;
+  avatar_url?: string | null;
+};
 
 export default function SidebarProfile() {
   const { user, setUser } = useAppUser();
+  const [profile, setProfile] = useState<ProfileRow | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+
+  async function loadProfile(forUserId: string | null | undefined) {
+    if (!forUserId) {
+      setProfile(null);
+      return;
+    }
+    try {
+      const { data } = await supabase
+        .from("profiles")
+        .select("display_name, username, avatar_url")
+        .eq("user_id", forUserId)
+        .maybeSingle();
+      setProfile((data as ProfileRow) ?? null);
+    } catch {
+      setProfile(null);
+    }
+  }
 
   useEffect(() => {
-    let ignore = false;
+    let mounted = true;
 
-    async function loadUser() {
+    async function init() {
+      setLoading(true);
+
       if (!user) {
-        const {
-          data: { user: u },
-        } = await supabase.auth.getUser();
-        if (u && !ignore) {
+        const { data: uData } = await supabase.auth.getUser();
+        const u = uData?.user ?? null;
+        if (mounted) {
           setUser(u);
+          await loadProfile(u?.id ?? null);
         }
+      } else {
+        await loadProfile(user.id);
       }
-    }
-    loadUser();
 
-    const { data: subscription } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        if (session?.user) {
-          setUser(session.user);
-        } else {
-          setUser(null);
-        }
-      }
-    );
+      if (mounted) setLoading(false);
+    }
+
+    init();
+
+    const { data: sub } = supabase.auth.onAuthStateChange(async (_evt, session) => {
+      const u = session?.user || null;
+      setUser(u);
+      await loadProfile(u?.id ?? null);
+    });
 
     return () => {
-      ignore = true;
-      subscription?.subscription.unsubscribe();
+      try {
+        sub?.subscription?.unsubscribe();
+      } catch {}
+      mounted = false;
     };
-  }, [user, setUser]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
+  // ---------- LOADING SKELETON (с аватаром, если уже знаем его url) ----------
+  if (loading) {
+    const optimisticAvatar =
+      profile?.avatar_url || user?.user_metadata?.avatar_url || null;
+
+    return (
+      <SidebarMenuButton asChild className="w-full">
+        <div className="w-full px-3 py-2 flex items-center gap-3">
+          {optimisticAvatar ? (
+            <Avatar className="h-8 w-8">
+              <AvatarImage src={optimisticAvatar} alt="" />
+              <AvatarFallback>U</AvatarFallback>
+            </Avatar>
+          ) : (
+            <Skeleton className="h-8 w-8 rounded-full" />
+          )}
+
+          <div className="flex-1">
+            <Skeleton className="h-3 w-28" />
+            <div className="mt-1">
+              <Skeleton className="h-2 w-36" />
+            </div>
+          </div>
+        </div>
+      </SidebarMenuButton>
+    );
+  }
+
+  // ---------- NOT AUTHED ----------
   if (!user) {
     return (
       <SidebarMenuButton asChild className="w-full">
@@ -66,30 +127,40 @@ export default function SidebarProfile() {
     );
   }
 
-  const displayName =
-    user.user_metadata?.full_name || user.email;
-  const avatarUrl = user.user_metadata?.avatar_url || null;
+  // ---------- AUTHED ----------
+  // ВЕРХНЯЯ СТРОКА: только display_name (или full_name), НО НЕ email
+  const title =
+    (profile?.display_name && String(profile.display_name)) ||
+    (user.user_metadata?.full_name && String(user.user_metadata.full_name)) ||
+    "Профиль";
+
+  // НИЖНЯЯ СТРОКА: email пользователя
+  const subtitle = user.email || "";
+
+  // АВАТАР: сначала из profiles, затем из user_metadata
+  const avatarUrl =
+    profile?.avatar_url || user.user_metadata?.avatar_url || null;
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <SidebarMenuButton className="w-full px-3 py-2 flex items-center gap-3 hover:bg-muted rounded-md">
-          <Avatar className="h-8 w-8">
-            {avatarUrl ? (
-              <AvatarImage src={avatarUrl} alt={displayName ?? ""} />
-            ) : (
-              <AvatarFallback>
-                {(displayName ?? "U")[0]}
-              </AvatarFallback>
-            )}
-          </Avatar>
+          {avatarUrl ? (
+            <Avatar className="h-8 w-8">
+              <AvatarImage src={avatarUrl} alt={title} />
+              <AvatarFallback>{(title ?? "U")[0]}</AvatarFallback>
+            </Avatar>
+          ) : (
+            <Avatar className="h-8 w-8">
+              <AvatarFallback>{(title ?? "U")[0]}</AvatarFallback>
+            </Avatar>
+          )}
+
           <div className="flex flex-col truncate text-left">
-            <span className="text-sm font-medium truncate">
-              {displayName}
-            </span>
-            <span className="text-xs text-muted-foreground truncate">
-              {user.email}
-            </span>
+            <span className="text-sm font-medium truncate">{title}</span>
+            {subtitle ? (
+              <span className="text-xs text-muted-foreground truncate">{subtitle}</span>
+            ) : null}
           </div>
         </SidebarMenuButton>
       </DropdownMenuTrigger>
@@ -109,9 +180,13 @@ export default function SidebarProfile() {
         </DropdownMenuItem>
         <DropdownMenuItem
           onClick={async () => {
-            await supabase.auth.signOut();
-            setUser(null);
-            window.location.href = "/login";
+            try {
+              await supabase.auth.signOut();
+            } finally {
+              // чистим контекст и уходим на логин
+              setUser(null);
+              window.location.href = "/login";
+            }
           }}
         >
           Выйти
