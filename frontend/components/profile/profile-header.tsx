@@ -13,7 +13,7 @@ type Props = {
 
 export default function ProfileHeader({ avatarUrl, displayName, email }: Props) {
   // дефолтная картинка, если у пользователя нет аватара
-  const fallbackAvatar = "/avatars/default-1.png";
+  const fallbackAvatar = "/avatars/default-1.svg";
 
   return (
     <Card>

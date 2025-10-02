@@ -20,6 +20,16 @@ type ProfileRow = {
   avatar_url?: string | null;
 };
 
+function normalizeSrc(src?: string | null): string | null {
+  if (!src) return null;
+  // абсолютный URL — оставляем как есть
+  if (/^https?:\/\//i.test(src)) return src;
+  // начинается с слэша — ок
+  if (src.startsWith("/")) return src;
+  // иначе добавим ведущий слэш, чтобы не получилось /workouts/avatars/...
+  return `/${src}`;
+}
+
 export default function SidebarProfile() {
   const { user, setUser } = useAppUser();
   const [profile, setProfile] = useState<ProfileRow | null>(null);
@@ -79,27 +89,28 @@ export default function SidebarProfile() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---------- LOADING SKELETON (с аватаром, если уже знаем его url) ----------
+  // ---------- LOADING SKELETON ----------
   if (loading) {
     const optimisticAvatar =
       profile?.avatar_url || user?.user_metadata?.avatar_url || null;
+    const normalized = normalizeSrc(optimisticAvatar);
 
     return (
       <SidebarMenuButton asChild className="w-full">
         <div className="w-full px-3 py-2 flex items-center gap-3">
-          {optimisticAvatar ? (
+          {normalized ? (
             <Avatar className="h-8 w-8">
-              <AvatarImage src={optimisticAvatar} alt="" />
+              <AvatarImage src={normalized} alt="" />
               <AvatarFallback>U</AvatarFallback>
             </Avatar>
           ) : (
-            <Skeleton className="h-8 w-8 rounded-full" />
+            <Skeleton className="h-8 w-8 rounded-full bg-[#5a6772]" />
           )}
 
           <div className="flex-1">
-            <Skeleton className="h-3 w-28" />
+            <Skeleton className="h-3 w-28 bg-[#5a6772]" />
             <div className="mt-1">
-              <Skeleton className="h-2 w-36" />
+              <Skeleton className="h-2 w-36 bg-[#5a6772]" />
             </div>
           </div>
         </div>
@@ -128,18 +139,18 @@ export default function SidebarProfile() {
   }
 
   // ---------- AUTHED ----------
-  // ВЕРХНЯЯ СТРОКА: только display_name (или full_name), НО НЕ email
+  // ВЕРХНЯЯ СТРОКА: только display_name, иначе — "Спортивная Капибара"
   const title =
-    (profile?.display_name && String(profile.display_name)) ||
-    (user.user_metadata?.full_name && String(user.user_metadata.full_name)) ||
-    "Профиль";
+    (profile?.display_name && String(profile.display_name).trim()) ||
+    "Спортивная Капибара";
 
-  // НИЖНЯЯ СТРОКА: email пользователя
+  // НИЖНЯЯ СТРОКА: email
   const subtitle = user.email || "";
 
-  // АВАТАР: сначала из profiles, затем из user_metadata
-  const avatarUrl =
-    profile?.avatar_url || user.user_metadata?.avatar_url || null;
+  // АВАТАР: profiles.avatar_url -> user_metadata.avatar_url
+  const avatarUrl = normalizeSrc(
+    profile?.avatar_url || user.user_metadata?.avatar_url || null
+  );
 
   return (
     <DropdownMenu>
@@ -183,7 +194,6 @@ export default function SidebarProfile() {
             try {
               await supabase.auth.signOut();
             } finally {
-              // чистим контекст и уходим на логин
               setUser(null);
               window.location.href = "/login";
             }
