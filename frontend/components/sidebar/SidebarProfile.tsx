@@ -195,8 +195,10 @@ export default function SidebarProfile() {
         <DropdownMenuItem
           onClick={async () => {
             await supabase.auth.signOut();
-            // обнулим пользователя в контексте, чтобы UI сразу отреагировал
-            try { /* защитный try */ } finally { /* no-op */ }
+            try {
+              await fetch("/api/auth/callback", { method: "POST" });
+            } catch {}
+            setUser(null);
             window.location.href = "/login";
           }}
         >

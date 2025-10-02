@@ -67,12 +67,16 @@ export default function LoginPage() {
 
         // Если сервер вернул session — редиректим сразу
         if (data?.session) {
+          // Сразу синхронизируем httpOnly-куки на сервере
+          await fetch("/api/auth/callback", { method: "POST" });
           router.replace("/home");
           return;
         }
 
-        // Иногда кука ставится асинхронно — короткий retry
+        // Иногда cookie/сессия ставится асинхронно (magic link flow или redirect). Делаем короткий retry getSession
         for (let i = 0; i < 3; i++) {
+          // На каждый ретрай сначала пробуем обновить server cookies
+          await fetch("/api/auth/callback", { method: "POST" });
           const { data: sessData } = await supabase.auth.getSession();
           if (sessData?.session) {
             router.replace("/home");
