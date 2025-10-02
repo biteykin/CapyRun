@@ -1,54 +1,139 @@
 // frontend/components/sidebar/SidebarProfile.tsx
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseBrowser";
-import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
-  DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { SidebarMenuButton } from "@/components/ui/sidebar";
 import { useAppUser } from "@/app/providers";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function SidebarProfile() {
+  // 1) Хуки: контекст, локальный стейт — всегда вызываются в одном порядке
   const { user, setUser } = useAppUser();
+  const [profile, setProfile] = useState<any | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
 
+  // 2) Поднимаем сессию и подписку на изменения auth
   useEffect(() => {
-    let mounted = true;
+    let isMounted = true;
 
     (async () => {
-      const { data: { user: u } } = await supabase.auth.getUser();
-      if (!mounted) return;
-      setUser(prev => {
-        const next = u ?? null;
-        if ((prev?.id ?? null) === (next?.id ?? null)) return prev;
-        return next;
-      });
+      // Попытка быстро получить user из текущей сессии
+      const { data: sess } = await supabase.auth.getSession();
+      const u = sess?.session?.user ?? null;
+
+      if (isMounted) setUser(u);
+
+      // Если пользователя нет — дополнительная попытка
+      if (!u) {
+        const { data: uData } = await supabase.auth.getUser();
+        if (isMounted) setUser(uData?.user ?? null);
+      }
+
+      if (isMounted) setLoading(false);
     })();
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!mounted) return;
-      setUser(prev => {
-        const next = session?.user ?? null;
-        if ((prev?.id ?? null) === (next?.id ?? null)) return prev;
-        return next;
-      });
+      if (!isMounted) return;
+      setUser(session?.user ?? null);
     });
 
     return () => {
-      mounted = false;
-      try { sub.subscription.unsubscribe(); } catch {}
+      isMounted = false;
+      try {
+        sub?.subscription?.unsubscribe();
+      } catch {}
     };
-  }, []); // ❗️важно: без зависимости от `user`
+  }, [setUser]);
 
+  // 3) Подтягиваем профиль из БД, когда появился user.id
+  useEffect(() => {
+    let canceled = false;
+
+    async function loadProfile() {
+      if (!user?.id) {
+        setProfile(null);
+        return;
+      }
+      try {
+        const { data } = await supabase
+          .from("profiles")
+          .select("display_name, avatar_url")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        if (!canceled) setProfile(data ?? null);
+      } catch {
+        if (!canceled) setProfile(null);
+      }
+    }
+
+    loadProfile();
+    return () => {
+      canceled = true;
+    };
+  }, [user?.id]);
+
+  // 4) Производные значения — вычисляем ХУКАМИ ПОВЕРХУ (безусловно)
+  const displayName = useMemo(() => {
+    const fromProfile =
+      profile?.display_name && String(profile.display_name).trim();
+    const fromMeta =
+      user?.user_metadata?.full_name &&
+      String(user.user_metadata.full_name).trim();
+
+    // верхняя строка: display_name > full_name > дефолт
+    return fromProfile || fromMeta || "Резвая Капибара";
+  }, [profile?.display_name, user?.user_metadata?.full_name]);
+
+  const avatarUrl = useMemo(() => {
+    // Порядок: avatar_url из profiles > avatar_url из метаданных > дефолт
+    return (
+      profile?.avatar_url ||
+      user?.user_metadata?.avatar_url ||
+      "/avatars/default-1.svg"
+    );
+  }, [profile?.avatar_url, user?.user_metadata?.avatar_url]);
+
+  // 5) Рендер
+
+  // Лоадер (скелетон) — красивый и постоянный
+  if (loading) {
+    return (
+      <SidebarMenuButton asChild className="w-full">
+        <div className="w-full px-3 py-2 flex items-center gap-3">
+          <Skeleton
+            className="h-8 w-8 rounded-full shrink-0"
+            style={{ backgroundColor: "#5a6772" }}
+          />
+          <div className="flex-1">
+            <Skeleton
+              className="h-4 w-[160px] rounded"
+              style={{ backgroundColor: "#5a6772" }}
+            />
+            <Skeleton
+              className="mt-2 h-3 w-[120px] rounded"
+              style={{ backgroundColor: "#5a6772" }}
+            />
+          </div>
+        </div>
+      </SidebarMenuButton>
+    );
+  }
+
+  // Не авторизован
   if (!user) {
     return (
       <SidebarMenuButton asChild className="w-full">
         <button
-          className="w-full px-3 py-2 flex items-center gap-2 hover:bg-muted rounded-md"
+          className="w-full px-3 py-2 flex items-center gap-3 hover:bg-muted rounded-md"
           onClick={() => (window.location.href = "/login")}
         >
           <Avatar className="h-8 w-8">
@@ -63,34 +148,33 @@ export default function SidebarProfile() {
     );
   }
 
-  // имя берём из профиля, если уже лежит в user_metadata — используем его
-  const displayName = useMemo(() => {
-    const dm = user?.user_metadata as any | undefined;
-    const fromMeta = (dm?.display_name || dm?.full_name || "").toString().trim();
-    if (fromMeta) return fromMeta;
-    return "Спортивная Капибара";
-  }, [user]);
-
-  const avatarUrl = (user?.user_metadata as any)?.avatar_url || null;
-
+  // Авторизован
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <SidebarMenuButton className="w-full px-3 py-2 flex items-center gap-3 hover:bg-muted rounded-md">
           <Avatar className="h-8 w-8">
-            {avatarUrl ? (
-              <AvatarImage src={avatarUrl} alt={displayName ?? ""} />
-            ) : (
-              <AvatarFallback>
-                {(displayName ?? "U")[0]}
-              </AvatarFallback>
-            )}
+            <AvatarImage
+              src={avatarUrl}
+              alt={displayName}
+              onError={(e) => {
+                // если svg/картинка не загрузилась — подставим дефолт
+                const img = e.currentTarget as HTMLImageElement;
+                if (img.src.endsWith("/avatars/default-1.svg")) return;
+                img.src = "/avatars/default-1.svg";
+              }}
+            />
+            <AvatarFallback>
+              {(displayName ?? "U").toString().trim().charAt(0) || "U"}
+            </AvatarFallback>
           </Avatar>
           <div className="flex flex-col truncate text-left">
-            {/* верхняя строка — только display_name */}
+            {/* ВЕРХНЯЯ СТРОКА: только display_name|full_name|дефолт, БЕЗ email */}
             <span className="text-sm font-medium truncate">{displayName}</span>
-            {/* нижняя строка — email (если хочешь, можно скрыть) */}
-            <span className="text-xs text-muted-foreground truncate">{user.email}</span>
+            {/* НИЖНЯЯ СТРОКА: email */}
+            <span className="text-xs text-muted-foreground truncate">
+              {user.email}
+            </span>
           </div>
         </SidebarMenuButton>
       </DropdownMenuTrigger>
@@ -111,7 +195,8 @@ export default function SidebarProfile() {
         <DropdownMenuItem
           onClick={async () => {
             await supabase.auth.signOut();
-            setUser(null);
+            // обнулим пользователя в контексте, чтобы UI сразу отреагировал
+            try { /* защитный try */ } finally { /* no-op */ }
             window.location.href = "/login";
           }}
         >
