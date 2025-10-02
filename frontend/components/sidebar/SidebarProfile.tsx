@@ -1,7 +1,7 @@
 // frontend/components/sidebar/SidebarProfile.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabaseBrowser";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -11,114 +11,39 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { SidebarMenuButton } from "@/components/ui/sidebar";
-import { Skeleton } from "@/components/ui/skeleton";
 import { useAppUser } from "@/app/providers";
-
-type ProfileRow = {
-  display_name?: string | null;
-  username?: string | null;
-  avatar_url?: string | null;
-};
-
-function normalizeSrc(src?: string | null): string | null {
-  if (!src) return null;
-  // абсолютный URL — оставляем как есть
-  if (/^https?:\/\//i.test(src)) return src;
-  // начинается с слэша — ок
-  if (src.startsWith("/")) return src;
-  // иначе добавим ведущий слэш, чтобы не получилось /workouts/avatars/...
-  return `/${src}`;
-}
 
 export default function SidebarProfile() {
   const { user, setUser } = useAppUser();
-  const [profile, setProfile] = useState<ProfileRow | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
-
-  async function loadProfile(forUserId: string | null | undefined) {
-    if (!forUserId) {
-      setProfile(null);
-      return;
-    }
-    try {
-      const { data } = await supabase
-        .from("profiles")
-        .select("display_name, username, avatar_url")
-        .eq("user_id", forUserId)
-        .maybeSingle();
-      setProfile((data as ProfileRow) ?? null);
-    } catch {
-      setProfile(null);
-    }
-  }
 
   useEffect(() => {
     let mounted = true;
 
-    async function init() {
-      setLoading(true);
+    (async () => {
+      const { data: { user: u } } = await supabase.auth.getUser();
+      if (!mounted) return;
+      setUser(prev => {
+        const next = u ?? null;
+        if ((prev?.id ?? null) === (next?.id ?? null)) return prev;
+        return next;
+      });
+    })();
 
-      if (!user) {
-        const { data: uData } = await supabase.auth.getUser();
-        const u = uData?.user ?? null;
-        if (mounted) {
-          setUser(u);
-          await loadProfile(u?.id ?? null);
-        }
-      } else {
-        await loadProfile(user.id);
-      }
-
-      if (mounted) setLoading(false);
-    }
-
-    init();
-
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_evt, session) => {
-      const u = session?.user || null;
-      setUser(u);
-      await loadProfile(u?.id ?? null);
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+      setUser(prev => {
+        const next = session?.user ?? null;
+        if ((prev?.id ?? null) === (next?.id ?? null)) return prev;
+        return next;
+      });
     });
 
     return () => {
-      try {
-        sub?.subscription?.unsubscribe();
-      } catch {}
       mounted = false;
+      try { sub.subscription.unsubscribe(); } catch {}
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // ❗️важно: без зависимости от `user`
 
-  // ---------- LOADING SKELETON ----------
-  if (loading) {
-    const optimisticAvatar =
-      profile?.avatar_url || user?.user_metadata?.avatar_url || null;
-    const normalized = normalizeSrc(optimisticAvatar);
-
-    return (
-      <SidebarMenuButton asChild className="w-full">
-        <div className="w-full px-3 py-2 flex items-center gap-3">
-          {normalized ? (
-            <Avatar className="h-8 w-8">
-              <AvatarImage src={normalized} alt="" />
-              <AvatarFallback>U</AvatarFallback>
-            </Avatar>
-          ) : (
-            <Skeleton className="h-8 w-8 rounded-full bg-[#5a6772]" />
-          )}
-
-          <div className="flex-1">
-            <Skeleton className="h-3 w-28 bg-[#5a6772]" />
-            <div className="mt-1">
-              <Skeleton className="h-2 w-36 bg-[#5a6772]" />
-            </div>
-          </div>
-        </div>
-      </SidebarMenuButton>
-    );
-  }
-
-  // ---------- NOT AUTHED ----------
   if (!user) {
     return (
       <SidebarMenuButton asChild className="w-full">
@@ -138,40 +63,34 @@ export default function SidebarProfile() {
     );
   }
 
-  // ---------- AUTHED ----------
-  // ВЕРХНЯЯ СТРОКА: только display_name, иначе — "Спортивная Капибара"
-  const title =
-    (profile?.display_name && String(profile.display_name).trim()) ||
-    "Спортивная Капибара";
+  // имя берём из профиля, если уже лежит в user_metadata — используем его
+  const displayName = useMemo(() => {
+    const dm = user?.user_metadata as any | undefined;
+    const fromMeta = (dm?.display_name || dm?.full_name || "").toString().trim();
+    if (fromMeta) return fromMeta;
+    return "Спортивная Капибара";
+  }, [user]);
 
-  // НИЖНЯЯ СТРОКА: email
-  const subtitle = user.email || "";
-
-  // АВАТАР: profiles.avatar_url -> user_metadata.avatar_url
-  const avatarUrl = normalizeSrc(
-    profile?.avatar_url || user.user_metadata?.avatar_url || null
-  );
+  const avatarUrl = (user?.user_metadata as any)?.avatar_url || null;
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <SidebarMenuButton className="w-full px-3 py-2 flex items-center gap-3 hover:bg-muted rounded-md">
-          {avatarUrl ? (
-            <Avatar className="h-8 w-8">
-              <AvatarImage src={avatarUrl} alt={title} />
-              <AvatarFallback>{(title ?? "U")[0]}</AvatarFallback>
-            </Avatar>
-          ) : (
-            <Avatar className="h-8 w-8">
-              <AvatarFallback>{(title ?? "U")[0]}</AvatarFallback>
-            </Avatar>
-          )}
-
+          <Avatar className="h-8 w-8">
+            {avatarUrl ? (
+              <AvatarImage src={avatarUrl} alt={displayName ?? ""} />
+            ) : (
+              <AvatarFallback>
+                {(displayName ?? "U")[0]}
+              </AvatarFallback>
+            )}
+          </Avatar>
           <div className="flex flex-col truncate text-left">
-            <span className="text-sm font-medium truncate">{title}</span>
-            {subtitle ? (
-              <span className="text-xs text-muted-foreground truncate">{subtitle}</span>
-            ) : null}
+            {/* верхняя строка — только display_name */}
+            <span className="text-sm font-medium truncate">{displayName}</span>
+            {/* нижняя строка — email (если хочешь, можно скрыть) */}
+            <span className="text-xs text-muted-foreground truncate">{user.email}</span>
           </div>
         </SidebarMenuButton>
       </DropdownMenuTrigger>
@@ -191,12 +110,9 @@ export default function SidebarProfile() {
         </DropdownMenuItem>
         <DropdownMenuItem
           onClick={async () => {
-            try {
-              await supabase.auth.signOut();
-            } finally {
-              setUser(null);
-              window.location.href = "/login";
-            }
+            await supabase.auth.signOut();
+            setUser(null);
+            window.location.href = "/login";
           }}
         >
           Выйти

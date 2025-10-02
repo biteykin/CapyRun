@@ -4,13 +4,18 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 
+// ВАЖНО: для server action нужны эти импорты
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+
 type ProfileData = {
   age?: number | null;
   gender?: string | null;
   weight?: number | null;
   height?: number | null;
   max_hr?: number | null;
-  hr_zones?: any | null;
+  hr_zones?: unknown | null;
 };
 
 export default function ProfileContent({ profile }: { profile: ProfileData }) {
@@ -72,21 +77,27 @@ export default function ProfileContent({ profile }: { profile: ProfileData }) {
             <form
               action={async () => {
                 "use server";
+                // Создаём SSR-клиент с публичным ключом — для logout этого достаточно.
+                const jar = await cookies();
                 const supabase = createServerClient(
-                  process.env.SUPABASE_URL!,
-                  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+                  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+                  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
                   {
                     cookies: {
                       getAll() {
-                        // получим куки из окружения сервера
-                        // import cookies внутри server action нельзя, поэтому можно оставить пустой массив
-                        return [];
+                        return jar.getAll();
                       },
-                      setAll() {},
+                      setAll(cookiesToSet) {
+                        cookiesToSet.forEach(({ name, value, options }) =>
+                          jar.set(name, value, options)
+                        );
+                      },
                     },
                   }
                 );
+
                 await supabase.auth.signOut();
+                redirect("/"); // уводим на публичный лендинг
               }}
             >
               <Button type="submit">Выйти из аккаунта</Button>

@@ -1,8 +1,8 @@
 // frontend/app/(protected)/profile/page.tsx
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
-import ProfileHeader from "@/components/profile/profile-header";
-import ProfileContent from "@/components/profile/profile-content";
+import ProfileHeader from "../../../components/profile/profile-header";
+import ProfileContent from "../../../components/profile/profile-content";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
