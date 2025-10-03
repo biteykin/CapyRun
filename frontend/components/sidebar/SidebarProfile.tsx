@@ -9,10 +9,12 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { SidebarMenuButton } from "@/components/ui/sidebar";
 import { useAppUser } from "@/app/providers";
 import { Skeleton } from "@/components/ui/skeleton";
+import { User, Settings, LogOut } from "lucide-react";
 
 export default function SidebarProfile() {
   // 1) Хуки: контекст, локальный стейт — всегда вызываются в одном порядке
@@ -181,17 +183,14 @@ export default function SidebarProfile() {
 
       <DropdownMenuContent side="top" className="w-[--radix-popper-anchor-width]">
         <DropdownMenuItem onClick={() => (window.location.href = "/profile")}>
-          Профиль
+          <User className="mr-2 h-4 w-4" />
+          <span>Профиль</span>
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => (window.location.href = "/workouts")}>
-          Тренировки
+        <DropdownMenuItem onClick={() => (window.location.href = "/settings")}>
+          <Settings className="mr-2 h-4 w-4" />
+          <span>Настройки</span>
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => (window.location.href = "/thresholds")}>
-          Пороги
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => (window.location.href = "/notifications")}>
-          Уведомления
-        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuItem
           onClick={async () => {
             await supabase.auth.signOut();
@@ -202,7 +201,8 @@ export default function SidebarProfile() {
             window.location.href = "/login";
           }}
         >
-          Выйти
+          <LogOut className="mr-2 h-4 w-4" />
+          <span>Выйти</span>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
