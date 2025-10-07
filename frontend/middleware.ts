@@ -25,6 +25,7 @@ export async function middleware(req: NextRequest) {
     p.startsWith("/static/") ||
     p.startsWith("/favicon") ||
     p.startsWith("/images/") ||
+    p.startsWith("/avatars/") ||
     p.startsWith("/api/")
   ) {
     return NextResponse.next();
@@ -35,16 +36,16 @@ export async function middleware(req: NextRequest) {
   // 1) если нет sb-кук — засеем их из capyrun.auth (если есть)
   const hasSbAccess = req.cookies.has("sb-access-token");
   const hasSbRefresh = req.cookies.has("sb-refresh-token");
+  const isProd = process.env.NODE_ENV === "production";
   if (!hasSbAccess || !hasSbRefresh) {
     const tokens = parseCapyRunCookie(req);
     if (tokens?.access_token && tokens?.refresh_token) {
-      // локально secure: false, в проде поставь true
       res.cookies.set({
         name: "sb-access-token",
         value: tokens.access_token,
         httpOnly: true,
         sameSite: "lax",
-        secure: false,
+        secure: isProd,
         path: "/",
       });
       res.cookies.set({
@@ -52,7 +53,7 @@ export async function middleware(req: NextRequest) {
         value: tokens.refresh_token,
         httpOnly: true,
         sameSite: "lax",
-        secure: false,
+        secure: isProd,
         path: "/",
       });
       // подчистим жирную куку
@@ -94,5 +95,5 @@ export async function middleware(req: NextRequest) {
 
 // обработать все пути, кроме статических
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|avatars).*)"],
 };
