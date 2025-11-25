@@ -21,11 +21,6 @@ import {
 
 import {
   CartesianGrid,
-  Line,
-  LineChart,
-  XAxis,
-  Bar,
-  BarChart,
 } from "recharts";
 
 /** ===== Types ===== */
@@ -95,7 +90,6 @@ export default function WorkoutCharts({ workoutId }: Props) {
           .single();
 
         if (error) throw error;
-        if (!data) throw new Error("Превью рядов не найдено");
 
         if (!canceled) setRow(data as unknown as PreviewRow);
       } catch (e: any) {
@@ -104,7 +98,6 @@ export default function WorkoutCharts({ workoutId }: Props) {
         if (!canceled) setLoading(false);
       }
     })();
-
     return () => {
       canceled = true;
     };
@@ -336,8 +329,6 @@ export default function WorkoutCharts({ workoutId }: Props) {
                 dataKey="x"
                 tickLine={false}
                 axisLine={false}
-                tickMargin={8}
-                tickFormatter={(v) => fmtTimeTick(Number(v))}
               />
               <ChartTooltip
                 cursor={{ strokeDasharray: "3 3" }}
