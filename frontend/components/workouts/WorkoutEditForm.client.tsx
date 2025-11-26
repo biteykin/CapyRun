@@ -14,6 +14,7 @@ import {
   SelectItem,
   SelectValue,
 } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 
 type SubOpt = { value: string; label: string };
 
@@ -168,6 +169,10 @@ export default function WorkoutEditForm({
     router.replace(`/workouts/${workout.id}`);
   }
 
+  function onCancel() {
+    router.back();
+  }
+
   return (
     <form onSubmit={save} className="card p-5 space-y-4">
       {/* Название */}
@@ -301,9 +306,24 @@ export default function WorkoutEditForm({
         </div>
       )}
 
-      <div className="flex gap-2">
-        <button className="btn btn-primary" disabled={saving}>{saving ? "Сохраняем…" : "Сохранить"}</button>
-        <button type="button" className="btn btn-ghost" onClick={()=>router.back()}>Отмена</button>
+      <div className="flex items-center justify-start gap-2">
+        <Button
+          type="submit"
+          variant="primary"
+          className="h-10 px-4"
+          disabled={saving}
+        >
+          {saving ? "Сохраняем…" : "Сохранить"}
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          className="h-10 px-4"
+          onClick={onCancel}
+          disabled={saving}
+        >
+          Отмена
+        </Button>
       </div>
     </form>
   );

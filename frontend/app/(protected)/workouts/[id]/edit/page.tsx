@@ -140,6 +140,7 @@ export default async function EditWorkoutPage({ params }: PageProps) {
   return (
     <main className="w-full space-y-5">
       <h1 className="text-2xl font-extrabold">Редактировать тренировку</h1>
+      {/* WorkoutEditForm теперь использует Button (primary/secondary) для submit/cancel */}
       <WorkoutEditForm workout={workout} initialSubOptions={initialSubOptions} />
     </main>
   );

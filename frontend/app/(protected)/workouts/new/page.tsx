@@ -11,6 +11,7 @@ import {
   SelectItem,
   SelectValue,
 } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 
 type SubOpt = { value: string; label: string };
 
@@ -318,8 +319,12 @@ export default function NewWorkoutPage() {
         {error && <div className="alert alert-error"><span className="alert-icon">⚠️</span><div>{error}</div></div>}
 
         <div className="flex gap-2">
-          <button className="btn btn-primary" disabled={saving}>{saving? "Сохраняем…":"Сохранить"}</button>
-          <button type="button" className="btn btn-ghost" onClick={()=>history.back()}>Отмена</button>
+          <Button variant="primary" type="submit" disabled={saving}>
+            {saving ? "Сохраняем…" : "Сохранить"}
+          </Button>
+          <Button variant="secondary" type="button" onClick={() => history.back()}>
+            Отмена
+          </Button>
         </div>
       </form>
     </main>

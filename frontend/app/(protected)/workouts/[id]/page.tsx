@@ -295,9 +295,9 @@ export default function WorkoutDetailPage() {
           <AlertDescription>{err}</AlertDescription>
         </Alert>
         <div>
-          <Button asChild variant="ghost">
-            <Link href="/workouts">← Назад к списку</Link>
-          </Button>
+          <Link href="/workouts">
+            <Button variant="ghost">← Назад к списку</Button>
+          </Link>
         </div>
       </main>
     );
@@ -502,13 +502,13 @@ export default function WorkoutDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button asChild variant="ghost">
-            <Link href="/workouts">← Назад</Link>
-          </Button>
-          <Button asChild>
-            <Link href={`/workouts/${row.id}/edit`}>Редактировать</Link>
-          </Button>
-          <Button variant="destructive" onClick={() => setPendingDelete(true)}>
+          <Link href="/workouts">
+            <Button variant="secondary">← Назад</Button>
+          </Link>
+          <Link href={`/workouts/${row.id}/edit`}>
+            <Button variant="primary">Редактировать</Button>
+          </Link>
+          <Button variant="danger" onClick={() => setPendingDelete(true)}>
             Удалить
           </Button>
         </div>

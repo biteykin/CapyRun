@@ -35,8 +35,9 @@ PaginationItem.displayName = "PaginationItem"
 
 type PaginationLinkProps = {
   isActive?: boolean
-} & Pick<ButtonProps, "size"> &
-  React.ComponentProps<"a">
+  // поддерживаем “icon” как шорткат под квадратную кнопку 36px
+  size?: ButtonProps["size"] | "icon"
+} & React.ComponentProps<"a">
 
 const PaginationLink = ({
   className,
@@ -47,10 +48,14 @@ const PaginationLink = ({
   <a
     aria-current={isActive ? "page" : undefined}
     className={cn(
+      // Для “icon” форсим квадрат 36px и убираем внутренние отступы
       buttonVariants({
-        variant: isActive ? "outline" : "ghost",
-        size,
+        variant: "ghost",
+        size: size === "icon" ? "md" : size,
       }),
+      size === "icon" && "h-9 w-9 p-0",
+      // Активная страница — мягкая подсветка как в таблице
+      isActive && "border border-[var(--border)] bg-[var(--color-bg-fill-tertiary)]",
       className
     )}
     {...props}
@@ -64,7 +69,7 @@ const PaginationPrevious = ({
 }: React.ComponentProps<typeof PaginationLink>) => (
   <PaginationLink
     aria-label="Go to previous page"
-    size="default"
+    size="md"
     className={cn("gap-1 pl-2.5", className)}
     {...props}
   >
@@ -80,7 +85,7 @@ const PaginationNext = ({
 }: React.ComponentProps<typeof PaginationLink>) => (
   <PaginationLink
     aria-label="Go to next page"
-    size="default"
+    size="md"
     className={cn("gap-1 pr-2.5", className)}
     {...props}
   >

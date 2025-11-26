@@ -1,392 +1,175 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-
+import * as React from "react";
 import { supabase } from "@/lib/supabaseBrowser";
 
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+// ⚠️ выбери нужный импорт в зависимости от имени файла infra-компонента
+import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
 
 import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  type ChartConfig,
-} from "@/components/ui/chart";
-
-import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
   CartesianGrid,
 } from "recharts";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 
-/** ===== Types ===== */
-type Props = { workoutId: string };
-
-type PreviewRow = {
-  workout_id: string;
-  points_count: number;
-  s: {
-    time_s: number[]; // общая ось X (сек от старта)
-    pace_s_per_km?: Array<number | null>; // темп в сек/км
-    hr?: Array<number | null>; // пульс bpm
-  };
+type StreamsPreview = {
+  time_s: number[];
+  hr: number[];
+  pace_s_per_km: number[];
 };
 
-type PacePoint = { x: number; pace: number | null };
-type HrPoint = { x: number; hr: number | null };
+export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
+  const [streams, setStreams] = React.useState<StreamsPreview>({
+    time_s: [],
+    hr: [],
+    pace_s_per_km: [],
+  });
+  const [err, setErr] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(true);
 
-/** ===== Utils ===== */
-function fmtSecToMinSec(sec?: number | null) {
-  if (sec == null || !Number.isFinite(sec)) return "—";
-  const m = Math.floor(sec / 60);
-  const s = Math.round(sec % 60);
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
-
-function fmtTimeTick(sec?: number | null) {
-  if (sec == null || !Number.isFinite(sec)) return "";
-  const m = Math.floor(sec / 60);
-  const s = Math.round(sec % 60);
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
-
-// Новая функция для форматирования темпа в десятичном формате (мин.сек)
-function fmtPaceDecimal(sec?: number | null) {
-  if (sec == null || !Number.isFinite(sec)) return "—";
-  const totalMinutes = sec / 60;
-  return `${totalMinutes.toFixed(2)}`;
-}
-
-function minMax(arr: Array<number | null | undefined>): { min?: number; max?: number } {
-  const vals = arr.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
-  if (!vals.length) return {};
-  return { min: Math.min(...vals), max: Math.max(...vals) };
-}
-
-/** ===== Component ===== */
-export default function WorkoutCharts({ workoutId }: Props) {
-  const [row, setRow] = useState<PreviewRow | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [zones, setZones] = useState<Array<{ zone: string; minutes: number }>>([]);
-  const [workoutStats, setWorkoutStats] = useState<{ avgPace?: number; avgHr?: number }>({});
-
-  // fetch preview row
-  useEffect(() => {
-    let canceled = false;
+  React.useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         setLoading(true);
-        setError(null);
+        setErr(null);
 
         const { data, error } = await supabase
           .from("workout_streams_preview")
-          .select("workout_id, points_count, s")
+          .select("time_s, hr, pace_s_per_km, updated_at, created_at")
           .eq("workout_id", workoutId)
-          .single();
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(); // безопасно при 0 строк
 
         if (error) throw error;
 
-        if (!canceled) setRow(data as unknown as PreviewRow);
+        if (!cancelled) {
+          if (!data) {
+            setStreams({ time_s: [], hr: [], pace_s_per_km: [] });
+            setErr("Нет данных превью для этой тренировки.");
+          } else {
+            setStreams({
+              time_s: data.time_s ?? [],
+              hr: data.hr ?? [],
+              pace_s_per_km: data.pace_s_per_km ?? [],
+            });
+          }
+        }
       } catch (e: any) {
-        if (!canceled) setError(e?.message ?? String(e));
+        if (!cancelled) {
+          const msg = String(e?.message || e);
+          if (/Cannot coerce the result to a single JSON object/i.test(msg)) {
+            setErr("В превью несколько строк для одной тренировки — берём последнюю.");
+          } else {
+            setErr("Не удалось получить превью рядов.");
+          }
+          setStreams({ time_s: [], hr: [], pace_s_per_km: [] });
+        }
       } finally {
-        if (!canceled) setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => {
-      canceled = true;
+      cancelled = true;
     };
   }, [workoutId]);
 
-  // тянем агрегат зон из workouts.hr_zone_time и средние значения
-  useEffect(() => {
-    let canceled = false;
-    (async () => {
-      try {
-        const { data, error } = await supabase
-          .from("workouts")
-          .select("hr_zone_time, avg_pace_s_per_km, avg_hr")
-          .eq("id", workoutId)
-          .single();
+  // Готовим данные для чарта
+  const chartData = React.useMemo(() => {
+    const { time_s, hr, pace_s_per_km } = streams;
+    if (!time_s?.length) return [];
+    return time_s.map((t, i) => ({
+      tMin: +(t / 60).toFixed(1),
+      hr: hr?.[i] ?? null,
+      pace: pace_s_per_km?.[i] ?? null,
+    }));
+  }, [streams]);
 
-        if (error) throw error;
-
-        const z = (data?.hr_zone_time ?? {}) as Record<string, unknown>;
-        const items = Object.entries(z)
-          .filter(([, v]) => typeof v === "number" && Number.isFinite(v))
-          .map(([k, v]) => ({ zone: k, minutes: Math.round((v as number) / 60) }));
-
-        // стабильный порядок Z1..Z5..Z7, если есть
-        items.sort((a, b) => a.zone.localeCompare(b.zone, undefined, { numeric: true }));
-
-        if (!canceled) {
-          setZones(items);
-          
-          // Сохраняем средние значения из базы данных (оставляем в секундах для темпа)
-          setWorkoutStats({
-            avgPace: data?.avg_pace_s_per_km || undefined, // оставляем в секундах
-            avgHr: data?.avg_hr || undefined
-          });
-        }
-      } catch {
-        if (!canceled) {
-          setZones([]);
-          setWorkoutStats({});
-        }
-      }
-    })();
-
-    return () => {
-      canceled = true;
-    };
-  }, [workoutId]);
-
-  // normalize to chart points
-  const { paceData, hrData, paceMM, hrMM } = useMemo(() => {
-    if (!row?.s?.time_s?.length) {
-      return {
-        paceData: [] as PacePoint[],
-        hrData: [] as HrPoint[],
-        paceMM: {} as { min?: number; max?: number },
-        hrMM: {} as { min?: number; max?: number },
-      };
-    }
-
-    const time = row.s.time_s;
-    const paceArr = row.s.pace_s_per_km ?? [];
-    const hrArr = row.s.hr ?? [];
-
-    const n = time.length;
-    const safePace = paceArr.length === n ? paceArr : new Array(n).fill(null);
-    const safeHr = hrArr.length === n ? hrArr : new Array(n).fill(null);
-
-    const paceData: PacePoint[] = new Array(n);
-    const hrData: HrPoint[] = new Array(n);
-
-    for (let i = 0; i < n; i++) {
-      const x = time[i];
-      // Конвертируем секунды в минуты для темпа
-      const paceInSeconds = typeof safePace[i] === "number" && (safePace[i] as number) >= 0 ? (safePace[i] as number) : null;
-      const p = paceInSeconds !== null ? paceInSeconds / 60 : null; // переводим в минуты
-      const h = typeof safeHr[i] === "number" && (safeHr[i] as number) > 0 ? (safeHr[i] as number) : null;
-
-      paceData[i] = { x, pace: p };
-      hrData[i] = { x, hr: h };
-    }
-
-    const paceMM = minMax(paceData.map(d => d.pace));
-    const hrMM = minMax(hrData.map(d => d.hr));
-
-    return { paceData, hrData, paceMM, hrMM };
-  }, [row]);
-
-  const hasAny =
-    (paceData?.some((p) => typeof p.pace === "number") ?? false) ||
-    (hrData?.some((p) => typeof p.hr === "number") ?? false);
-
-  const paceConfig: ChartConfig = { pace: { label: "Темп", color: "var(--chart-1)" } };
-  const hrConfig: ChartConfig = { hr: { label: "Пульс", color: "var(--chart-2)" } };
-
-  if (loading) {
-    return (
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Темп (мин/км)</CardTitle>
-            <CardDescription>Загружаем…</CardDescription>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Пульс (уд/мин)</CardTitle>
-            <CardDescription>Загружаем…</CardDescription>
-          </CardHeader>
-        </Card>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="grid grid-cols-1 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Графики</CardTitle>
-            <CardDescription className="text-red-600">
-              Не удалось получить превью рядов: {error}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            Ожидаем таблицу <code>public.workout_streams_preview</code> с JSON-полем
-            <code className="ml-1">s</code>, содержащим массивы
-            <code className="mx-1">time_s</code>,
-            <code className="mx-1">pace_s_per_km</code>,
-            <code className="mx-1">hr</code>.
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  if (!hasAny) {
-    return (
-      <div className="grid grid-cols-1 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Графики</CardTitle>
-            <CardDescription>Нет данных для визуализации</CardDescription>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            Для этой тренировки в превью отсутствуют ряды темпа и/или пульса.
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  // Обновленные описания с правильным форматированием темпа
-  const paceDesc =
-    paceMM.max != null && paceMM.min != null && workoutStats.avgPace != null
-      ? `Макс: ${fmtSecToMinSec(paceMM.max * 60)} мин/км · Среднее: ${fmtSecToMinSec(workoutStats.avgPace)} мин/км · Мин: ${fmtSecToMinSec(paceMM.min * 60)} мин/км`
-      : "—";
-
-  const hrDesc =
-    hrMM.max != null && hrMM.min != null && workoutStats.avgHr != null 
-      ? `Макс: ${Math.round(hrMM.max)} уд/мин · Среднее: ${Math.round(workoutStats.avgHr)} уд/мин · Мин: ${Math.round(hrMM.min)} уд/мин` 
-      : "—";
+  // Конфиг цветов/лейблов для ChartContainer → прокинется как CSS vars (--color-hr/--color-pace)
+  const chartConfig: ChartConfig = {
+    hr:   { label: "ЧСС",  color: "hsl(var(--chart-1))" },
+    pace: { label: "Темп", color: "hsl(var(--chart-2))" },
+  };
 
   return (
-    <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-      {/* Pace (мин/км) */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Темп (мин/км)</CardTitle>
-          <CardDescription>{paceDesc}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ChartContainer config={paceConfig}>
-            <LineChart
-              accessibilityLayer
-              data={paceData}
-              syncId="workout-sync"
-              margin={{ left: 12, right: 12 }}
-            >
-              <CartesianGrid vertical={false} />
+    <Card className="overflow-visible">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">Графики</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <div className="p-4 text-sm text-muted-foreground">Загружаем…</div>
+        ) : !chartData.length ? (
+          <div className="p-4 text-sm text-muted-foreground">
+            {err ?? "Нет данных для визуализации."}
+          </div>
+        ) : (
+          <ChartContainer config={chartConfig} className="h-72">
+            <AreaChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
+              <CartesianGrid strokeDasharray="3 3" />
               <XAxis
-                dataKey="x"
+                dataKey="tMin"
+                tickFormatter={(v: number) => `${v} мин`}
                 tickLine={false}
                 axisLine={false}
-                tickMargin={8}
-                tickFormatter={(v) => fmtTimeTick(Number(v))}
+                minTickGap={28}
               />
-              <ChartTooltip
-                // показываем кросс-хэйр, чтобы было видно момент во времени
-                cursor={{ strokeDasharray: "3 3" }}
-                content={
-                  <ChartTooltipContent
-                    indicator="line"
-                    labelFormatter={(label) => `Время: ${fmtTimeTick(Number(label))}`}
-                    valueFormatter={(v) => `Темп: ${fmtSecToMinSec(Number(v) * 60)} мин/км`}
-                  />
-                }
+              <YAxis
+                yAxisId="hr"
+                allowDecimals={false}
+                tickLine={false}
+                axisLine={false}
               />
-              <Line
-                dataKey="pace"
-                type="natural"
-                stroke="var(--color-pace, var(--chart-1))"
-                strokeWidth={2}
-                dot={false}
-                connectNulls={false}
-                activeDot={{ r: 4 }}
-                isAnimationActive={false}
-              />
-            </LineChart>
-          </ChartContainer>
-        </CardContent>
-      </Card>
-
-      {/* Heart Rate */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Пульс (bpm)</CardTitle>
-          <CardDescription>{hrDesc}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ChartContainer config={hrConfig}>
-            <LineChart
-              accessibilityLayer
-              data={hrData}
-              syncId="workout-sync"
-              margin={{ left: 12, right: 12 }}
-            >
-              <CartesianGrid vertical={false} />
-              <XAxis
-                dataKey="x"
+              <YAxis
+                yAxisId="pace"
+                orientation="right"
+                allowDecimals={false}
                 tickLine={false}
                 axisLine={false}
               />
               <ChartTooltip
-                cursor={{ strokeDasharray: "3 3" }}
+                cursor={false}
                 content={
                   <ChartTooltipContent
-                    indicator="line"
-                    labelFormatter={(label) => `Время: ${fmtTimeTick(Number(label))}`}
-                    valueFormatter={(v) => `Пульс: ${Math.round(Number(v))} уд/мин`}
+                    indicator="dot"
+                    labelFormatter={(val) => `Время: ${val} мин`}
                   />
                 }
               />
-              <Line
+              <Area
+                yAxisId="hr"
+                type="monotone"
                 dataKey="hr"
-                type="natural"
-                stroke="var(--color-hr, var(--chart-2))"
+                stroke="var(--color-hr)"
+                fill="var(--color-hr)"
+                fillOpacity={0.15}
                 strokeWidth={2}
                 dot={false}
-                connectNulls={false}
-                activeDot={{ r: 4 }}
-                isAnimationActive={false}
+                name="ЧСС"
               />
-            </LineChart>
+              <Area
+                yAxisId="pace"
+                type="monotone"
+                dataKey="pace"
+                stroke="var(--color-pace)"
+                fill="var(--color-pace)"
+                fillOpacity={0.12}
+                strokeWidth={2}
+                dot={false}
+                name="Темп"
+              />
+            </AreaChart>
           </ChartContainer>
-        </CardContent>
-      </Card>
+        )}
 
-      {/* HR Zones bar chart */}
-      {zones.length > 0 && (
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Время в HR-зонах</CardTitle>
-            <CardDescription>
-              Всего: {zones.reduce((s, x) => s + x.minutes, 0)} мин
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ChartContainer
-              config={{ minutes: { label: "Минуты", color: "var(--chart-3, var(--chart-1))" } }}
-              className="h-44"
-            >
-              <BarChart accessibilityLayer data={zones} margin={{ left: 8, right: 8 }}>
-                <CartesianGrid vertical={false} />
-                <XAxis
-                  dataKey="zone"
-                  tickLine={false}
-                  axisLine={false}
-                  tickMargin={8}
-                />
-                <ChartTooltip
-                  cursor={false}
-                  content={<ChartTooltipContent hideLabel valueFormatter={(v)=>`${v} мин`} />}
-                />
-                <Bar dataKey="minutes" fill="var(--color-minutes, var(--chart-1))" radius={6} />
-              </BarChart>
-            </ChartContainer>
-          </CardContent>
-        </Card>
-      )}
-    </section>
+        {err && chartData.length > 0 && (
+          <p className="mt-2 text-xs text-destructive/70">{err}</p>
+        )}
+      </CardContent>
+    </Card>
   );
 }

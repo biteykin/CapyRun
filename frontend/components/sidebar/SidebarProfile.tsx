@@ -113,16 +113,13 @@ export default function SidebarProfile() {
         <div className="w-full px-3 py-2 flex items-center gap-3">
           <Skeleton
             className="h-8 w-8 rounded-full shrink-0"
-            style={{ backgroundColor: "#5a6772" }}
           />
           <div className="flex-1">
             <Skeleton
               className="h-4 w-[160px] rounded"
-              style={{ backgroundColor: "#5a6772" }}
             />
             <Skeleton
               className="mt-2 h-3 w-[120px] rounded"
-              style={{ backgroundColor: "#5a6772" }}
             />
           </div>
         </div>

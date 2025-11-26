@@ -489,20 +489,23 @@ export default function WorkoutsTable({
                   it === "…" ? (
                     <PaginationEllipsis key={`e${idx}`} />
                   ) : (
-                    <button
+                    <Button
                       key={it}
-                      type="button"
+                      variant="ghost"
                       className={
-                        "btn btn-ghost h-9 w-9 px-0 tabular-nums " +
+                        "h-9 w-9 px-0 tabular-nums" +
                         (it === pagination.pageIndex + 1
-                          ? "border border-[var(--border)] bg-[var(--color-bg-fill-tertiary)]"
+                          ? " border border-[var(--border)] bg-[var(--color-bg-fill-tertiary)]"
                           : "")
                       }
                       aria-current={it === pagination.pageIndex + 1 ? "page" : undefined}
-                      onClick={() => table.setPageIndex(it - 1)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        table.setPageIndex(it - 1);
+                      }}
                     >
                       {it}
-                    </button>
+                    </Button>
                   )
                 )}
               </div>
@@ -510,22 +513,28 @@ export default function WorkoutsTable({
 
             {/* Right: Prev/Next — PostHog-стиль */}
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="btn btn-ghost h-9"
-                onClick={() => table.previousPage()}
+              <Button
+                variant="ghost"
+                className="h-9"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  table.previousPage();
+                }}
                 disabled={!table.getCanPreviousPage()}
               >
                 Назад
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost h-9"
-                onClick={() => table.nextPage()}
+              </Button>
+              <Button
+                variant="ghost"
+                className="h-9"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  table.nextPage();
+                }}
                 disabled={!table.getCanNextPage()}
               >
                 Вперёд
-              </button>
+              </Button>
             </div>
           </PaginationContent>
         </Pagination>
