@@ -250,32 +250,33 @@ export default function PlansCalendar({
               </div>
 
               <div className="space-y-1">
-                {dayEvents.slice(0, 3).map((e) => (
-                  <button
-                    key={e.id}
-                    type="button"
-                    onClick={() => onEventClick?.(e)}
-                    className={cn(
-                      "block w-full truncate rounded-md px-2 py-1 text-left text-xs transition-colors",
-                      e.status === "completed"
-                        ? "text-white border"
-                        : "border hover:bg-muted"
-                    )}
-                    style={
-                      e.status === "completed"
-                        ? {
-                            backgroundColor: e.colorHex,
-                            borderColor: e.colorHex,
-                          }
-                        : e.colorHex
-                          ? { borderColor: e.colorHex }
-                          : undefined
-                    }
-                    title={e.title}
-                  >
-                    {e.title}
-                  </button>
-                ))}
+                {dayEvents.slice(0, 3).map((e) => {
+                  // Выполненные: зелёные (COLOR_DONE из /plan/page.tsx = "#2D7601")
+                  const isDone = e.colorHex === "#2D7601";
+
+                  const style: React.CSSProperties | undefined = e.colorHex
+                    ? isDone
+                      ? { backgroundColor: e.colorHex, borderColor: e.colorHex }
+                      : { borderColor: e.colorHex }
+                    : undefined;
+
+                  return (
+                    <button
+                      key={e.id}
+                      type="button"
+                      onClick={() => onEventClick?.(e)}
+                      className={cn(
+                        "block w-full truncate rounded-md border px-2 py-1 text-left text-xs",
+                        isDone && "text-white",
+                        "hover:bg-muted"
+                      )}
+                      style={style}
+                      title={e.title}
+                    >
+                      {e.title}
+                    </button>
+                  );
+                })}
                 {dayEvents.length > 3 && (
                   <div className="text-[10px] text-muted-foreground">
                     + ещё {dayEvents.length - 3}
