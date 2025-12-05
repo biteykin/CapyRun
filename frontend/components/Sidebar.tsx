@@ -10,7 +10,6 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -20,8 +19,8 @@ import {
 } from "@/components/ui/sidebar";
 import { Home, Activity, Target, Calendar, User } from "lucide-react";
 
-// скорректируй путь
-import SidebarProfile from "./sidebar/SidebarProfile"; 
+// профиль
+import SidebarProfile from "./sidebar/SidebarProfile";
 
 type Item = {
   href: string;
@@ -29,12 +28,13 @@ type Item = {
   icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
 };
 
+// ----- НОВОЕ МЕНЮ -----
 const TOP: Item[] = [
-  { href: "/home",     label: "Главная",         icon: Home },
-  { href: "/workouts", label: "Мои тренировки",  icon: Activity },
-  { href: "/goals",    label: "Цели",            icon: Target },
-  { href: "/plan",     label: "План",            icon: Calendar },
-  { href: "/coach",    label: "Coach",           icon: User },
+  { href: "/home",     label: "Главная",    icon: Home },
+  { href: "/plan",     label: "Календарь",  icon: Calendar },
+  { href: "/workouts", label: "Тренировки", icon: Activity },
+  { href: "/coach",    label: "Тренер",     icon: User },
+  { href: "/goals",    label: "Цели",       icon: Target },
 ];
 
 function NavItem({
@@ -47,7 +47,6 @@ function NavItem({
   collapsed: boolean;
 }) {
   const Icon = item.icon;
-
   const btnClass = collapsed ? "justify-center px-2 w-8 h-8" : "gap-3";
 
   const Btn = (
@@ -74,7 +73,7 @@ function NavItem({
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const { state } = useSidebar(); // 'expanded' | 'collapsed'
+  const { state } = useSidebar();
   const collapsed = state === "collapsed";
 
   const isActive = React.useCallback(
@@ -102,9 +101,15 @@ export default function Sidebar() {
                 <span
                   aria-hidden
                   className="inline-block h-6 w-6 rounded-md"
-                  style={{ background: "linear-gradient(135deg,#FFD699,#DF6133)" }}
+                  style={{
+                    background: "linear-gradient(135deg,#FFD699,#DF6133)",
+                  }}
                 />
-                <span className={`h-display font-semibold truncate ${collapsed ? 'sr-only' : ''}`}>
+                <span
+                  className={`h-display font-semibold truncate ${
+                    collapsed ? "sr-only" : ""
+                  }`}
+                >
                   CapyRun
                 </span>
               </Link>
@@ -116,7 +121,6 @@ export default function Sidebar() {
       {/* Content */}
       <SidebarContent className="flex-1 overflow-y-auto">
         <SidebarGroup>
-          <SidebarGroupLabel>Навигация</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {TOP.map((it) => (
@@ -132,13 +136,11 @@ export default function Sidebar() {
         </SidebarGroup>
       </SidebarContent>
 
-      {/* Footer - профиль снизу */}
-      {/* в теге <SidebarFooter> */}
+      {/* Footer */}
       <SidebarFooter className="mt-auto border-t">
         <SidebarProfile />
       </SidebarFooter>
 
-      {/* Rail */}
       <SidebarRail />
     </UISidebar>
   );
