@@ -1,233 +1,238 @@
 // app/api/coach/send/route.ts
-import { NextResponse } from "next/server";
-import OpenAI from "openai";
+import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabaseServerApp";
+import OpenAI from "openai";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
+    // --- 1. Читаем тело запроса максимально мягко ---
+    let body: any = null;
+    try {
+      body = await req.json();
+    } catch (e) {
+      console.warn("coach_send: json_parse_failed", e);
+      body = {};
+    }
+
+    // допускаем разные формы: {text}, {message}, {content}
+    const rawText =
+      (body?.text ??
+        body?.message ??
+        body?.content ??
+        "") as string | undefined;
+
+    const text = (rawText ?? "").toString().trim();
+
+    // даже если текст пустой — НЕ возвращаем 400, а подставим дефолт
+    const finalText =
+      text ||
+      "Пользователь не задал конкретный вопрос, но хочет получить рекомендации по тренировкам.";
+
+    const reqThreadId = (body?.threadId ?? null) as string | null;
+
+    // --- 2. Проверка пользователя через Supabase ---
     const supabase = await createSupabaseServerClient();
     const {
       data: { user },
       error: userErr,
     } = await supabase.auth.getUser();
 
-    if (userErr) {
-      console.error("coach/send: auth.getUser error", userErr);
-      return NextResponse.json(
-        { error: "auth_error" },
-        { status: 401 },
-      );
+    if (userErr || !user) {
+      console.error("coach_send: auth error", userErr);
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
 
-    if (!user) {
-      return NextResponse.json(
-        { error: "unauthorized" },
-        { status: 401 },
-      );
-    }
-
-    // ---- Разбор тела запроса ----
-    const body = await req.json().catch(() => null) as
-      | { threadId?: string | null; text?: string; message?: string }
-      | null;
-
-    if (!body) {
-      return NextResponse.json(
-        { error: "invalid_json_body" },
-        { status: 400 },
-      );
-    }
-
-    const { threadId: rawThreadId, text, message } = body;
-    const prompt = (text ?? message ?? "").trim();
-
-    if (!prompt) {
-      return NextResponse.json(
-        { error: "missing_text" },
-        { status: 400 },
-      );
-    }
-
-    // ---- Готовим thread ----
-    let threadId = rawThreadId ?? null;
+    // --- 3. Находим / создаём тред с тренером ---
+    let threadId: string | null = reqThreadId;
 
     if (threadId) {
-      // Проверим, что тред реально принадлежит пользователю
-      const { data: existing, error: threadErr } = await supabase
+      const { data: threadRow, error: tErr } = await supabase
         .from("coach_threads")
-        .select("id, user_id, created_by")
+        .select("id, user_id")
         .eq("id", threadId)
         .maybeSingle();
 
-      if (threadErr) {
-        console.error("coach/send: check thread error", threadErr);
-        threadId = null; // создадим новый
-      } else if (
-        !existing ||
-        (existing.user_id !== user.id && existing.created_by !== user.id)
-      ) {
-        // чужой тред — не используем
+      if (tErr) {
+        console.error("coach_send: thread_lookup_error", tErr);
+        // продолжаем как будто треда нет
+        threadId = null;
+      } else if (!threadRow || threadRow.user_id !== user.id) {
+        // чужой или не найден
         threadId = null;
       }
     }
 
-    // Если тред отсутствует/невалидный — создаём новый
     if (!threadId) {
-      const { data: newThread, error: newThreadErr } = await supabase
+      // пробуем найти существующий general-тред
+      const { data: existing, error: exErr } = await supabase
         .from("coach_threads")
-        .insert({
-          user_id: user.id,
-          subject: "Личный чат с тренером",
-          scope: "user",
-          ref_plan_id: null,
-          ref_goal_id: null,
-          ref_session_id: null,
-          created_by: user.id,
-        })
-        .select("*")
-        .single();
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("scope", "general")
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
 
-      if (newThreadErr || !newThread) {
-        console.error("coach/send: create thread error", newThreadErr);
-        return NextResponse.json(
-          { error: "thread_create_failed" },
-          { status: 500 },
-        );
+      if (exErr && exErr.code !== "PGRST116") {
+        console.error("coach_send: thread_select_error", exErr);
+        // но не ломаемся — просто попробуем создать новый
       }
 
-      threadId = newThread.id;
+      if (existing) {
+        threadId = existing.id;
+      } else {
+        const { data: created, error: createErr } = await supabase
+          .from("coach_threads")
+          .insert({
+            user_id: user.id,
+            subject: "Мой тренер",
+            scope: "general", // <= важно: enum в БД должен содержать general
+            created_by: user.id,
+          })
+          .select("id")
+          .single();
+
+        if (createErr || !created) {
+          console.error("coach_send: thread_create_error", createErr);
+          return NextResponse.json(
+            { error: "thread_create_failed" },
+            { status: 500 },
+          );
+        }
+
+        threadId = created.id;
+      }
     }
 
-    // ---- Вставляем сообщение пользователя в coach_messages ----
-    const { data: userMessageRow, error: userMsgErr } = await supabase
-      .from("coach_messages")
-      .insert({
-        thread_id: threadId,
-        author_id: user.id,
-        type: "user", // coach_msg_type: 'user' | 'coach' | 'system' | 'note'
-        body: prompt,
-        meta: {},
-      })
-      .select("*")
-      .single();
-
-    if (userMsgErr || !userMessageRow) {
-      console.error("coach/send: insert user message error", userMsgErr);
+    if (!threadId) {
       return NextResponse.json(
-        {
-          error: "user_message_insert_failed",
-          detail: userMsgErr?.message ?? null,
-          code: userMsgErr?.code ?? null,
-        },
+        { error: "thread_resolve_failed" },
         { status: 500 },
       );
     }
 
-    // ---- Подтягиваем контекст последних сообщений (для GPT) ----
+    // --- 4. Сохраняем сообщение пользователя в coach_messages ---
+    const { data: userMsgRow, error: userMsgErr } = await supabase
+      .from("coach_messages")
+      .insert({
+        thread_id: threadId,
+        author_id: user.id,
+        type: "user", // coach_msg_type enum
+        body: finalText,
+        meta: null,
+      })
+      .select("*")
+      .single();
+
+    if (userMsgErr || !userMsgRow) {
+      console.error("coach_send: user_message_insert_error", userMsgErr);
+      return NextResponse.json(
+        { error: "user_message_insert_failed" },
+        { status: 500 },
+      );
+    }
+
+    // --- 5. История для контекста (последние 30 сообщений этого треда) ---
     const { data: history, error: histErr } = await supabase
       .from("coach_messages")
-      .select("id, type, body, created_at, author_id")
+      .select("type, body, created_at")
       .eq("thread_id", threadId)
       .order("created_at", { ascending: true })
       .limit(30);
 
     if (histErr) {
-      console.error("coach/send: history load error", histErr);
+      console.error("coach_send: history_error", histErr);
     }
 
-    // Превращаем историю в messages для GPT
-    const chatMessages = [];
+    const messages: any[] = [];
 
-    chatMessages.push({
-      role: "system" as const,
+    messages.push({
+      role: "system",
       content:
-        "Ты — персональный тренер по бегу и физподготовке. " +
-        "Общайся по-русски, дружелюбно и по делу. " +
-        "Учитывай прошлые сообщения в этом диалоге как историю общения с атлетом.",
+        "Ты персональный беговой и фитнес-тренер. " +
+        "Отвечай по-русски, коротко и по делу, без воды. " +
+        "Ориентируйся на любителя, учитывай усталость, занятость и здоровье, " +
+        "если пользователь это упоминает. Если нужно — задавай уточняющие вопросы.",
     });
 
-    if (history && history.length > 0) {
-      for (const m of history) {
-        // user / coach / system → превращаем в роли GPT
-        const role =
-          m.type === "coach"
-            ? ("assistant" as const)
-            : m.type === "system"
-            ? ("system" as const)
-            : ("user" as const);
-
-        chatMessages.push({
-          role,
-          content: m.body ?? "",
-        });
+    for (const m of history ?? []) {
+      if (m.type === "user") {
+        messages.push({ role: "user", content: m.body });
+      } else if (m.type === "coach") {
+        messages.push({ role: "assistant", content: m.body });
+      } else if (m.type === "system" || m.type === "note") {
+        messages.push({ role: "system", content: m.body });
       }
-    } else {
-      // Если история пустая — подсказка
-      chatMessages.push({
-        role: "system" as const,
-        content:
-          "Это первое сообщение в чате. Сначала узнай цели пользователя и текущий уровень, " +
-          "а потом давай рекомендации по тренировкам.",
-      });
     }
 
-    // ---- Вызов OpenAI ----
+    // страховка: если история пустая — всё равно кладём последний вопрос
+    if (!history || history.length === 0) {
+      messages.push({ role: "user", content: finalText });
+    }
+
+    // --- 6. Вызов OpenAI ---
     const completion = await openai.chat.completions.create({
       model: "gpt-4.1-mini",
-      messages: chatMessages,
-      temperature: 0.5,
-      max_tokens: 800,
+      messages,
+      temperature: 0.4,
+      max_tokens: 700,
     });
 
     const answer =
-      completion.choices[0]?.message?.content?.toString() ??
-      "Я получил твоё сообщение, но не смог сформировать ответ. Попробуй переформулировать вопрос.";
+      completion.choices[0]?.message?.content?.trim() ||
+      "Извини, сейчас не получилось сформировать ответ. Попробуй ещё раз.";
 
-    // ---- Сохраняем ответ тренера в coach_messages ----
-    const { data: coachMessageRow, error: coachMsgErr } = await supabase
+    // --- 7. Сохраняем ответ «тренера» ---
+    const { data: coachMsgRow, error: coachMsgErr } = await supabase
       .from("coach_messages")
       .insert({
         thread_id: threadId,
-        author_id: user.id, // пока считаем, что «системный» тренер привязан к тому же юзеру
+        author_id: user.id, // пока нет отдельного coach-пользователя
         type: "coach",
         body: answer,
-        meta: {
-          model: "gpt-4.1-mini",
-        },
+        meta: null,
       })
       .select("*")
       .single();
 
-    if (coachMsgErr || !coachMessageRow) {
-      console.error("coach/send: insert coach message error", coachMsgErr);
+    if (coachMsgErr || !coachMsgRow) {
+      console.error("coach_send: coach_message_insert_error", coachMsgErr);
+
+      // Даже если не сохранили — всё равно отдаём ответ на фронт
       return NextResponse.json(
         {
           error: "coach_message_insert_failed",
-          detail: coachMsgErr?.message ?? null,
-          code: coachMsgErr?.code ?? null,
+          threadId,
+          userMessage: userMsgRow,
+          coachMessage: {
+            id: "temp-coach",
+            thread_id: threadId,
+            author_id: user.id,
+            type: "coach",
+            body: answer,
+            meta: null,
+            created_at: new Date().toISOString(),
+          },
         },
         { status: 500 },
       );
     }
 
-    // ---- Успешный ответ для фронта ----
-    return NextResponse.json({
-      threadId,
-      userMessage: userMessageRow,
-      coachMessage: coachMessageRow,
-    });
-  } catch (e: any) {
-    console.error("coach/send: unexpected error", e);
+    // --- 8. Отдаём в формате, который ждёт CoachChat.client.tsx ---
     return NextResponse.json(
       {
-        error: "unexpected_error",
-        detail: e?.message ?? String(e),
+        threadId,
+        userMessage: userMsgRow,
+        coachMessage: coachMsgRow,
       },
-      { status: 500 },
+      { status: 200 },
     );
+  } catch (err) {
+    console.error("coach_send: unexpected_error", err);
+    return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
 }
