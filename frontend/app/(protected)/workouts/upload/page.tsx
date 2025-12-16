@@ -4,6 +4,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseBrowser";
+import { uploadWorkoutFile } from "@/lib/uploadWorkoutFile";
 
 // shadcn/ui
 import {
@@ -30,6 +31,7 @@ type FileRow = {
   workout_id?: string | null;
   filename: string | null;
   status?: string | null;          // ⬅️ предполагаем, что есть колонка status
+  error_message?: string | null;
   created_at: string;
 };
 
@@ -41,6 +43,7 @@ export default function WorkoutUploadPage() {
   const [rows, setRows] = useState<FileRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [reloading, setReloading] = useState(false);
+  const [uploadingFiles, setUploadingFiles] = useState(false);
   const [sortBy, setSortBy] = useState<"filename" | "status" | "created_at">("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
@@ -71,7 +74,7 @@ export default function WorkoutUploadPage() {
       setUserId(u.id);
       const { data, error, status } = await supabase
         .from("workout_files")
-        .select("id,user_id,workout_id,filename,status,created_at")
+        .select("id,user_id,workout_id,filename,status,error_message,created_at")
         .eq("user_id", u.id) // показываем ТОЛЬКО свои файлы
         .order("created_at", { ascending: false })
         .limit(500);
@@ -87,7 +90,11 @@ export default function WorkoutUploadPage() {
           });
           setRows([]);
         } else {
-          setRows((data || []) as FileRow[]);
+          const normalized = ((data || []) as FileRow[]).map((r) => ({
+            ...r,
+            status: (r.status || "pending").toLowerCase(),
+          }));
+          setRows(normalized);
         }
         setLoading(false);
       }
@@ -102,7 +109,7 @@ export default function WorkoutUploadPage() {
     setReloading(true);
     const { data, error, status } = await supabase
       .from("workout_files")
-      .select("id,user_id,workout_id,filename,status,created_at")
+      .select("id,user_id,workout_id,filename,status,error_message,created_at")
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(500);
@@ -115,7 +122,11 @@ export default function WorkoutUploadPage() {
         hint: (error as any)?.hint,
       });
     }
-    setRows((data || []) as FileRow[]);
+    const normalized = ((data || []) as FileRow[]).map((r) => ({
+      ...r,
+      status: (r.status || "pending").toLowerCase(),
+    }));
+    setRows(normalized);
     setReloading(false);
   }
 
@@ -126,12 +137,30 @@ export default function WorkoutUploadPage() {
   async function handleSelectFiles(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
-    // TODO: вставь сюда свою логику загрузки файлов (.fit, .fit.gz, .gpx, .tcx, .zip)
-    // Например: вызов Edge Function или загрузка в Storage + insert в public.workout_files
-    // После завершения не забудь:
-    await refresh();
-    // и очистить input (чтобы можно было выбрать те же файлы повторно)
-    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (uploadingFiles) return;
+
+    setUploadingFiles(true);
+    try {
+      // грузим файлы последовательно (проще дебажить, меньше гонок по статусам)
+      for (const file of files) {
+        const res = await uploadWorkoutFile(file);
+        if (!res.ok) {
+          console.error("[upload] failed:", file.name, res.error);
+          // минимально — показать пользователю
+          alert(`Не удалось загрузить ${file.name}: ${res.error}`);
+        } else if ((res as any).duplicate) {
+          console.log("[upload] duplicate:", file.name, "id:", res.id);
+        } else {
+          console.log("[upload] ok:", file.name, "id:", res.id);
+        }
+        // подтягиваем свежие статусы после каждого файла
+        await refresh();
+      }
+    } finally {
+      setUploadingFiles(false);
+      // очистить input (чтобы можно было выбрать те же файлы повторно)
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   }
 
   async function removeRow(id: string) {
@@ -154,6 +183,7 @@ export default function WorkoutUploadPage() {
       processing: { label: "Обработка",  dot: "bg-amber-500",         variant: "secondary" },
       ready:      { label: "Готово",     dot: "bg-green-500",         variant: "default"   },
       error:      { label: "Ошибка",     dot: "bg-red-500",           variant: "outline"   },
+      failed:     { label: "Ошибка",     dot: "bg-red-500",           variant: "outline"   },
       archived:   { label: "Архив",      dot: "bg-slate-500",         variant: "secondary" },
     };
     const m = map[s] || map["pending"];
@@ -169,7 +199,7 @@ export default function WorkoutUploadPage() {
   // ===== Сортировка =====
   const statusRank = (s?: string | null) => {
     const order: Record<string, number> = {
-      pending: 0, uploading: 1, uploaded: 2, processing: 3, ready: 4, error: 5, archived: 6,
+      pending: 0, uploading: 1, uploaded: 2, processing: 3, ready: 4, error: 5, failed: 5, archived: 6,
     };
     return order[(s || "pending").toLowerCase()] ?? 0;
   };
@@ -241,6 +271,11 @@ export default function WorkoutUploadPage() {
         <CardContent className="space-y-4">
           {/* Счётчик */}
           <div className="text-sm text-muted-foreground">Файлов: <span className="font-medium">{rows.length}</span></div>
+          {uploadingFiles && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" /> Загружаем файлы…
+            </div>
+          )}
 
           {/* Таблица (одна) */}
           {loading ? (
@@ -277,6 +312,13 @@ export default function WorkoutUploadPage() {
                     <TableRow key={r.id} className="align-top">
                       <TableCell className="py-3">
                         <div className="font-medium">{r.filename || "без имени"}</div>
+                        {(String(r.status || "").toLowerCase() === "error" ||
+                          String(r.status || "").toLowerCase() === "failed") &&
+                          r.error_message && (
+                            <div className="mt-1 text-xs text-destructive">
+                              {r.error_message}
+                            </div>
+                          )}
                       </TableCell>
 
                       <TableCell className="py-3">

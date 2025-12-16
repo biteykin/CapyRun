@@ -4,7 +4,14 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseBrowser";
 
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+  CardFooter,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -91,7 +98,9 @@ export default function GoalsOnboardingFlow({
   const [primaryGoal, setPrimaryGoal] = React.useState("");
   const [secondaryGoals, setSecondaryGoals] = React.useState("");
 
-  const [gender, setGender] = React.useState<"male" | "female" | "other" | "">("");
+  const [gender, setGender] = React.useState<"male" | "female" | "other" | "">(
+    ""
+  );
   const [age, setAge] = React.useState<string>("");
   const [heightCm, setHeightCm] = React.useState<string>("");
   const [weightKg, setWeightKg] = React.useState<string>("");
@@ -140,9 +149,7 @@ export default function GoalsOnboardingFlow({
       to.setMonth(to.getMonth() + 3);
       const toStr = to.toISOString().slice(0, 10);
 
-      const title =
-        primaryGoal.trim() ||
-        "Мои цели на ближайшие 3 месяца";
+      const title = primaryGoal.trim() || "Мои цели на ближайшие 3 месяца";
 
       const targetJson = {
         primary: primaryGoal.trim() || null,
@@ -160,11 +167,11 @@ export default function GoalsOnboardingFlow({
       const { error: insertErr } = await supabase.from("goals").insert({
         user_id: user.id,
         title,
-        type: "custom",    // из enum plan_goal_type
-        sport: null,       // пока не фиксируем конкретный спорт
+        type: "custom", // из enum plan_goal_type
+        sport: null, // пока не фиксируем конкретный спорт
         date_from: fromStr,
         date_to: toStr,
-        status: "active",  // из enum plan_status
+        status: "active", // из enum plan_status
         target_json: targetJson,
       });
 
@@ -201,32 +208,36 @@ export default function GoalsOnboardingFlow({
         <div className="grid gap-3 md:grid-cols-2">
           {PRESETS.map((p) => {
             const active = selectedPresets.includes(p.id);
+
             return (
-              <button
+              <Card
                 key={p.id}
-                type="button"
-                onClick={() => togglePreset(p.id)}
                 className={cn(
-                  "flex h-full flex-col items-start rounded-xl border px-4 py-3 text-left transition-colors",
+                  "cursor-pointer transition-all",
                   active
-                    ? "border-[color:var(--btn-primary-main,#E58B21)] bg-[color:var(--btn-primary-bg,#1F1306)]"
-                    : "border-border hover:bg-muted/40"
+                    ? "border-primary shadow-md bg-card"
+                    : "hover:border-muted-foreground/40 bg-card"
                 )}
+                onClick={() => togglePreset(p.id)}
               >
-                <div className="mb-1 flex items-center gap-2">
-                  <span className="text-xl">{p.emoji}</span>
-                  <span className="font-medium">{p.title}</span>
-                </div>
-                <p className="text-xs text-muted-foreground">{p.description}</p>
-              </button>
+                <CardHeader className="pb-2">
+                  <div className="flex items-start gap-2">
+                    <div className="mt-0.5 text-xl">{p.emoji}</div>
+                    <div>
+                      <CardTitle className="text-sm">{p.title}</CardTitle>
+                      <CardDescription className="text-xs">
+                        {p.description}
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+              </Card>
             );
           })}
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="primaryGoal">
-            Своя формулировка цели (опционально)
-          </Label>
+          <Label htmlFor="primaryGoal">Своя формулировка цели (опционально)</Label>
           <Textarea
             id="primaryGoal"
             value={primaryGoal}
@@ -261,7 +272,7 @@ export default function GoalsOnboardingFlow({
           </CardDescription>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid w-full gap-4 md:grid-cols-2">
           <div className="space-y-2">
             <Label>Пол</Label>
             <div className="grid grid-cols-3 gap-2">
@@ -415,42 +426,48 @@ export default function GoalsOnboardingFlow({
   }
 
   return (
-    <Card className="max-w-2xl">
-      <CardHeader>
-        <div className="flex items-center justify-between gap-2">
-          <div className="space-y-1">
-            <CardTitle>
-              {isInitial ? "Поможем настроить цели" : "Обновление целей"}
-            </CardTitle>
-            <CardDescription>
-              2 коротких шага — и тренер будет лучше понимать, куда ты хочешь прийти.
-            </CardDescription>
+    <section className="w-full">
+      <Card
+        className={cn(
+          "flex h-full flex-col border bg-card text-card-foreground shadow-sm rounded-xl"
+        )}
+      >
+        <CardHeader>
+          <div className="flex items-center justify-between gap-2">
+            <div className="space-y-1">
+              <CardTitle>
+                {isInitial ? "Поможем настроить цели" : "Обновление целей"}
+              </CardTitle>
+              <CardDescription>
+                2 коротких шага — и тренер будет лучше понимать, куда ты хочешь прийти.
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              {[1, 2, 3].map((i) => (
+                <div
+                  key={i}
+                  className={cn(
+                    "h-1.5 w-6 rounded-full transition-all",
+                    step === i
+                      ? "bg-[color:var(--btn-primary-main,#E58B21)]"
+                      : "bg-muted"
+                  )}
+                />
+              ))}
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            {[1, 2, 3].map((i) => (
-              <div
-                key={i}
-                className={cn(
-                  "h-1.5 w-6 rounded-full transition-all",
-                  step === i
-                    ? "bg-[color:var(--btn-primary-main,#E58B21)]"
-                    : "bg-muted"
-                )}
-              />
-            ))}
-          </div>
-        </div>
-      </CardHeader>
+        </CardHeader>
 
-      <CardContent>
-        {step === 1 && renderStep1()}
-        {step === 2 && renderStep2()}
-        {step === 3 && renderStep3()}
-      </CardContent>
+        <CardContent className="w-full">
+          {step === 1 && renderStep1()}
+          {step === 2 && renderStep2()}
+          {step === 3 && renderStep3()}
+        </CardContent>
 
-      <CardFooter className="justify-end text-[11px] text-muted-foreground">
-        Цели всегда можно будет скорректировать позже.
-      </CardFooter>
-    </Card>
+        <CardFooter className="justify-end text-[11px] text-muted-foreground">
+          Цели всегда можно будет скорректировать позже.
+        </CardFooter>
+      </Card>
+    </section>
   );
 }

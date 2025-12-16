@@ -2,11 +2,13 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { createSupabaseServerClient } from "@/lib/supabaseServerApp";
 import ProfileHeader from "@/components/profile/profile-header";
 import ProfileContent from "@/components/profile/profile-content";
 import { differenceInYears } from "date-fns";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default async function Page() {
   const supabase = await createSupabaseServerClient();
@@ -26,6 +28,16 @@ export default async function Page() {
     )
     .eq("user_id", user.id)
     .maybeSingle();
+
+  // тянем кэш-статистику профиля (лёгкий запрос)
+  const { data: stats, error: statsErr } = await supabase
+    .from("profile_stats_cache")
+    .select("workouts_count,total_hours,total_distance_km,last_workout_at,primary_sport,updated_at")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (statsErr) {
+    console.error("profile_stats_cache fetch error", statsErr);
+  }
 
   // заголовок (аватар/имя/email)
   const displayName =
@@ -50,104 +62,96 @@ export default async function Page() {
     hr_zones: prof?.hr_zones ?? null,
   };
 
-  // ---- НОРМАЛИЗАЦИЯ ЗОН (серверный расчёт, без хуков) ----
-  type HrZone = { z: number; min?: number; max?: number };
-  const zonesRaw: HrZone[] = Array.isArray((prof as any)?.hr_zones?.zones)
-    ? (prof as any).hr_zones.zones
-    : [];
-  const hrMax: number | null =
-    prof?.hr_max ??
-    (zonesRaw.length ? Math.max(...zonesRaw.map((z) => Number(z.max ?? 0))) || null : null);
-
-  const zonesNorm =
-    hrMax && zonesRaw.length
-      ? zonesRaw
-          .filter((z) => typeof z.z === "number" && (z.min != null || z.max != null))
-          .map((z) => {
-            const min = Math.max(0, Math.min(Number(z.min ?? 0), Number(z.max ?? hrMax)));
-            const max = Math.max(min, Math.min(Number(z.max ?? hrMax), Number(hrMax)));
-            const pctMin = Math.round((min / hrMax) * 100);
-            const pctMax = Math.round((max / hrMax) * 100);
-            const widthPct = Math.max(2, pctMax - pctMin); // чтобы узкие зоны были видимы
-            return { z: z.z, min, max, pctMin, pctMax, widthPct };
-          })
-          .sort((a, b) => a.z - b.z)
-      : [];
-
-  const palette = [
-    "bg-emerald-500",
-    "bg-sky-500",
-    "bg-indigo-500",
-    "bg-amber-500",
-    "bg-rose-500",
-    "bg-teal-500",
-    "bg-purple-500",
-  ];
+  const workoutsCount = stats?.workouts_count ?? null;
+  const totalHours = stats?.total_hours != null ? Number(stats.total_hours) : null;
+  const totalKm = stats?.total_distance_km != null ? Number(stats.total_distance_km) : null;
+  const lastWorkoutAt = stats?.last_workout_at ? new Date(stats.last_workout_at) : null;
+  const primarySport = stats?.primary_sport ? String(stats.primary_sport) : null;
 
   return (
-    <main className="space-y-6 px-4 py-10">
+    <main className="space-y-3">
+      {/* Действия — между шапкой (хлебные крошки) и плашкой профиля */}
+      <div className="flex justify-end">
+        <Link href="/profile/edit" className="inline-flex">
+          <Button variant="secondary" size="sm" type="button">
+            Редактировать профиль
+          </Button>
+        </Link>
+      </div>
+
       <ProfileHeader
         avatarUrl={avatarUrl}
         displayName={displayName}
         email={user.email ?? null}
       />
-      <ProfileContent profile={profileData} />
 
-      {/* Аккуратная карточка зон — рендерим только если зоны валидны */}
-      {zonesNorm.length > 0 && hrMax && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Пульсовые зоны</CardTitle>
-            <CardDescription>
-              Модель: <span className="font-medium">{(prof as any)?.hr_zones?.model ?? "default-5"}</span>{" "}
-              • Max HR: <span className="font-medium">{hrMax} bpm</span>
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Полоса-сегменты */}
-            <div className="w-full rounded-md border p-3">
-              <div className="h-8 w-full rounded bg-muted relative overflow-hidden">
-                {zonesNorm.map((z, idx) => (
-                  <div
-                    key={z.z}
-                    className={`absolute top-0 h-full ${palette[idx % palette.length]}`}
-                    style={{ left: `${z.pctMin}%`, width: `${z.widthPct}%` }}
-                    title={`Z${z.z}: ${z.min}–${z.max} bpm (${z.pctMin}–${z.pctMax}% HRmax)`}
-                    aria-label={`Зона Z${z.z}`}
-                  />
-                ))}
-                <div className="absolute inset-0 flex justify-between text-[10px] text-muted-foreground px-1">
-                  <span>0%</span>
-                  <span>25%</span>
-                  <span>50%</span>
-                  <span>75%</span>
-                  <span>100%</span>
-                </div>
+      {/* Статистика профиля (из profile_stats_cache) */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Статистика</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">Тренировок</div>
+              <div className="text-lg font-semibold">{workoutsCount ?? "—"}</div>
+            </div>
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">Дистанция</div>
+              <div className="text-lg font-semibold">
+                {totalKm != null ? `${totalKm.toFixed(1)} км` : "—"}
               </div>
             </div>
-
-            {/* Табличка */}
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              {zonesNorm.map((z, idx) => (
-                <div key={z.z} className="flex items-center justify-between rounded-md border p-2">
-                  <div className="flex items-center gap-2">
-                    <span className={`inline-block h-3 w-3 rounded ${palette[idx % palette.length]}`} />
-                    <div className="text-sm">
-                      <div className="font-medium">Z{z.z}</div>
-                      <div className="text-muted-foreground text-xs">
-                        {z.min}–{z.max} bpm
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right text-xs text-muted-foreground">
-                    {z.pctMin}%–{z.pctMax}% HRmax
-                  </div>
-                </div>
-              ))}
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">Время</div>
+              <div className="text-lg font-semibold">
+                {totalHours != null ? `${totalHours.toFixed(1)} ч` : "—"}
+              </div>
             </div>
-          </CardContent>
-        </Card>
-      )}
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">Последняя</div>
+              <div className="text-sm font-medium">
+                {lastWorkoutAt
+                  ? lastWorkoutAt.toLocaleString(undefined, {
+                      year: "numeric",
+                      month: "2-digit",
+                      day: "2-digit",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })
+                  : "—"}
+              </div>
+            </div>
+          </div>
+
+          {(primarySport || stats?.updated_at) && (
+            <div className="mt-4 text-xs text-muted-foreground">
+              {primarySport ? (
+                <>
+                  Основной спорт: <span className="font-medium">{primarySport}</span>
+                </>
+              ) : null}
+              {primarySport && stats?.updated_at ? <> · </> : null}
+              {stats?.updated_at ? (
+                <>
+                  Обновлено:{" "}
+                  <span className="font-medium">
+                    {new Date(stats.updated_at).toLocaleString(undefined, {
+                      year: "numeric",
+                      month: "2-digit",
+                      day: "2-digit",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                </>
+              ) : null}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <ProfileContent profile={profileData} />
     </main>
   );
 }

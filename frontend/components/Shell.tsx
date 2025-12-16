@@ -35,8 +35,18 @@ function buildCrumbs(pathname: string) {
       crumbs.push({ label: "Тренировка" });
       if (parts[2] === "edit") crumbs.push({ label: "Редактировать" });
     }
-  } else if (root === "goals") crumbs.push({ label: "Цели" });
-  else if (root === "plan") crumbs.push({ label: "План" });
+  } else if (root === "goals") {
+    // /goals → "Главная > Цели"
+    crumbs.push({ href: "/goals", label: "Цели" });
+
+    const second = parts[1];
+    // /goals/onboarding → "Главная > Цели > Новая цель"
+    if (second === "onboarding") {
+      crumbs.push({ label: "Новая цель" });
+    }
+  } else if (root === "plan") {
+    crumbs.push({ label: "План" });
+  }
   else if (root === "coach") crumbs.push({ label: "Coach" });
   else if (root === "nutrition") crumbs.push({ label: "Питание" });
   else if (root === "profile") crumbs.push({ label: "Профиль" });

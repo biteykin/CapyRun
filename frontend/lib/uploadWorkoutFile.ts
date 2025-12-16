@@ -1,4 +1,3 @@
-// frontend/lib/uploadWorkoutFile.ts
 import { supabase } from "@/lib/supabaseBrowser";
 
 const CT_BY_EXT: Record<string, string> = {
@@ -45,6 +44,20 @@ async function sha256Hex(file: File) {
   const digest = await crypto.subtle.digest("SHA-256", ab);
   return bytesToHex(digest);
 }
+
+function normalizeUuidOrNull(v: unknown): string | null {
+  if (v == null) return null;
+  if (typeof v !== "string") return null;
+  const s = v.trim();
+  if (!s) return null;
+  if (s === "null" || s === "undefined") return null;
+  // UUID v1..v5 (достаточно строгая проверка)
+  const re =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (!re.test(s)) return null;
+  return s;
+}
+
 function buildStoragePath(userId: string, ext: string) {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -78,6 +91,9 @@ export async function uploadWorkoutFile(
     const contentType = file.type || CT_BY_EXT[ext] || "application/octet-stream";
     const kind = KIND_BY_EXT[ext] ?? "source";
 
+    // ВАЖНО: workout_id в БД uuid. Иногда из UI прилетает строка "null" — это ломает insert.
+    const workout_id = normalizeUuidOrNull(opts?.workoutId);
+
     // 1) checksum & dedupe
     let sha256 = "";
     try {
@@ -105,9 +121,9 @@ export async function uploadWorkoutFile(
     const storage_path = buildStoragePath(userId, ext);
     const insertPayload: any = {
       user_id: userId,
-      workout_id: opts?.workoutId ?? null,
+      workout_id,
       source: "upload",
-      kind, // <-- требует, чтобы БД принимала 'source' (см. SQL-миграцию ниже)
+      kind,
       content_type: contentType,
       storage_bucket: bucket,
       storage_path,
