@@ -8,7 +8,10 @@ import ProfileHeader from "@/components/profile/profile-header";
 import ProfileContent from "@/components/profile/profile-content";
 import { differenceInYears } from "date-fns";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+// ВАЖНО: для server action нужны эти импорты
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
 
 export default async function Page() {
   const supabase = await createSupabaseServerClient();
@@ -23,9 +26,7 @@ export default async function Page() {
   // тянем профиль текущего пользователя
   const { data: prof } = await supabase
     .from("profiles")
-    .select(
-      "display_name, avatar_url, sex, birth_date, weight_kg, height_cm, hr_max, hr_zones"
-    )
+    .select("display_name, avatar_url, sex, birth_date, weight_kg, height_cm, hr_max, hr_zones")
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -39,7 +40,6 @@ export default async function Page() {
     console.error("profile_stats_cache fetch error", statsErr);
   }
 
-  // заголовок (аватар/имя/email)
   const displayName =
     (prof?.display_name && String(prof.display_name)) ||
     (user.user_metadata?.full_name && String(user.user_metadata.full_name)) ||
@@ -50,9 +50,7 @@ export default async function Page() {
     (user.user_metadata?.avatar_url && String(user.user_metadata.avatar_url)) ||
     "/avatars/default-1.svg";
 
-  // маппинг под ProfileContent
-  const age =
-    prof?.birth_date ? differenceInYears(new Date(), new Date(prof.birth_date)) : null;
+  const age = prof?.birth_date ? differenceInYears(new Date(), new Date(prof.birth_date)) : null;
   const profileData = {
     age,
     gender: prof?.sex ?? null,
@@ -70,12 +68,10 @@ export default async function Page() {
 
   return (
     <main className="space-y-3">
-      {/* Действия — между шапкой (хлебные крошки) и плашкой профиля */}
+      {/* Действия: кнопка должна быть НАД плашкой профиля, справа */}
       <div className="flex justify-end">
         <Link href="/profile/edit" className="inline-flex">
-          <Button variant="secondary" size="sm" type="button">
-            Редактировать профиль
-          </Button>
+          <Button variant="secondary" size="sm" type="button">Редактировать профиль</Button>
         </Link>
       </div>
 
@@ -83,79 +79,17 @@ export default async function Page() {
         avatarUrl={avatarUrl}
         displayName={displayName}
         email={user.email ?? null}
+        stats={{
+          workoutsCount,
+          totalKm,
+          totalHours,
+          lastWorkoutAt,
+          primarySport,
+          updatedAt: stats?.updated_at ? new Date(stats.updated_at) : null,
+        }}
       />
 
-      {/* Статистика профиля (из profile_stats_cache) */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Статистика</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Тренировок</div>
-              <div className="text-lg font-semibold">{workoutsCount ?? "—"}</div>
-            </div>
-            <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Дистанция</div>
-              <div className="text-lg font-semibold">
-                {totalKm != null ? `${totalKm.toFixed(1)} км` : "—"}
-              </div>
-            </div>
-            <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Время</div>
-              <div className="text-lg font-semibold">
-                {totalHours != null ? `${totalHours.toFixed(1)} ч` : "—"}
-              </div>
-            </div>
-            <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Последняя</div>
-              <div className="text-sm font-medium">
-                {lastWorkoutAt
-                  ? lastWorkoutAt.toLocaleString(undefined, {
-                      year: "numeric",
-                      month: "2-digit",
-                      day: "2-digit",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })
-                  : "—"}
-              </div>
-            </div>
-          </div>
-
-          {(primarySport || stats?.updated_at) && (
-            <div className="mt-4 text-xs text-muted-foreground">
-              {primarySport ? (
-                <>
-                  Основной спорт: <span className="font-medium">{primarySport}</span>
-                </>
-              ) : null}
-              {primarySport && stats?.updated_at ? <> · </> : null}
-              {stats?.updated_at ? (
-                <>
-                  Обновлено:{" "}
-                  <span className="font-medium">
-                    {new Date(stats.updated_at).toLocaleString(undefined, {
-                      year: "numeric",
-                      month: "2-digit",
-                      day: "2-digit",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </span>
-                </>
-              ) : null}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
       <ProfileContent profile={profileData} />
-
-      <div className="pt-2 text-xs text-muted-foreground">
-        Deploy check: {new Date().toISOString()}
-      </div>
     </main>
   );
 }
