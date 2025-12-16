@@ -152,6 +152,10 @@ export default async function Page() {
       </Card>
 
       <ProfileContent profile={profileData} />
+
+      <div className="pt-2 text-xs text-muted-foreground">
+        Deploy check: {new Date().toISOString()}
+      </div>
     </main>
   );
 }
