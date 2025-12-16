@@ -20,7 +20,6 @@ export default async function Page() {
     redirect("/login");
   }
 
-  
   // тянем профиль текущего пользователя
   const { data: prof } = await supabase
     .from("profiles")
