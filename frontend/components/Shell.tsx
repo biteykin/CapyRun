@@ -47,10 +47,11 @@ function buildCrumbs(pathname: string) {
   } else if (root === "plan") {
     crumbs.push({ label: "План" });
   }
-  else if (root === "coach") crumbs.push({ label: "Coach" });
+  else if (root === "coach") crumbs.push({ label: "Тренер" });
   else if (root === "nutrition") crumbs.push({ label: "Питание" });
   else if (root === "profile") crumbs.push({ label: "Профиль" });
   else if (root === "badges") crumbs.push({ label: "Бейджи" });
+  else if (root === "settings") crumbs.push({ label: "Настройки" });
   else crumbs.push({ label: "CapyRun" });
 
   return crumbs;

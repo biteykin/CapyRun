@@ -154,7 +154,7 @@ export default function WorkoutsTable({
 
         const { data, error, status } = await supabase.rpc("list_dashboard", {
           limit_files: 0,
-          limit_workouts: 200,
+          limit_workouts: 1000,
         });
 
         if (error) {
@@ -177,8 +177,9 @@ export default function WorkoutsTable({
               "id,start_time,local_date,uploaded_at,sport,sub_sport,duration_sec,distance_m,avg_hr,calories_kcal,name,visibility,weekday_iso,user_id"
             )
             .eq("user_id", userId)  // ← ТОЛЬКО свои
-            .order("start_time", { ascending: false })
-            .limit(200);
+            .order("start_time", { ascending: false, nullsFirst: false })
+            // TODO: заменить на пагинацию/инфинит-скролл
+            .limit(1000);
 
           if (err2) throw err2;
           if (!cancelled) {

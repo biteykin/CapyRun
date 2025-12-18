@@ -148,8 +148,10 @@ export default async function WorkoutsPage() {
       weekday_iso
     `)
     .eq("user_id", uid)
-    .order("start_time", { ascending: false })
-    .limit(200);
+    .order("start_time", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+    // TODO: заменить на пагинацию/инфинит-скролл
+    .limit(1000);
 
   if (selectErr) {
     console.error("workouts select error:", selectErr);
