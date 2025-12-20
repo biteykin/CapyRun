@@ -125,7 +125,7 @@ export default function NewWorkoutPage() {
 
   useEffect(() => { loadSubOptions(sport); }, [sport]);
 
-  function SportSpecific() {
+  function renderSportSpecific() {
     if (sport === "swim") {
       return (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -307,7 +307,7 @@ export default function NewWorkoutPage() {
         </div>
 
         {/* Sport-specific inputs */}
-        <SportSpecific />
+        {renderSportSpecific()}
 
         {/* Note */}
         <label className="block space-y-1">

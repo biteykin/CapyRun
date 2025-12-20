@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { supabase } from "@/lib/supabaseBrowser";
 
 import {
@@ -28,8 +29,11 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 
 import { AppTooltip } from "@/components/ui/AppTooltip";
-import WorkoutCharts from "@/components/workouts/WorkoutCharts";
-import DeviceFileBlock from "@/components/workouts/DeviceFileBlock";
+
+// ВАЖНО: recharts/сложные chart-компоненты иногда ломают гидрацию/рендер.
+// Вынесем в dynamic import (ssr: false) — чтобы стабильно работало в dev/prod.
+const WorkoutCharts = dynamic(() => import("@/components/workouts/WorkoutCharts"), { ssr: false });
+const DeviceFileBlock = dynamic(() => import("@/components/workouts/DeviceFileBlock"), { ssr: false });
 
 import {
   ChartContainer,
@@ -100,6 +104,7 @@ type Workout = {
   perceived_exertion: number | null;
   created_at: string;
   updated_at: string;
+  strava_activity_url?: string | null; // если поле добавлено в БД — покажем кнопку "Открыть в Strava"
 };
 
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
@@ -173,6 +178,23 @@ function fmtSpeedKmh(distance_m?: number | null, time_sec?: number | null) {
   const kmh = distance_m / 1000 / (time_sec / 3600);
   const decimals = kmh >= 100 ? 0 : kmh >= 10 ? 1 : 2;
   return `${kmh.toFixed(decimals).replace(".", ",")} км/ч`;
+}
+
+function fmtNumber(v?: number | null, digits = 0) {
+  if (!isNum(v)) return "—";
+  return v.toFixed(digits).replace(".", ",");
+}
+
+function fmtClimbRate(elev_gain_m?: number | null, moving_time_sec?: number | null) {
+  if (!isNum(elev_gain_m) || !isNum(moving_time_sec) || moving_time_sec <= 0) return "—";
+  const perHour = elev_gain_m / (moving_time_sec / 3600);
+  return `${fmtNumber(perHour, perHour >= 100 ? 0 : 1)} м/ч`;
+}
+
+function fmtTimeOfDay(start_time?: string | null) {
+  if (!isStr(start_time)) return "—";
+  const d = new Date(start_time);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 /* ================= page ================= */
@@ -317,6 +339,7 @@ export default function WorkoutDetailPage() {
     row.distance_m,
     row.moving_time_sec ?? row.duration_sec
   );
+  const computedClimbRate = fmtClimbRate(row.elev_gain_m, row.moving_time_sec ?? row.duration_sec);
 
   type MetricItem = {
     label: string;
@@ -505,6 +528,11 @@ export default function WorkoutDetailPage() {
           <Link href="/workouts">
             <Button variant="secondary">← Назад</Button>
           </Link>
+          {isStr(row.strava_activity_url) && (
+            <a href={row.strava_activity_url} target="_blank" rel="noreferrer">
+              <Button variant="secondary">Открыть в Strava</Button>
+            </a>
+          )}
           <Link href={`/workouts/${row.id}/edit`}>
             <Button variant="primary">Редактировать</Button>
           </Link>
@@ -513,6 +541,54 @@ export default function WorkoutDetailPage() {
           </Button>
         </div>
       </div>
+
+      {/* KPI STRIP (PostHog-style) */}
+      <section>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6">
+          <Card>
+            <CardContent className="p-3">
+              <div className="text-xs text-muted-foreground">Дистанция</div>
+              <div className="mt-1 text-base font-semibold">{fmtKm(row.distance_m)}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-3">
+              <div className="text-xs text-muted-foreground">Длительность</div>
+              <div className="mt-1 text-base font-semibold">{fmtDuration(row.duration_sec)}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-3">
+              <div className="text-xs text-muted-foreground">
+                {(row?.sport || "").toLowerCase() === "run" || (row?.sport || "").toLowerCase() === "walk" ? "Темп" : "Скорость"}
+              </div>
+              <div className="mt-1 text-base font-semibold">
+                {(row?.sport || "").toLowerCase() === "run" || (row?.sport || "").toLowerCase() === "walk"
+                  ? fmtPace(row.avg_pace_s_per_km)
+                  : computedSpeed}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-3">
+              <div className="text-xs text-muted-foreground">Пульс (ср)</div>
+              <div className="mt-1 text-base font-semibold">{isNum(row.avg_hr) ? `${row.avg_hr} bpm` : "—"}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-3">
+              <div className="text-xs text-muted-foreground">Набор</div>
+              <div className="mt-1 text-base font-semibold">{fmtM(row.elev_gain_m)}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-3">
+              <div className="text-xs text-muted-foreground">Старт</div>
+              <div className="mt-1 text-base font-semibold">{fmtTimeOfDay(row.start_time)}</div>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
 
       {/* METRICS GRID (каждый пункт — shadcn Card) */}
       {metricItems.length > 0 && (
@@ -532,17 +608,76 @@ export default function WorkoutDetailPage() {
         </section>
       )}
 
+      {/* Insights row (small analytics cards) */}
+      <section>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <Card className="border-dashed">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Инсайт: набор/время</CardTitle>
+              <CardDescription>скорость набора высоты</CardDescription>
+            </CardHeader>
+            <CardContent className="text-sm">
+              <div className="flex items-baseline justify-between">
+                <span className="text-muted-foreground">Climb rate</span>
+                <span className="font-semibold">{computedClimbRate}</span>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-dashed">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Инсайт: нагрузка</CardTitle>
+              <CardDescription>TRIMP / Load</CardDescription>
+            </CardHeader>
+            <CardContent className="text-sm space-y-1">
+              <div className="flex items-baseline justify-between">
+                <span className="text-muted-foreground">TRIMP</span>
+                <span className="font-semibold">{isNum(row.trimp) ? row.trimp : "—"}</span>
+              </div>
+              <div className="flex items-baseline justify-between">
+                <span className="text-muted-foreground">Load</span>
+                <span className="font-semibold">{isNum(row.training_load_score) ? row.training_load_score : "—"}</span>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-dashed">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Инсайт: эффективность</CardTitle>
+              <CardDescription>EF / PA:HR</CardDescription>
+            </CardHeader>
+            <CardContent className="text-sm space-y-1">
+              <div className="flex items-baseline justify-between">
+                <span className="text-muted-foreground">EF</span>
+                <span className="font-semibold">{isNum(row.ef) ? row.ef : "—"}</span>
+              </div>
+              <div className="flex items-baseline justify-between">
+                <span className="text-muted-foreground">PA:HR</span>
+                <span className="font-semibold">{isNum(row.pa_hr_pct) ? `${row.pa_hr_pct}%` : "—"}</span>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+
       {/* HR ZONES + WEATHER */}
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {zonesData.length > 0 && (
-          <Card className="overflow-visible">
+          // FIX #1: recharts tooltip/bars иногда "вылезают" за Card.
+          // Делаем overflow-hidden и гарантируем 100% ширину контейнера.
+          <Card className="overflow-hidden">
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Время в HR-зонах</CardTitle>
               <CardDescription>минуты по зонам</CardDescription>
             </CardHeader>
-            <CardContent>
-              <ChartContainer config={chartConfig} className="h-56">
-                <BarChart accessibilityLayer data={zonesData}>
+            <CardContent className="overflow-hidden">
+              <ChartContainer
+                config={chartConfig}
+                className="h-56 w-full overflow-hidden"
+              >
+                <BarChart
+                  accessibilityLayer
+                  data={zonesData}
+                  margin={{ left: 8, right: 8, top: 8, bottom: 0 }}
+                >
                   <CartesianGrid vertical={false} />
                   <XAxis
                     dataKey="zone"
@@ -623,7 +758,9 @@ export default function WorkoutDetailPage() {
       </section>
 
       {/* Charts */}
-      <WorkoutCharts workoutId={row.id} />
+      <section>
+        <WorkoutCharts workoutId={row.id} />
+      </section>
 
       {/* Delete modal - shadcn AlertDialog */}
       <AlertDialog open={pendingDelete} onOpenChange={setPendingDelete}>
