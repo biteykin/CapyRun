@@ -482,11 +482,11 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
   const zoneBands = React.useMemo(() => {
     if (!hrZones?.length) return [];
     const fills = [
-      "rgba(246,176,33,0.06)",
-      "rgba(246,176,33,0.05)",
-      "rgba(251,87,141,0.05)",
-      "rgba(251,87,141,0.06)",
-      "rgba(251,87,141,0.07)",
+      "rgba(19,128,229,0.12)",
+      "rgba(62,134,30,0.12)",
+      "rgba(246,175,33,0.12)",
+      "rgba(241,64,10,0.12)",
+      "rgba(250,0,77,0.12)",
     ];
     return hrZones.map((z, i) => ({
       ...z,

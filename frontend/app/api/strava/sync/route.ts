@@ -38,8 +38,34 @@ function mapSport(stravaType: string): string {
 }
 
 function toLocalDate(isoUtc: string) {
-  // берём YYYY-MM-DD из UTC start_date, это нормально для MVP
   return isoUtc?.slice(0, 10) ?? null;
+}
+
+function isNum(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v);
+}
+
+function downsampleEvenly<T>(arr: T[], maxPoints: number) {
+  if (arr.length <= maxPoints) return arr;
+  const step = arr.length / maxPoints;
+  const out: T[] = [];
+  for (let i = 0; i < maxPoints; i++) out.push(arr[Math.floor(i * step)]);
+  return out;
+}
+
+/**
+ * Безопасное чтение ответа: сначала text(), потом пробуем JSON.parse
+ * Это защищает от HTML-страниц (<!DOCTYPE ...>) и иных не-JSON ответов.
+ */
+async function readJsonOrText(resp: Response) {
+  const text = await resp.text();
+  let json: any = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    json = null;
+  }
+  return { text, json };
 }
 
 async function refreshStravaToken(refresh_token: string) {
@@ -54,27 +80,127 @@ async function refreshStravaToken(refresh_token: string) {
     }),
   });
 
-  const json: any = await resp.json();
+  const { json, text } = await readJsonOrText(resp);
+
   if (!resp.ok) {
-    throw new Error(json?.message || "strava_refresh_failed");
+    const msg =
+      (json && (json.message || json.error_description || json.error)) ||
+      `strava_refresh_failed: http_${resp.status}`;
+    const snippet = text?.slice(0, 220);
+    throw new Error(`${msg}. Body: ${snippet}`);
   }
 
   return {
-    access_token: String(json.access_token),
-    refresh_token: String(json.refresh_token),
-    expires_at: Number(json.expires_at),
-    token_type: json.token_type ? String(json.token_type) : null,
+    access_token: String(json?.access_token),
+    refresh_token: String(json?.refresh_token),
+    expires_at: Number(json?.expires_at),
+    token_type: json?.token_type ? String(json.token_type) : null,
   };
 }
 
-export async function POST() {
-  const base = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+async function fetchStravaActivities(accessToken: string, after: number) {
+  const perPage = 50;
+  let page = 1;
+  const all: StravaActivity[] = [];
 
+  while (true) {
+    const url = new URL("https://www.strava.com/api/v3/athlete/activities");
+    url.searchParams.set("per_page", String(perPage));
+    url.searchParams.set("page", String(page));
+    if (after > 0) url.searchParams.set("after", String(after));
+
+    const resp = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    const { json, text } = await readJsonOrText(resp);
+
+    if (!resp.ok) {
+      const msg =
+        (json && (json.message || json.error)) || `strava_fetch_failed: http_${resp.status}`;
+      const snippet = text?.slice(0, 220);
+      throw new Error(`${msg}. Body: ${snippet}`);
+    }
+
+    const items: StravaActivity[] = Array.isArray(json) ? json : [];
+    all.push(...items);
+
+    if (items.length < perPage) break;
+    page += 1;
+    if (page > 40) break;
+  }
+
+  return all;
+}
+
+async function fetchStravaStreams(activityId: number, accessToken: string) {
+  const url = new URL(`https://www.strava.com/api/v3/activities/${activityId}/streams`);
+  url.searchParams.set("keys", "latlng,time,altitude");
+  url.searchParams.set("key_by_type", "true");
+
+  const resp = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  const { json, text } = await readJsonOrText(resp);
+
+  if (!resp.ok) {
+    const msg =
+      (json && (json.message || json.error)) || `strava_streams_failed: http_${resp.status}`;
+    const snippet = text?.slice(0, 220);
+    throw new Error(`${msg}. Body: ${snippet}`);
+  }
+
+  return json;
+}
+
+type GpsPayload = {
+  time_s: number[];
+  lat: number[];
+  lon: number[];
+  alt_m?: Array<number | null>;
+};
+
+function buildGpsPayloadFromStreams(streams: any): GpsPayload | null {
+  const latlng = streams?.latlng?.data;
+  const time = streams?.time?.data;
+  const alt = streams?.altitude?.data;
+
+  if (!Array.isArray(latlng) || !Array.isArray(time) || latlng.length < 2 || time.length < 2) return null;
+
+  const n0 = Math.min(latlng.length, time.length);
+  const time_s: number[] = [];
+  const lat: number[] = [];
+  const lon: number[] = [];
+  const alt_m: Array<number | null> = [];
+
+  for (let i = 0; i < n0; i++) {
+    const t = time[i];
+    const p = latlng[i];
+    if (!isNum(t)) continue;
+    if (!Array.isArray(p) || p.length < 2 || !isNum(p[0]) || !isNum(p[1])) continue;
+
+    time_s.push(t);
+    lat.push(p[0]);
+    lon.push(p[1]);
+
+    if (Array.isArray(alt)) alt_m.push(isNum(alt[i]) ? alt[i] : null);
+  }
+
+  if (time_s.length < 2) return null;
+
+  const payload: GpsPayload = { time_s, lat, lon };
+  if (Array.isArray(alt) && alt_m.length === time_s.length) payload.alt_m = alt_m;
+
+  return payload;
+}
+
+export async function POST() {
   const redirectErrJson = (reason: string, detail?: string, status = 400) =>
     NextResponse.json({ ok: false, reason, detail }, { status });
 
   try {
-    const jar = await cookies();
+    const jar = cookies(); // <-- без await
     const supabase = createServerClient(env("NEXT_PUBLIC_SUPABASE_URL"), env("NEXT_PUBLIC_SUPABASE_ANON_KEY"), {
       cookies: {
         getAll: () => jar.getAll(),
@@ -87,7 +213,7 @@ export async function POST() {
     const user = userData?.user;
     if (!user) return redirectErrJson("no_session", undefined, 401);
 
-    // 2) load external_accounts
+    // 2) external_accounts
     const { data: acc, error: accErr } = await supabase
       .from("external_accounts")
       .select(
@@ -112,7 +238,6 @@ export async function POST() {
 
     if (shouldRefresh) {
       const refreshed = await refreshStravaToken(refreshToken);
-
       accessToken = refreshed.access_token;
       refreshToken = refreshed.refresh_token;
       expiresAt = refreshed.expires_at;
@@ -132,79 +257,51 @@ export async function POST() {
         } as any)
         .eq("id", acc.id);
 
-      if (updTokErr) {
-        return redirectErrJson("db_update_tokens", updTokErr.message, 500);
-      }
+      if (updTokErr) return redirectErrJson("db_update_tokens", updTokErr.message, 500);
     }
 
     if (!accessToken) return redirectErrJson("no_access_token", "Access token missing after refresh", 500);
 
-    // 4) incremental cursor (after)
-    // last_sync_cursor будем хранить как unix seconds
+    // 4) cursor
     const after = acc.last_sync_cursor ? Number(acc.last_sync_cursor) : 0;
 
-    // 5) fetch activities (paging)
-    const perPage = 50;
-    let page = 1;
-    const all: StravaActivity[] = [];
+    // 5) fetch activities
+    let all: StravaActivity[] = [];
+    try {
+      all = await fetchStravaActivities(accessToken, after);
+    } catch (e: any) {
+      await supabase
+        .from("external_accounts")
+        .update({
+          last_sync_status: "failed",
+          last_sync_error: String(e?.message || e),
+          error_message: String(e?.message || e),
+          updated_at: new Date().toISOString(),
+        } as any)
+        .eq("id", acc.id);
 
-    while (true) {
-      const url = new URL("https://www.strava.com/api/v3/athlete/activities");
-      url.searchParams.set("per_page", String(perPage));
-      url.searchParams.set("page", String(page));
-      if (after > 0) url.searchParams.set("after", String(after));
-
-      const resp = await fetch(url.toString(), {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-
-      const json: any = await resp.json();
-      if (!resp.ok) {
-        // сохраним ошибку синхры в external_accounts
-        await supabase
-          .from("external_accounts")
-          .update({
-            last_sync_status: "failed",
-            last_sync_error: json?.message || "strava_fetch_failed",
-            error_message: json?.message || null,
-            updated_at: new Date().toISOString(),
-          } as any)
-          .eq("id", acc.id);
-
-        return redirectErrJson("strava_fetch", json?.message || JSON.stringify(json), 401);
-      }
-
-      const items: StravaActivity[] = Array.isArray(json) ? json : [];
-      all.push(...items);
-
-      if (items.length < perPage) break;
-      page += 1;
-
-      // предохранитель, чтобы случайно не улететь в бесконечность
-      if (page > 40) break; // 2000 активностей за раз — более чем
+      // важно: отдаём JSON, а не падаем в HTML
+      return redirectErrJson("strava_fetch", String(e?.message || e), 401);
     }
 
-    // 6) pre-count new vs update
     const ids = all.map((a) => String(a.id));
-    let added = 0;
-    let updated = 0;
-
     if (ids.length === 0) {
-      // обновим статус и last_synced_at
+      const nowIso = new Date().toISOString();
       await supabase
         .from("external_accounts")
         .update({
           last_sync_status: "success",
-          last_synced_at: new Date().toISOString(),
-          last_sync_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+          last_synced_at: nowIso,
+          last_sync_at: nowIso,
+          updated_at: nowIso,
           error_message: null,
         } as any)
         .eq("id", acc.id);
 
-      return NextResponse.json({ ok: true, added: 0, updated: 0, last_synced_at: new Date().toISOString() });
+      return NextResponse.json({ ok: true, added: 0, updated: 0, gps_saved: 0, gps_failed: 0, last_synced_at: nowIso });
     }
 
+    // 6) added/updated stats
     const { data: existing } = await supabase
       .from("workouts")
       .select("strava_activity_id")
@@ -212,14 +309,13 @@ export async function POST() {
       .in("strava_activity_id", ids);
 
     const existingSet = new Set((existing || []).map((r: any) => String(r.strava_activity_id)));
-    added = ids.filter((id) => !existingSet.has(id)).length;
-    updated = ids.length - added;
+    const added = ids.filter((id) => !existingSet.has(id)).length;
+    const updated = ids.length - added;
 
     // 7) upsert workouts
     const rows = all.map((a) => {
       const startTime = a.start_date || null;
       const localDate = startTime ? toLocalDate(startTime) : null;
-
       const avgSpeedKmh = typeof a.average_speed === "number" ? a.average_speed * 3.6 : null;
 
       return {
@@ -242,7 +338,6 @@ export async function POST() {
         avg_speed_kmh: typeof avgSpeedKmh === "number" ? Number(avgSpeedKmh.toFixed(2)) : null,
         calories_kcal: typeof a.calories === "number" ? Math.round(a.calories) : null,
 
-        // strava-specific
         strava_activity_id: String(a.id),
         strava_activity_url: `https://www.strava.com/activities/${a.id}`,
 
@@ -251,8 +346,6 @@ export async function POST() {
       };
     });
 
-    // ВАЖНО:
-    // Этот onConflict работает только если у тебя есть UNIQUE(user_id, strava_activity_id)
     const { error: upErr } = await supabase.from("workouts").upsert(rows as any, {
       onConflict: "user_id,strava_activity_id",
     });
@@ -271,7 +364,81 @@ export async function POST() {
       return redirectErrJson("db_upsert_workouts", upErr.message, 500);
     }
 
-    // 8) update cursor = max(start_date) unix seconds
+    // 7.1) GPS streams (не валит синхру)
+    let gps_saved = 0;
+    let gps_failed = 0;
+
+    const { data: wmap, error: wmapErr } = await supabase
+      .from("workouts")
+      .select("id,strava_activity_id")
+      .eq("user_id", user.id)
+      .in("strava_activity_id", ids);
+
+    if (!wmapErr && Array.isArray(wmap) && wmap.length) {
+      const idByStrava = new Map<string, string>();
+      for (const r of wmap as any[]) {
+        if (r?.id && r?.strava_activity_id) idByStrava.set(String(r.strava_activity_id), String(r.id));
+      }
+
+      const MAX_GPS_FETCH = 60;
+      for (let i = 0; i < all.length && i < MAX_GPS_FETCH; i++) {
+        const a = all[i];
+        const workoutId = idByStrava.get(String(a.id));
+        if (!workoutId) continue;
+
+        try {
+          const streams = await fetchStravaStreams(a.id, accessToken);
+          const payload = buildGpsPayloadFromStreams(streams);
+          if (!payload) {
+            gps_failed += 1;
+            continue;
+          }
+
+          const MAX_POINTS = 5000;
+          const n = payload.time_s.length;
+
+          let time_s = payload.time_s;
+          let lat = payload.lat;
+          let lon = payload.lon;
+          let alt_m = payload.alt_m;
+
+          if (n > MAX_POINTS) {
+            const idx = downsampleEvenly(Array.from({ length: n }, (_, k) => k), MAX_POINTS);
+            time_s = idx.map((k) => time_s[k]);
+            lat = idx.map((k) => lat[k]);
+            lon = idx.map((k) => lon[k]);
+            if (alt_m) alt_m = idx.map((k) => alt_m![k] ?? null);
+          }
+
+          const s = {
+            time_s,
+            lat,
+            lon,
+            ...(alt_m ? { alt_m } : {}),
+          };
+
+          const upGps = await supabase.from("workout_gps_streams").upsert(
+            [
+              {
+                workout_id: workoutId,
+                user_id: user.id,
+                points_count: time_s.length,
+                s,
+                updated_at: new Date().toISOString(),
+              },
+            ] as any,
+            { onConflict: "workout_id" }
+          );
+
+          if (upGps.error) gps_failed += 1;
+          else gps_saved += 1;
+        } catch {
+          gps_failed += 1;
+        }
+      }
+    }
+
+    // 8) update cursor
     let newCursor = after;
     for (const a of all) {
       const t = a.start_date ? Math.floor(new Date(a.start_date).getTime() / 1000) : 0;
@@ -292,18 +459,18 @@ export async function POST() {
       } as any)
       .eq("id", acc.id);
 
-    if (updAccErr) {
-      return redirectErrJson("db_update_external_accounts", updAccErr.message, 500);
-    }
+    if (updAccErr) return redirectErrJson("db_update_external_accounts", updAccErr.message, 500);
 
-    return NextResponse.json({ ok: true, added, updated, last_synced_at: nowIso });
+    return NextResponse.json({ ok: true, added, updated, gps_saved, gps_failed, last_synced_at: nowIso });
   } catch (e: any) {
-    // если что-то упало до supabase update — хотя бы отдаём ответ
-    return NextResponse.json({ ok: false, reason: "sync_fatal", detail: String(e?.message ?? e) }, { status: 500 });
+    // ВАЖНО: всегда JSON, чтобы фронт не получал HTML
+    return NextResponse.json(
+      { ok: false, reason: "sync_fatal", detail: String(e?.message ?? e) },
+      { status: 500 }
+    );
   }
 }
 
-// (не обязательно, но полезно для отладки)
 export async function GET() {
   return NextResponse.json({ ok: false, reason: "method_not_allowed" }, { status: 405 });
 }
