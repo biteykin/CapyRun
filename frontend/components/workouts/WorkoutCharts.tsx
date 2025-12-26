@@ -34,7 +34,7 @@ type PreviewRow = {
 
 type HrZone = { name: string; from: number; to: number };
 
-const HR_COLOR = "#FB578D"; // data-color-8
+const HR_COLOR = "#EF3707"; // bg-red
 const PACE_COLOR = "#F6B021"; // bg-yellow
 const SERIES_OPACITY = 0.75;
 
@@ -742,11 +742,11 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
                       type="natural"
                       dataKey="hr"
                       stroke={HR_COLOR}
-                      strokeWidth={2.6}
+                      strokeWidth={2.2}
                       dot={false}
                       connectNulls
                       isAnimationActive={false}
-                      filter="url(#softGlow)"
+                      //filter="url(#softGlow)"
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       opacity={SERIES_OPACITY}
@@ -767,11 +767,11 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
                       type="natural"
                       dataKey="pace"
                       stroke={PACE_COLOR}
-                      strokeWidth={2.6}
+                      strokeWidth={2.2}
                       dot={false}
                       connectNulls
                       isAnimationActive={false}
-                      filter="url(#softGlow)"
+                      //filter="url(#softGlow)"
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       opacity={SERIES_OPACITY}
