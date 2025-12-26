@@ -157,7 +157,8 @@ function pickKmMarkers(
   kmStep = 1
 ) {
   if (!t.length || !dist_m.length) return [];
-  const out: Array<{ km: number; idx: number; t: number; hr: number | null; pace: number | null }> = [];
+  const out: Array<{ km: number; idx: number; t: number; hr: number | null; pace: number | null }> =
+    [];
 
   const maxKm = Math.floor(dist_m[dist_m.length - 1] / 1000);
   if (maxKm <= 0) return out;
@@ -195,7 +196,7 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
   const [err, setErr] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
 
-  // zoom state (indices in chartData)
+  // ✅ НОВЫЙ зум: храним диапазон по ИНДЕКСАМ в chartData (полной серии)
   const [brush, setBrush] = React.useState<{ startIndex: number; endIndex: number } | null>(null);
 
   React.useEffect(() => {
@@ -245,6 +246,8 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
             hr: hr.slice(0, n),
             pace_s_per_km: pace_s_per_km.slice(0, n),
           });
+          // сбрасываем зум при смене тренировки/данных
+          setBrush(null);
         }
 
         // 2) подтянуть hr_max + hr_zones из профиля (для раскраски зон)
@@ -258,10 +261,7 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
           .eq("user_id", uid)
           .maybeSingle();
 
-        if (profErr) {
-          // не критично
-          return;
-        }
+        if (profErr) return;
 
         if (!cancelled) {
           const maxHr = prof?.hr_max != null ? Number(prof.hr_max) : null;
@@ -302,7 +302,34 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
     return downsampleEvenly(raw, MAX_POINTS);
   }, [streams]);
 
-  // rebuild arrays aligned to chartData (после downsample)
+  // фиксируем brush, чтобы он не выходил за пределы при изменении данных
+  React.useEffect(() => {
+    if (!brush) return;
+    if (!chartData.length) return;
+    const maxIdx = Math.max(0, chartData.length - 1);
+    const s = clamp(brush.startIndex, 0, maxIdx);
+    const e = clamp(brush.endIndex, 0, maxIdx);
+    if (s !== brush.startIndex || e !== brush.endIndex) {
+      setBrush({ startIndex: s, endIndex: e });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chartData.length]);
+
+  // X-domain для “зумнутого” окна (✅ вместо того, чтобы резать data и ломать Brush)
+  const xDomain = React.useMemo(() => {
+    if (!chartData.length) return [0, "dataMax"] as any;
+    if (!brush) return [0, "dataMax"] as any;
+
+    const maxIdx = chartData.length - 1;
+    const a = clamp(Math.min(brush.startIndex, brush.endIndex), 0, maxIdx);
+    const b = clamp(Math.max(brush.startIndex, brush.endIndex), 0, maxIdx);
+
+    const x1 = chartData[a]?.tMin ?? 0;
+    const x2 = chartData[b]?.tMin ?? chartData[maxIdx]?.tMin ?? "dataMax";
+    return [x1, x2] as any;
+  }, [chartData, brush]);
+
+  // derived (для KPI, маркеров, best splits) — считаем по полной серии (это ок)
   const derived = React.useMemo(() => {
     if (!chartData.length) return null;
 
@@ -313,8 +340,6 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
     const dist_m = buildDistanceFromPace(time_s, pace);
     const kmMarkers = pickKmMarkers(time_s, dist_m, hr, pace, 1);
 
-    // “лучшие” сегменты 1к/5к/10к — через скользящее окно по дистанции
-    // (на основе интегрированной дистанции — достаточно круто для MVP)
     const best = (km: number) => {
       const target = km * 1000;
       let bestDt = Infinity;
@@ -331,9 +356,7 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
             bestI = i;
             bestJ = j;
           }
-        } else {
-          break;
-        }
+        } else break;
       }
       if (!Number.isFinite(bestDt) || bestI < 0) return null;
       return {
@@ -358,16 +381,6 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
     };
   }, [chartData]);
 
-  const viewData = React.useMemo(() => {
-    if (!chartData.length) return [];
-    if (!brush) return chartData;
-    const s = clamp(brush.startIndex, 0, chartData.length - 1);
-    const e = clamp(brush.endIndex, 0, chartData.length - 1);
-    const a = Math.min(s, e);
-    const b = Math.max(s, e);
-    return chartData.slice(a, b + 1);
-  }, [chartData, brush]);
-
   const kpi = React.useMemo(() => {
     if (!derived || !chartData.length) return null;
     const durationSec = chartData[chartData.length - 1]?.t ?? null;
@@ -387,9 +400,21 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
     };
   }, [chartData, derived]);
 
+  // Домены лучше считать из “видимого” окна, иначе шкала прыгает странно.
+  // Но т.к. мы не режем data, берём points, попадающие в xDomain.
+  const visible = React.useMemo(() => {
+    if (!chartData.length) return [];
+    if (!brush) return chartData;
+
+    const maxIdx = chartData.length - 1;
+    const a = clamp(Math.min(brush.startIndex, brush.endIndex), 0, maxIdx);
+    const b = clamp(Math.max(brush.startIndex, brush.endIndex), 0, maxIdx);
+    return chartData.slice(a, b + 1);
+  }, [chartData, brush]);
+
   const paceValues = React.useMemo(
-    () => viewData.map((d) => d.pace).filter((v): v is number => isNum(v)),
-    [viewData]
+    () => visible.map((d) => d.pace).filter((v): v is number => isNum(v)),
+    [visible]
   );
 
   const paceDomain = React.useMemo(() => {
@@ -401,8 +426,8 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
   }, [paceValues]);
 
   const hrValues = React.useMemo(
-    () => viewData.map((d) => d.hr).filter((v): v is number => isNum(v)),
-    [viewData]
+    () => visible.map((d) => d.hr).filter((v): v is number => isNum(v)),
+    [visible]
   );
 
   const hrDomain = React.useMemo(() => {
@@ -415,6 +440,7 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
 
   const SexyTooltip = ({ active, payload }: any) => {
     if (!active || !payload?.length) return null;
+    // payload может содержать разные серии, берём исходный payload у первой
     const p = payload?.[0]?.payload;
     const tSec = p?.t;
     const hr = p?.hr;
@@ -455,17 +481,28 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
   // зоны рисуем как полупрозрачные полосы по HR оси (если есть hr_zones)
   const zoneBands = React.useMemo(() => {
     if (!hrZones?.length) return [];
-    // мягкая градация в сторону “красного”
-    const op = 0.07;
-    const fills = ["rgba(246,176,33,0.10)", "rgba(246,176,33,0.08)", "rgba(251,87,141,0.07)", "rgba(251,87,141,0.09)", "rgba(251,87,141,0.11)"];
+    const fills = [
+      "rgba(246,176,33,0.06)",
+      "rgba(246,176,33,0.05)",
+      "rgba(251,87,141,0.05)",
+      "rgba(251,87,141,0.06)",
+      "rgba(251,87,141,0.07)",
+    ];
     return hrZones.map((z, i) => ({
       ...z,
       fill: fills[i % fills.length],
-      opacity: op,
     }));
   }, [hrZones]);
 
   const showBrush = chartData.length > 120;
+
+  // ✅ маркеры “каждый км” в режиме both рисуем по темпу И по пульсу (две точки)
+  const kmDots = React.useMemo(() => {
+    const ms = derived?.kmMarkers ?? [];
+    if (!ms.length) return [];
+    // ограничим, чтобы не заспамить
+    return ms.slice(0, 40);
+  }, [derived]);
 
   return (
     <Card className="overflow-hidden">
@@ -534,7 +571,8 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {derived.best1k && (
               <Badge variant="outline" className="rounded-full">
-                Best 1k: {fmtDurationFromSeconds(derived.best1k.dt)} ({fmtMmSsFromSeconds(derived.best1k.dt)} /км)
+                Best 1k: {fmtDurationFromSeconds(derived.best1k.dt)} ({fmtMmSsFromSeconds(derived.best1k.dt)}{" "}
+                /км)
               </Badge>
             )}
             {derived.best5k && (
@@ -555,35 +593,19 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
         {loading ? (
           <div className="p-4 text-sm text-muted-foreground">Загружаем…</div>
         ) : !chartData.length ? (
-          <div className="p-4 text-sm text-muted-foreground">
-            {err ?? "Нет данных для визуализации."}
-          </div>
+          <div className="p-4 text-sm text-muted-foreground">{err ?? "Нет данных для визуализации."}</div>
         ) : (
           <div className="rounded-2xl border bg-card/30">
             <div className="h-[380px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart
-                  data={viewData}
+                  data={chartData}
                   margin={{ top: 18, right: 18, left: 12, bottom: showBrush ? 10 : 14 }}
                 >
                   <defs>
-                    {/* HR */}
-                    <linearGradient id="hrFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={HR_COLOR} stopOpacity={SERIES_OPACITY * 0.42} />
-                      <stop offset="60%" stopColor={HR_COLOR} stopOpacity={SERIES_OPACITY * 0.16} />
-                      <stop offset="100%" stopColor={HR_COLOR} stopOpacity={0} />
-                    </linearGradient>
-
-                    {/* Pace */}
-                    <linearGradient id="paceFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={PACE_COLOR} stopOpacity={SERIES_OPACITY * 0.35} />
-                      <stop offset="70%" stopColor={PACE_COLOR} stopOpacity={SERIES_OPACITY * 0.12} />
-                      <stop offset="100%" stopColor={PACE_COLOR} stopOpacity={0} />
-                    </linearGradient>
-
-                    {/* glow */}
+                    {/* glow (оставим лёгкий, он не “подложка”) */}
                     <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
-                      <feGaussianBlur stdDeviation="2.6" result="blur" />
+                      <feGaussianBlur stdDeviation="2.2" result="blur" />
                       <feColorMatrix
                         in="blur"
                         type="matrix"
@@ -591,7 +613,7 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
                           1 0 0 0 0
                           0 1 0 0 0
                           0 0 1 0 0
-                          0 0 0 0.32 0"
+                          0 0 0 0.28 0"
                         result="glow"
                       />
                       <feMerge>
@@ -606,7 +628,7 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
                   <XAxis
                     dataKey="tMin"
                     type="number"
-                    domain={[0, "dataMax"]}
+                    domain={xDomain}
                     tickLine={false}
                     axisLine={false}
                     minTickGap={30}
@@ -643,7 +665,7 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
 
                   <Tooltip cursor={cursorStyle as any} content={<SexyTooltip />} />
 
-                  {/* HR zones bands */}
+                  {/* HR zones bands (оставляем) */}
                   {mode !== "pace" &&
                     zoneBands.map((z) => (
                       <ReferenceArea
@@ -657,10 +679,9 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
                       />
                     ))}
 
-                  {/* Best split windows highlight */}
+                  {/* Best split windows highlight (оставляем) */}
                   {derived?.best1k && (
                     <ReferenceArea
-                      xAxisId={undefined as any}
                       x1={derived.best1k.startMin}
                       x2={derived.best1k.endMin}
                       fill="rgba(246,176,33,0.08)"
@@ -676,43 +697,59 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
                     />
                   )}
 
-                  {/* KM markers (каждый км) */}
-                  {derived?.kmMarkers?.slice(0, 30).map((m) => (
-                    <ReferenceDot
-                      key={`km-${m.km}`}
-                      x={m.t / 60}
-                      y={mode === "pace" ? (m.pace ?? null) : (m.hr ?? null)}
-                      yAxisId={mode === "pace" ? "pace" : "hr"}
-                      r={3}
-                      fill={mode === "pace" ? PACE_COLOR : HR_COLOR}
-                      stroke="hsl(var(--background))"
-                      strokeWidth={2}
-                      ifOverflow="discard"
-                      label={{
-                        value: `${m.km}к`,
-                        position: "top",
-                        fill: "hsl(var(--muted-foreground))",
-                        fontSize: 10,
-                      }}
-                    />
+                  {/* KM markers: ✅ в both показываем обе точки (HR и Pace) */}
+                  {kmDots.map((m) => (
+                    <React.Fragment key={`km-${m.km}`}>
+                      {mode !== "pace" && (
+                        <ReferenceDot
+                          x={m.t / 60}
+                          y={m.hr ?? null}
+                          yAxisId="hr"
+                          r={3}
+                          fill={HR_COLOR}
+                          stroke="hsl(var(--background))"
+                          strokeWidth={2}
+                          ifOverflow="discard"
+                          label={{
+                            value: `${m.km}к`,
+                            position: "top",
+                            fill: "hsl(var(--muted-foreground))",
+                            fontSize: 10,
+                          }}
+                        />
+                      )}
+
+                      {mode !== "hr" && (
+                        <ReferenceDot
+                          x={m.t / 60}
+                          y={m.pace ?? null}
+                          yAxisId="pace"
+                          r={3}
+                          fill={PACE_COLOR}
+                          stroke="hsl(var(--background))"
+                          strokeWidth={2}
+                          ifOverflow="discard"
+                        />
+                      )}
+                    </React.Fragment>
                   ))}
 
+                  {/* ✅ 3) УБРАЛИ “подложку” (градиентные заливки): теперь только линии */}
                   {/* HR series */}
                   {mode !== "pace" && (
-                    <Area
+                    <Line
                       yAxisId="hr"
                       type="natural"
                       dataKey="hr"
                       stroke={HR_COLOR}
-                      fill="url(#hrFill)"
-                      strokeWidth={2.4}
+                      strokeWidth={2.6}
                       dot={false}
                       connectNulls
                       isAnimationActive={false}
                       filter="url(#softGlow)"
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      fillOpacity={SERIES_OPACITY}
+                      opacity={SERIES_OPACITY}
                       activeDot={{
                         r: 5,
                         stroke: "hsl(var(--background))",
@@ -723,59 +760,52 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
                     />
                   )}
 
-                  {/* Pace series */}
+                  {/* ✅ 2) Темп — полноценная линия (а не только точки) */}
                   {mode !== "hr" && (
-                    <>
-                      <Area
-                        yAxisId="pace"
-                        type="natural"
-                        dataKey="pace"
-                        stroke="transparent"
-                        fill="url(#paceFill)"
-                        dot={false}
-                        connectNulls
-                        isAnimationActive={false}
-                        fillOpacity={SERIES_OPACITY}
-                        name="Темп (заливка)"
-                      />
-                      <Line
-                        yAxisId="pace"
-                        type="natural"
-                        dataKey="pace"
-                        stroke={PACE_COLOR}
-                        strokeWidth={2.4}
-                        dot={false}
-                        connectNulls
-                        isAnimationActive={false}
-                        filter="url(#softGlow)"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        activeDot={{
-                          r: 5,
-                          stroke: "hsl(var(--background))",
-                          strokeWidth: 2,
-                          fill: PACE_COLOR,
-                        }}
-                        name="Темп"
-                      />
-                    </>
+                    <Line
+                      yAxisId="pace"
+                      type="natural"
+                      dataKey="pace"
+                      stroke={PACE_COLOR}
+                      strokeWidth={2.6}
+                      dot={false}
+                      connectNulls
+                      isAnimationActive={false}
+                      filter="url(#softGlow)"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      opacity={SERIES_OPACITY}
+                      activeDot={{
+                        r: 5,
+                        stroke: "hsl(var(--background))",
+                        strokeWidth: 2,
+                        fill: PACE_COLOR,
+                      }}
+                      name="Темп"
+                    />
                   )}
 
-                  {/* Zoom */}
+                  {/* ✅ 1) Переписанный Brush: теперь он работает по полной серии, а зум делаем через XAxis domain */}
                   {showBrush && (
                     <Brush
                       dataKey="tMin"
                       height={26}
                       stroke="hsl(var(--muted-foreground))"
                       travellerWidth={10}
+                      startIndex={brush ? brush.startIndex : 0}
+                      endIndex={brush ? brush.endIndex : Math.max(0, chartData.length - 1)}
                       onChange={(v: any) => {
                         if (!v) return;
-                        // v.startIndex/v.endIndex относятся к viewData — нам нужен диапазон внутри viewData
-                        // поэтому делаем “локальный” brush просто для view, без пересчёта в исходный chartData
-                        setBrush({
-                          startIndex: v.startIndex ?? 0,
-                          endIndex: v.endIndex ?? Math.max(0, viewData.length - 1),
-                        });
+
+                        const maxIdx = Math.max(0, chartData.length - 1);
+                        const s = clamp(Number(v.startIndex ?? 0), 0, maxIdx);
+                        const e = clamp(Number(v.endIndex ?? maxIdx), 0, maxIdx);
+
+                        // если выбрано почти всё — считаем, что зума нет
+                        const full =
+                          Math.min(s, e) <= 0 && Math.max(s, e) >= Math.max(0, maxIdx - 1);
+
+                        setBrush(full ? null : { startIndex: s, endIndex: e });
                       }}
                     />
                   )}
@@ -807,12 +837,7 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
               </div>
 
               <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setBrush(null)}
-                  disabled={!brush}
-                >
+                <Button size="sm" variant="ghost" onClick={() => setBrush(null)} disabled={!brush}>
                   Сбросить зум
                 </Button>
               </div>
@@ -820,9 +845,7 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
           </div>
         )}
 
-        {err && chartData.length > 0 && (
-          <p className="mt-2 text-xs text-destructive/70">{err}</p>
-        )}
+        {err && chartData.length > 0 && <p className="mt-2 text-xs text-destructive/70">{err}</p>}
       </CardContent>
     </Card>
   );
