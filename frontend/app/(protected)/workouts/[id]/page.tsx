@@ -30,10 +30,19 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { AppTooltip } from "@/components/ui/AppTooltip";
 
-// ВАЖНО: recharts/сложные chart-компоненты иногда ломают гидрацию/рендер.
-// Вынесем в dynamic import (ssr: false) — чтобы стабильно работало в dev/prod.
+// Charts (dynamic)
 const WorkoutCharts = dynamic(() => import("@/components/workouts/WorkoutCharts"), { ssr: false });
 const DeviceFileBlock = dynamic(() => import("@/components/workouts/DeviceFileBlock"), { ssr: false });
+
+// ✅ Leaflet map MUST be dynamic + ssr:false
+const WorkoutMap = dynamic(() => import("@/components/workouts/WorkoutMap.client"), {
+  ssr: false,
+  loading: () => (
+    <div className="h-[440px] w-full rounded-2xl border bg-muted/30 flex items-center justify-center text-sm text-muted-foreground">
+      Загружаем карту…
+    </div>
+  ),
+});
 
 import {
   BarChart,
@@ -105,7 +114,7 @@ type Workout = {
   perceived_exertion: number | null;
   created_at: string;
   updated_at: string;
-  strava_activity_url?: string | null; // если поле добавлено в БД — покажем кнопку "Открыть в Strava"
+  strava_activity_url?: string | null;
 };
 
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
@@ -180,18 +189,15 @@ function fmtSpeedKmh(distance_m?: number | null, time_sec?: number | null) {
   const decimals = kmh >= 100 ? 0 : kmh >= 10 ? 1 : 2;
   return `${kmh.toFixed(decimals).replace(".", ",")} км/ч`;
 }
-
 function fmtNumber(v?: number | null, digits = 0) {
   if (!isNum(v)) return "—";
   return v.toFixed(digits).replace(".", ",");
 }
-
 function fmtClimbRate(elev_gain_m?: number | null, moving_time_sec?: number | null) {
   if (!isNum(elev_gain_m) || !isNum(moving_time_sec) || moving_time_sec <= 0) return "—";
   const perHour = elev_gain_m / (moving_time_sec / 3600);
   return `${fmtNumber(perHour, perHour >= 100 ? 0 : 1)} м/ч`;
 }
-
 function fmtTimeOfDay(start_time?: string | null) {
   if (!isStr(start_time)) return "—";
   const d = new Date(start_time);
@@ -203,20 +209,18 @@ function fmtTimeOfDay(start_time?: string | null) {
 export default function WorkoutDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+
   const [row, setRow] = useState<Workout | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  // delete dialog
   const [pendingDelete, setPendingDelete] = useState(false);
 
-  // note (textarea) state
   const [note, setNote] = useState<string>("");
   const [noteDirty, setNoteDirty] = useState(false);
   const [noteSaving, setNoteSaving] = useState(false);
   const [noteSavedAt, setNoteSavedAt] = useState<Date | null>(null);
 
-  // fetch workout
   useEffect(() => {
     let canceled = false;
     (async () => {
@@ -296,6 +300,161 @@ export default function WorkoutDetailPage() {
     }
   }
 
+  const computedSpeed = fmtSpeedKmh(
+    row?.distance_m ?? null,
+    row?.moving_time_sec ?? row?.duration_sec ?? null
+  );
+  const computedClimbRate = fmtClimbRate(
+    row?.elev_gain_m ?? null,
+    row?.moving_time_sec ?? row?.duration_sec ?? null
+  );
+
+  type MetricItem = {
+    label: string;
+    value: React.ReactNode;
+    present: boolean;
+    hint?: string;
+  };
+
+  const metricItems: Array<MetricItem> = [
+    {
+      label: "Дистанция",
+      value: fmtKm(row?.distance_m ?? null),
+      present: isNum(row?.distance_m),
+      hint: "Преодолённое расстояние. Единицы: километры.",
+    },
+    {
+      label: "Время",
+      value: fmtDuration(row?.duration_sec ?? null),
+      present: isNum(row?.duration_sec),
+      hint: "От старта до финиша, включая паузы.",
+    },
+    {
+      label: "В движении",
+      value: fmtDuration(row?.moving_time_sec ?? null),
+      present: isNum(row?.moving_time_sec),
+      hint: "Сумма интервалов движения (без пауз).",
+    },
+    showRunPace
+      ? {
+          label: "Темп",
+          value: fmtPace(row?.avg_pace_s_per_km ?? null),
+          present: isNum(row?.avg_pace_s_per_km),
+          hint: "Средний темп: мин/км.",
+        }
+      : {
+          label: "Скорость",
+          value: computedSpeed,
+          present: computedSpeed !== "—",
+          hint: "Средняя скорость: км/ч.",
+        },
+    {
+      label: "Подъём",
+      value: fmtM(row?.elev_gain_m ?? null),
+      present: isNum(row?.elev_gain_m),
+      hint: "Суммарный набор высоты.",
+    },
+    {
+      label: "Спуск",
+      value: fmtM(row?.elev_loss_m ?? null),
+      present: isNum(row?.elev_loss_m),
+      hint: "Суммарная потеря высоты.",
+    },
+    {
+      label: "Ккал",
+      value: isNum(row?.calories_kcal) ? row!.calories_kcal : "—",
+      present: isNum(row?.calories_kcal),
+      hint: "Оценка энергозатрат.",
+    },
+    {
+      label: "Пульс ср/макс",
+      value: `${isNum(row?.avg_hr) ? row!.avg_hr : "—"} / ${isNum(row?.max_hr) ? row!.max_hr : "—"} bpm`,
+      present: isNum(row?.avg_hr) || isNum(row?.max_hr),
+      hint: "Средняя и максимальная ЧСС.",
+    },
+    {
+      label: "Мощность ср/NP/макс",
+      value: `${isNum(row?.avg_power_w) ? row!.avg_power_w : "—"} / ${isNum(row?.np_power_w) ? row!.np_power_w : "—"} / ${
+        isNum(row?.max_power_w) ? row!.max_power_w : "—"
+      } W`,
+      present:
+        isNum(row?.avg_power_w) || isNum(row?.np_power_w) || isNum(row?.max_power_w),
+      hint: "Средняя, NP и максимальная мощность.",
+    },
+    {
+      label: "Каденс (шаг)",
+      value: isNum(row?.avg_cadence_spm) ? row!.avg_cadence_spm : "—",
+      present: isNum(row?.avg_cadence_spm),
+      hint: "SPM — шагов в минуту.",
+    },
+    {
+      label: "Каденс (rpm)",
+      value: isNum(row?.avg_cadence_rpm) ? row!.avg_cadence_rpm : "—",
+      present: isNum(row?.avg_cadence_rpm),
+      hint: "RPM — оборотов в минуту.",
+    },
+    {
+      label: "SWOLF ср",
+      value: isNum(row?.swim_swolf_avg) ? row!.swim_swolf_avg : "—",
+      present: isNum(row?.swim_swolf_avg),
+      hint: "Время за дорожку + число гребков.",
+    },
+    {
+      label: "Плав. темп",
+      value: fmtSwimPace(row?.avg_swim_pace_s_per_100m ?? null),
+      present: isNum(row?.avg_swim_pace_s_per_100m),
+      hint: "Средний темп: мин/100м.",
+    },
+    {
+      label: "Бассейн",
+      value: isNum(row?.swim_pool_length_m) ? `${row!.swim_pool_length_m} м` : "—",
+      present: isNum(row?.swim_pool_length_m),
+      hint: "Длина бассейна.",
+    },
+    {
+      label: "Стиль",
+      value: isStr(row?.swim_stroke_primary) ? row!.swim_stroke_primary : "—",
+      present: isStr(row?.swim_stroke_primary),
+      hint: "Основной стиль плавания.",
+    },
+    {
+      label: "RPE",
+      value: isNum(row?.perceived_exertion) ? row!.perceived_exertion : "—",
+      present: isNum(row?.perceived_exertion),
+      hint: "Субъективная тяжесть (1–10).",
+    },
+    {
+      label: "TRIMP",
+      value: isNum(row?.trimp) ? row!.trimp : "—",
+      present: isNum(row?.trimp),
+      hint: "Импульс тренировки.",
+    },
+    {
+      label: "EF",
+      value: isNum(row?.ef) ? row!.ef : "—",
+      present: isNum(row?.ef),
+      hint: "Efficiency Factor.",
+    },
+    {
+      label: "PA:HR",
+      value: isNum(row?.pa_hr_pct) ? `${row!.pa_hr_pct}%` : "—",
+      present: isNum(row?.pa_hr_pct),
+      hint: "Декуплинг темпа/мощности и ЧСС.",
+    },
+    {
+      label: "IF",
+      value: isNum(row?.intensity_factor) ? row!.intensity_factor : "—",
+      present: isNum(row?.intensity_factor),
+      hint: "Intensity Factor (≈ NP/FTP).",
+    },
+    {
+      label: "Нагрузка",
+      value: isNum(row?.training_load_score) ? row!.training_load_score : "—",
+      present: isNum(row?.training_load_score),
+      hint: "TSS-подобная метрика.",
+    },
+  ].filter((i) => i.present);
+
   /* ================= render ================= */
 
   if (loading) {
@@ -335,160 +494,6 @@ export default function WorkoutDetailPage() {
       </main>
     );
   }
-
-  const computedSpeed = fmtSpeedKmh(
-    row.distance_m,
-    row.moving_time_sec ?? row.duration_sec
-  );
-  const computedClimbRate = fmtClimbRate(row.elev_gain_m, row.moving_time_sec ?? row.duration_sec);
-
-  type MetricItem = {
-    label: string;
-    value: React.ReactNode;
-    present: boolean;
-    hint?: string;
-  };
-
-  const metricItems: Array<MetricItem> = [
-    {
-      label: "Дистанция",
-      value: fmtKm(row.distance_m),
-      present: isNum(row.distance_m),
-      hint: "Преодолённое расстояние. Единицы: километры.",
-    },
-    {
-      label: "Время",
-      value: fmtDuration(row.duration_sec),
-      present: isNum(row.duration_sec),
-      hint: "От старта до финиша, включая паузы.",
-    },
-    {
-      label: "В движении",
-      value: fmtDuration(row.moving_time_sec),
-      present: isNum(row.moving_time_sec),
-      hint: "Сумма интервалов движения (без пауз).",
-    },
-    showRunPace
-      ? {
-          label: "Темп",
-          value: fmtPace(row.avg_pace_s_per_km),
-          present: isNum(row.avg_pace_s_per_km),
-          hint: "Средний темп: мин/км.",
-        }
-      : {
-          label: "Скорость",
-          value: computedSpeed,
-          present: computedSpeed !== "—",
-          hint: "Средняя скорость: км/ч.",
-        },
-    {
-      label: "Подъём",
-      value: fmtM(row.elev_gain_m),
-      present: isNum(row.elev_gain_m),
-      hint: "Суммарный набор высоты.",
-    },
-    {
-      label: "Спуск",
-      value: fmtM(row.elev_loss_m),
-      present: isNum(row.elev_loss_m),
-      hint: "Суммарная потеря высоты.",
-    },
-    {
-      label: "Ккал",
-      value: isNum(row.calories_kcal) ? row.calories_kcal : "—",
-      present: isNum(row.calories_kcal),
-      hint: "Оценка энергозатрат.",
-    },
-    {
-      label: "Пульс ср/макс",
-      value: `${isNum(row.avg_hr) ? row.avg_hr : "—"} / ${
-        isNum(row.max_hr) ? row.max_hr : "—"
-      } bpm`,
-      present: isNum(row.avg_hr) || isNum(row.max_hr),
-      hint: "Средняя и максимальная ЧСС.",
-    },
-    {
-      label: "Мощность ср/NP/макс",
-      value: `${isNum(row.avg_power_w) ? row.avg_power_w : "—"} / ${
-        isNum(row.np_power_w) ? row.np_power_w : "—"
-      } / ${isNum(row.max_power_w) ? row.max_power_w : "—"} W`,
-      present:
-        isNum(row.avg_power_w) || isNum(row.np_power_w) || isNum(row.max_power_w),
-      hint: "Средняя, NP и максимальная мощность.",
-    },
-    {
-      label: "Каденс (шаг)",
-      value: isNum(row.avg_cadence_spm) ? row.avg_cadence_spm : "—",
-      present: isNum(row.avg_cadence_spm),
-      hint: "SPM — шагов в минуту.",
-    },
-    {
-      label: "Каденс (rpm)",
-      value: isNum(row.avg_cadence_rpm) ? row.avg_cadence_rpm : "—",
-      present: isNum(row.avg_cadence_rpm),
-      hint: "RPM — оборотов в минуту.",
-    },
-    {
-      label: "SWOLF ср",
-      value: isNum(row.swim_swolf_avg) ? row.swim_swolf_avg : "—",
-      present: isNum(row.swim_swolf_avg),
-      hint: "Время за дорожку + число гребков.",
-    },
-    {
-      label: "Плав. темп",
-      value: fmtSwimPace(row.avg_swim_pace_s_per_100m),
-      present: isNum(row.avg_swim_pace_s_per_100m),
-      hint: "Средний темп: мин/100м.",
-    },
-    {
-      label: "Бассейн",
-      value: isNum(row.swim_pool_length_m) ? `${row.swim_pool_length_m} м` : "—",
-      present: isNum(row.swim_pool_length_m),
-      hint: "Длина бассейна.",
-    },
-    {
-      label: "Стиль",
-      value: isStr(row.swim_stroke_primary) ? row.swim_stroke_primary : "—",
-      present: isStr(row.swim_stroke_primary),
-      hint: "Основной стиль плавания.",
-    },
-    {
-      label: "RPE",
-      value: isNum(row.perceived_exertion) ? row.perceived_exertion : "—",
-      present: isNum(row.perceived_exertion),
-      hint: "Субъективная тяжесть (1–10).",
-    },
-    {
-      label: "TRIMP",
-      value: isNum(row.trimp) ? row.trimp : "—",
-      present: isNum(row.trimp),
-      hint: "Импульс тренировки.",
-    },
-    {
-      label: "EF",
-      value: isNum(row.ef) ? row.ef : "—",
-      present: isNum(row.ef),
-      hint: "Efficiency Factor.",
-    },
-    {
-      label: "PA:HR",
-      value: isNum(row.pa_hr_pct) ? `${row.pa_hr_pct}%` : "—",
-      present: isNum(row.pa_hr_pct),
-      hint: "Декуплинг темпа/мощности и ЧСС.",
-    },
-    {
-      label: "IF",
-      value: isNum(row.intensity_factor) ? row.intensity_factor : "—",
-      present: isNum(row.intensity_factor),
-      hint: "Intensity Factor (≈ NP/FTP).",
-    },
-    {
-      label: "Нагрузка",
-      value: isNum(row.training_load_score) ? row.training_load_score : "—",
-      present: isNum(row.training_load_score),
-      hint: "TSS-подобная метрика.",
-    },
-  ].filter((i) => i.present);
 
   return (
     <main className="space-y-6">
@@ -536,55 +541,19 @@ export default function WorkoutDetailPage() {
         </div>
       </div>
 
-      {/* KPI STRIP (PostHog-style) */}
+      {/* KPI STRIP */}
       <section>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6">
-          <Card>
-            <CardContent className="p-3">
-              <div className="text-xs text-muted-foreground">Дистанция</div>
-              <div className="mt-1 text-base font-semibold">{fmtKm(row.distance_m)}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-3">
-              <div className="text-xs text-muted-foreground">Длительность</div>
-              <div className="mt-1 text-base font-semibold">{fmtDuration(row.duration_sec)}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-3">
-              <div className="text-xs text-muted-foreground">
-                {(row?.sport || "").toLowerCase() === "run" || (row?.sport || "").toLowerCase() === "walk" ? "Темп" : "Скорость"}
-              </div>
-              <div className="mt-1 text-base font-semibold">
-                {(row?.sport || "").toLowerCase() === "run" || (row?.sport || "").toLowerCase() === "walk"
-                  ? fmtPace(row.avg_pace_s_per_km)
-                  : computedSpeed}
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-3">
-              <div className="text-xs text-muted-foreground">Пульс (ср)</div>
-              <div className="mt-1 text-base font-semibold">{isNum(row.avg_hr) ? `${row.avg_hr} bpm` : "—"}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-3">
-              <div className="text-xs text-muted-foreground">Набор</div>
-              <div className="mt-1 text-base font-semibold">{fmtM(row.elev_gain_m)}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-3">
-              <div className="text-xs text-muted-foreground">Старт</div>
-              <div className="mt-1 text-base font-semibold">{fmtTimeOfDay(row.start_time)}</div>
-            </CardContent>
-          </Card>
+          <Card><CardContent className="p-3"><div className="text-xs text-muted-foreground">Дистанция</div><div className="mt-1 text-base font-semibold">{fmtKm(row.distance_m)}</div></CardContent></Card>
+          <Card><CardContent className="p-3"><div className="text-xs text-muted-foreground">Длительность</div><div className="mt-1 text-base font-semibold">{fmtDuration(row.duration_sec)}</div></CardContent></Card>
+          <Card><CardContent className="p-3"><div className="text-xs text-muted-foreground">{showRunPace ? "Темп" : "Скорость"}</div><div className="mt-1 text-base font-semibold">{showRunPace ? fmtPace(row.avg_pace_s_per_km) : computedSpeed}</div></CardContent></Card>
+          <Card><CardContent className="p-3"><div className="text-xs text-muted-foreground">Пульс (ср)</div><div className="mt-1 text-base font-semibold">{isNum(row.avg_hr) ? `${row.avg_hr} bpm` : "—"}</div></CardContent></Card>
+          <Card><CardContent className="p-3"><div className="text-xs text-muted-foreground">Набор</div><div className="mt-1 text-base font-semibold">{fmtM(row.elev_gain_m)}</div></CardContent></Card>
+          <Card><CardContent className="p-3"><div className="text-xs text-muted-foreground">Старт</div><div className="mt-1 text-base font-semibold">{fmtTimeOfDay(row.start_time)}</div></CardContent></Card>
         </div>
       </section>
 
-      {/* METRICS GRID (каждый пункт — shadcn Card) */}
+      {/* METRICS GRID */}
       {metricItems.length > 0 && (
         <section>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6">
@@ -602,7 +571,22 @@ export default function WorkoutDetailPage() {
         </section>
       )}
 
-      {/* Insights row (small analytics cards) */}
+      {/* MAP */}
+      <section>
+        <Card className="overflow-hidden">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Маршрут</CardTitle>
+            <CardDescription>
+              Интерактивная карта: градиент, play, клик по треку, follow и т.д.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <WorkoutMap workoutId={row.id} />
+          </CardContent>
+        </Card>
+      </section>
+
+      {/* Insights row */}
       <section>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           <Card className="border-dashed">
@@ -617,6 +601,7 @@ export default function WorkoutDetailPage() {
               </div>
             </CardContent>
           </Card>
+
           <Card className="border-dashed">
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Инсайт: нагрузка</CardTitle>
@@ -633,6 +618,7 @@ export default function WorkoutDetailPage() {
               </div>
             </CardContent>
           </Card>
+
           <Card className="border-dashed">
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Инсайт: эффективность</CardTitle>
@@ -655,8 +641,6 @@ export default function WorkoutDetailPage() {
       {/* HR ZONES + WEATHER */}
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {zonesData.length > 0 && (
-          // FIX #1: recharts tooltip/bars иногда "вылезают" за Card.
-          // Делаем overflow-hidden и гарантируем 100% ширину контейнера.
           <Card className="overflow-hidden">
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Время в HR-зонах</CardTitle>
@@ -702,7 +686,6 @@ export default function WorkoutDetailPage() {
 
       {/* Note + Device/File */}
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* NOTE (Textarea внутри shadcn Card) */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Заметка</CardTitle>
@@ -711,10 +694,7 @@ export default function WorkoutDetailPage() {
           <CardContent className="space-y-3">
             <Textarea
               value={note}
-              onChange={(e) => {
-                setNote(e.target.value);
-                setNoteDirty(true);
-              }}
+              onChange={(e) => { setNote(e.target.value); setNoteDirty(true); }}
               placeholder="Как прошло? самочувствие, погода, особенности маршрута…"
               className="min-h-[120px] resize-vertical"
             />
@@ -725,10 +705,7 @@ export default function WorkoutDetailPage() {
               <Button
                 variant="ghost"
                 disabled={!noteDirty || noteSaving}
-                onClick={() => {
-                  setNote(row.description || "");
-                  setNoteDirty(false);
-                }}
+                onClick={() => { setNote(row.description || ""); setNoteDirty(false); }}
               >
                 Отмена
               </Button>
@@ -741,7 +718,6 @@ export default function WorkoutDetailPage() {
           </CardContent>
         </Card>
 
-        {/* DEVICE / FILES */}
         <DeviceFileBlock workoutId={row.id} />
       </section>
 
@@ -750,21 +726,16 @@ export default function WorkoutDetailPage() {
         <WorkoutCharts workoutId={row.id} />
       </section>
 
-      {/* Delete modal - shadcn AlertDialog */}
+      {/* Delete modal */}
       <AlertDialog open={pendingDelete} onOpenChange={setPendingDelete}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Удалить тренировку?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Это действие необратимо.
-            </AlertDialogDescription>
+            <AlertDialogDescription>Это действие необратимо.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Отмена</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-red-600 hover:bg-red-700"
-              onClick={doDelete}
-            >
+            <AlertDialogAction className="bg-red-600 hover:bg-red-700" onClick={doDelete}>
               Удалить
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -774,7 +745,6 @@ export default function WorkoutDetailPage() {
   );
 }
 
-/* ============ tiny ui parts ============ */
 function KV({ k, v }: { k: string; v: React.ReactNode }) {
   return (
     <div>

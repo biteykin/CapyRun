@@ -135,7 +135,10 @@ async function fetchStravaActivities(accessToken: string, after: number) {
 
 async function fetchStravaStreams(activityId: number, accessToken: string) {
   const url = new URL(`https://www.strava.com/api/v3/activities/${activityId}/streams`);
-  url.searchParams.set("keys", "latlng,time,altitude");
+
+  // ✅ важно: добавили heartrate + velocity_smooth + distance (fallback)
+  // time нужен, потому что preview у нас time_s от старта
+  url.searchParams.set("keys", "latlng,time,altitude,heartrate,velocity_smooth,distance");
   url.searchParams.set("key_by_type", "true");
 
   const resp = await fetch(url.toString(), {
@@ -193,6 +196,83 @@ function buildGpsPayloadFromStreams(streams: any): GpsPayload | null {
   if (Array.isArray(alt) && alt_m.length === time_s.length) payload.alt_m = alt_m;
 
   return payload;
+}
+
+// ✅ Preview payload (time_s/hr/pace_s_per_km)
+type PreviewPayload = {
+  time_s: number[];
+  hr: Array<number | null>;
+  pace_s_per_km: Array<number | null>;
+};
+
+function buildPreviewPayloadFromStreams(streams: any): PreviewPayload | null {
+  const time = streams?.time?.data;
+  if (!Array.isArray(time) || time.length < 2) return null;
+
+  const hrRaw = streams?.heartrate?.data;
+  const velRaw = streams?.velocity_smooth?.data;
+  const distRaw = streams?.distance?.data;
+
+  const nCandidates = [
+    time.length,
+    Array.isArray(hrRaw) ? hrRaw.length : Infinity,
+    Array.isArray(velRaw) ? velRaw.length : Infinity,
+    Array.isArray(distRaw) ? distRaw.length : Infinity,
+  ];
+  const n0 = Math.min(...nCandidates);
+
+  if (!Number.isFinite(n0) || n0 < 2) return null;
+
+  const outTime: number[] = [];
+  const outHr: Array<number | null> = [];
+  const outPace: Array<number | null> = [];
+
+  // если velocity_smooth нет, пробуем оценить скорость по distance/time
+  const canUseVel = Array.isArray(velRaw);
+  const canUseDist = Array.isArray(distRaw);
+
+  for (let i = 0; i < n0; i++) {
+    const t = time[i];
+    if (!isNum(t)) continue;
+
+    outTime.push(t);
+
+    // hr
+    const h = Array.isArray(hrRaw) ? hrRaw[i] : null;
+    outHr.push(isNum(h) && h > 0 ? h : null);
+
+    // speed -> pace
+    let speedMs: number | null = null;
+
+    if (canUseVel) {
+      const v = velRaw[i];
+      speedMs = isNum(v) && v > 0 ? v : null;
+    } else if (canUseDist && i > 0) {
+      const d0 = distRaw[i - 1];
+      const d1 = distRaw[i];
+      const t0 = time[i - 1];
+      const t1 = time[i];
+      if (isNum(d0) && isNum(d1) && isNum(t0) && isNum(t1)) {
+        const dt = t1 - t0;
+        const dd = d1 - d0;
+        if (dt > 0 && dd >= 0) {
+          const v = dd / dt;
+          speedMs = v > 0 ? v : null;
+        }
+      }
+    }
+
+    if (speedMs && speedMs > 0) outPace.push(Math.round(1000 / speedMs));
+    else outPace.push(null);
+  }
+
+  if (outTime.length < 2) return null;
+
+  return {
+    time_s: outTime,
+    hr: outHr,
+    pace_s_per_km: outPace,
+  };
 }
 
 export async function POST() {
@@ -280,7 +360,6 @@ export async function POST() {
         } as any)
         .eq("id", acc.id);
 
-      // важно: отдаём JSON, а не падаем в HTML
       return redirectErrJson("strava_fetch", String(e?.message || e), 401);
     }
 
@@ -298,7 +377,16 @@ export async function POST() {
         } as any)
         .eq("id", acc.id);
 
-      return NextResponse.json({ ok: true, added: 0, updated: 0, gps_saved: 0, gps_failed: 0, last_synced_at: nowIso });
+      return NextResponse.json({
+        ok: true,
+        added: 0,
+        updated: 0,
+        gps_saved: 0,
+        gps_failed: 0,
+        preview_saved: 0,
+        preview_failed: 0,
+        last_synced_at: nowIso,
+      });
     }
 
     // 6) added/updated stats
@@ -364,9 +452,11 @@ export async function POST() {
       return redirectErrJson("db_upsert_workouts", upErr.message, 500);
     }
 
-    // 7.1) GPS streams (не валит синхру)
+    // 7.1) Streams: GPS + Preview (не валит синхру)
     let gps_saved = 0;
     let gps_failed = 0;
+    let preview_saved = 0;
+    let preview_failed = 0;
 
     const { data: wmap, error: wmapErr } = await supabase
       .from("workouts")
@@ -380,60 +470,109 @@ export async function POST() {
         if (r?.id && r?.strava_activity_id) idByStrava.set(String(r.strava_activity_id), String(r.id));
       }
 
-      const MAX_GPS_FETCH = 60;
-      for (let i = 0; i < all.length && i < MAX_GPS_FETCH; i++) {
+      // лимит по API/скорости — можно поднять позже
+      const MAX_STREAMS_FETCH = 60;
+
+      for (let i = 0; i < all.length && i < MAX_STREAMS_FETCH; i++) {
         const a = all[i];
         const workoutId = idByStrava.get(String(a.id));
         if (!workoutId) continue;
 
         try {
           const streams = await fetchStravaStreams(a.id, accessToken);
-          const payload = buildGpsPayloadFromStreams(streams);
-          if (!payload) {
+
+          // ---- GPS ----
+          try {
+            const payload = buildGpsPayloadFromStreams(streams);
+            if (payload) {
+              const MAX_POINTS = 5000;
+              const n = payload.time_s.length;
+
+              let time_s = payload.time_s;
+              let lat = payload.lat;
+              let lon = payload.lon;
+              let alt_m = payload.alt_m;
+
+              if (n > MAX_POINTS) {
+                const idx = downsampleEvenly(Array.from({ length: n }, (_, k) => k), MAX_POINTS);
+                time_s = idx.map((k) => time_s[k]);
+                lat = idx.map((k) => lat[k]);
+                lon = idx.map((k) => lon[k]);
+                if (alt_m) alt_m = idx.map((k) => alt_m![k] ?? null);
+              }
+
+              const s = {
+                time_s,
+                lat,
+                lon,
+                ...(alt_m ? { alt_m } : {}),
+              };
+
+              const upGps = await supabase.from("workout_gps_streams").upsert(
+                [
+                  {
+                    workout_id: workoutId,
+                    user_id: user.id,
+                    points_count: time_s.length,
+                    s,
+                    updated_at: new Date().toISOString(),
+                  },
+                ] as any,
+                { onConflict: "workout_id" }
+              );
+
+              if (upGps.error) gps_failed += 1;
+              else gps_saved += 1;
+            } else {
+              gps_failed += 1;
+            }
+          } catch {
             gps_failed += 1;
-            continue;
           }
 
-          const MAX_POINTS = 5000;
-          const n = payload.time_s.length;
+          // ---- Preview (hr + pace) ----
+          try {
+            const preview = buildPreviewPayloadFromStreams(streams);
+            if (preview) {
+              const MAX_PREVIEW_POINTS = 1500;
 
-          let time_s = payload.time_s;
-          let lat = payload.lat;
-          let lon = payload.lon;
-          let alt_m = payload.alt_m;
+              const n = preview.time_s.length;
+              let idx = Array.from({ length: n }, (_, k) => k);
+              if (n > MAX_PREVIEW_POINTS) idx = downsampleEvenly(idx, MAX_PREVIEW_POINTS);
 
-          if (n > MAX_POINTS) {
-            const idx = downsampleEvenly(Array.from({ length: n }, (_, k) => k), MAX_POINTS);
-            time_s = idx.map((k) => time_s[k]);
-            lat = idx.map((k) => lat[k]);
-            lon = idx.map((k) => lon[k]);
-            if (alt_m) alt_m = idx.map((k) => alt_m![k] ?? null);
+              const time_s = idx.map((k) => preview.time_s[k]);
+              const hr = idx.map((k) => (isNum(preview.hr[k] as any) ? (preview.hr[k] as number) : null));
+              const pace_s_per_km = idx.map((k) =>
+                isNum(preview.pace_s_per_km[k] as any) ? (preview.pace_s_per_km[k] as number) : null
+              );
+
+              const points_count = time_s.length;
+
+              const upPrev = await supabase.from("workout_streams_preview").upsert(
+                [
+                  {
+                    workout_id: workoutId,
+                    user_id: user.id,
+                    points_count,
+                    s: { time_s, hr, pace_s_per_km },
+                    updated_at: new Date().toISOString(),
+                  },
+                ] as any,
+                { onConflict: "workout_id" }
+              );
+
+              if (upPrev.error) preview_failed += 1;
+              else preview_saved += 1;
+            } else {
+              preview_failed += 1;
+            }
+          } catch {
+            preview_failed += 1;
           }
-
-          const s = {
-            time_s,
-            lat,
-            lon,
-            ...(alt_m ? { alt_m } : {}),
-          };
-
-          const upGps = await supabase.from("workout_gps_streams").upsert(
-            [
-              {
-                workout_id: workoutId,
-                user_id: user.id,
-                points_count: time_s.length,
-                s,
-                updated_at: new Date().toISOString(),
-              },
-            ] as any,
-            { onConflict: "workout_id" }
-          );
-
-          if (upGps.error) gps_failed += 1;
-          else gps_saved += 1;
         } catch {
+          // streams fetch fail
           gps_failed += 1;
+          preview_failed += 1;
         }
       }
     }
@@ -461,9 +600,17 @@ export async function POST() {
 
     if (updAccErr) return redirectErrJson("db_update_external_accounts", updAccErr.message, 500);
 
-    return NextResponse.json({ ok: true, added, updated, gps_saved, gps_failed, last_synced_at: nowIso });
+    return NextResponse.json({
+      ok: true,
+      added,
+      updated,
+      gps_saved,
+      gps_failed,
+      preview_saved,
+      preview_failed,
+      last_synced_at: nowIso,
+    });
   } catch (e: any) {
-    // ВАЖНО: всегда JSON, чтобы фронт не получал HTML
     return NextResponse.json(
       { ok: false, reason: "sync_fatal", detail: String(e?.message ?? e) },
       { status: 500 }
