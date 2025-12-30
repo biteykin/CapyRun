@@ -32,9 +32,7 @@ import { AppTooltip } from "@/components/ui/AppTooltip";
 
 // Charts (dynamic)
 const WorkoutCharts = dynamic(() => import("@/components/workouts/WorkoutCharts"), { ssr: false });
-const DeviceFileBlock = dynamic(() => import("@/components/workouts/DeviceFileBlock"), { ssr: false });
 
-// ✅ Leaflet map MUST be dynamic + ssr:false
 const WorkoutMap = dynamic(() => import("@/components/workouts/WorkoutMap.client"), {
   ssr: false,
   loading: () => (
@@ -571,22 +569,7 @@ export default function WorkoutDetailPage() {
         </section>
       )}
 
-      {/* MAP */}
-      <section>
-        <Card className="overflow-hidden">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Маршрут</CardTitle>
-            <CardDescription>
-              Интерактивная карта: градиент, play, клик по треку, follow и т.д.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <WorkoutMap workoutId={row.id} />
-          </CardContent>
-        </Card>
-      </section>
-
-      {/* Insights row */}
+      {/* Insights row (должны быть выше графика) */}
       <section>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           <Card className="border-dashed">
@@ -638,6 +621,62 @@ export default function WorkoutDetailPage() {
         </div>
       </section>
 
+      {/* Note + AI Coach placeholder (должны быть выше графика) */}
+      <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Заметка</CardTitle>
+            <CardDescription>дополните тренировку комментариями</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Textarea
+              value={note}
+              onChange={(e) => { setNote(e.target.value); setNoteDirty(true); }}
+              placeholder="Как прошло? самочувствие, погода, особенности маршрута…"
+              className="min-h-[120px] resize-vertical"
+            />
+            <div className="flex items-center gap-2">
+              <Button onClick={saveNote} disabled={!noteDirty || noteSaving}>
+                {noteSaving ? "Сохраняем…" : "Сохранить"}
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={!noteDirty || noteSaving}
+                onClick={() => { setNote(row.description || ""); setNoteDirty(false); }}
+              >
+                Отмена
+              </Button>
+              {noteSavedAt && !noteDirty && (
+                <span className="text-xs text-muted-foreground">
+                  Сохранено {noteSavedAt.toLocaleTimeString()}
+                </span>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* AI Coach placeholder */}
+        <Card className="border-dashed">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Комментарии AI-тренера</CardTitle>
+            <CardDescription>заглушка — добавим анализ позже</CardDescription>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground space-y-2">
+            <div>Скоро здесь появятся:</div>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>оценка нагрузки и восстановления</li>
+              <li>заметки по темпу/пульсу и декуплингу</li>
+              <li>рекомендации на следующую тренировку</li>
+            </ul>
+          </CardContent>
+        </Card>
+      </section>
+
+      {/* Charts (пульс/темп) — сразу под картой (после инсайтов+заметки) */}
+      <section>
+        <WorkoutCharts workoutId={row.id} />
+      </section>
+
       {/* HR ZONES + WEATHER */}
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {zonesData.length > 0 && (
@@ -684,46 +723,19 @@ export default function WorkoutDetailPage() {
         )}
       </section>
 
-      {/* Note + Device/File */}
-      <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card>
+      {/* MAP (перенесли в самый низ) */}
+      <section>
+        <Card className="overflow-hidden">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Заметка</CardTitle>
-            <CardDescription>дополните тренировку комментариями</CardDescription>
+            <CardTitle className="text-base">Маршрут</CardTitle>
+            <CardDescription>
+              Интерактивная карта: градиент, play, клик по треку, follow и т.д.
+            </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <Textarea
-              value={note}
-              onChange={(e) => { setNote(e.target.value); setNoteDirty(true); }}
-              placeholder="Как прошло? самочувствие, погода, особенности маршрута…"
-              className="min-h-[120px] resize-vertical"
-            />
-            <div className="flex items-center gap-2">
-              <Button onClick={saveNote} disabled={!noteDirty || noteSaving}>
-                {noteSaving ? "Сохраняем…" : "Сохранить"}
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={!noteDirty || noteSaving}
-                onClick={() => { setNote(row.description || ""); setNoteDirty(false); }}
-              >
-                Отмена
-              </Button>
-              {noteSavedAt && !noteDirty && (
-                <span className="text-xs text-muted-foreground">
-                  Сохранено {noteSavedAt.toLocaleTimeString()}
-                </span>
-              )}
-            </div>
+          <CardContent>
+            <WorkoutMap workoutId={row.id} />
           </CardContent>
         </Card>
-
-        <DeviceFileBlock workoutId={row.id} />
-      </section>
-
-      {/* Charts */}
-      <section>
-        <WorkoutCharts workoutId={row.id} />
       </section>
 
       {/* Delete modal */}

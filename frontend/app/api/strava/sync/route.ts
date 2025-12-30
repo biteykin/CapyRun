@@ -385,6 +385,8 @@ export async function POST() {
         gps_failed: 0,
         preview_saved: 0,
         preview_failed: 0,
+        gps_fail_reasons: [],
+        preview_fail_reasons: [],
         last_synced_at: nowIso,
       });
     }
@@ -458,6 +460,9 @@ export async function POST() {
     let preview_saved = 0;
     let preview_failed = 0;
 
+    const gps_fail_reasons: Array<{ activity_id: string; reason: string }> = [];
+    const preview_fail_reasons: Array<{ activity_id: string; reason: string }> = [];
+
     const { data: wmap, error: wmapErr } = await supabase
       .from("workouts")
       .select("id,strava_activity_id")
@@ -521,13 +526,25 @@ export async function POST() {
                 { onConflict: "workout_id" }
               );
 
-              if (upGps.error) gps_failed += 1;
-              else gps_saved += 1;
+              if (upGps.error) {
+                gps_failed += 1;
+                const reason = `db_upsert_failed: ${upGps.error.message}`;
+                gps_fail_reasons.push({ activity_id: String(a.id), reason });
+                console.warn("[strava] gps upsert failed", a.id, upGps.error.message);
+              } else {
+                gps_saved += 1;
+              }
             } else {
               gps_failed += 1;
+              gps_fail_reasons.push({ activity_id: String(a.id), reason: "no_latlng_or_time" });
             }
-          } catch {
+          } catch (e: any) {
             gps_failed += 1;
+            gps_fail_reasons.push({
+              activity_id: String(a.id),
+              reason: `gps_exception: ${String(e?.message ?? e)}`,
+            });
+            console.warn("[strava] gps exception", a.id, e?.message ?? e);
           }
 
           // ---- Preview (hr + pace) ----
@@ -561,18 +578,37 @@ export async function POST() {
                 { onConflict: "workout_id" }
               );
 
-              if (upPrev.error) preview_failed += 1;
-              else preview_saved += 1;
+              if (upPrev.error) {
+                preview_failed += 1;
+                const reason = `db_upsert_failed: ${upPrev.error.message}`;
+                preview_fail_reasons.push({ activity_id: String(a.id), reason });
+                console.warn("[strava] preview upsert failed", a.id, upPrev.error.message);
+              } else {
+                preview_saved += 1;
+              }
             } else {
               preview_failed += 1;
+              preview_fail_reasons.push({
+                activity_id: String(a.id),
+                reason: "no_time_or_no_streams_for_preview",
+              });
             }
-          } catch {
+          } catch (e: any) {
             preview_failed += 1;
+            preview_fail_reasons.push({
+              activity_id: String(a.id),
+              reason: `preview_exception: ${String(e?.message ?? e)}`,
+            });
+            console.warn("[strava] preview exception", a.id, e?.message ?? e);
           }
-        } catch {
+        } catch (e: any) {
           // streams fetch fail
           gps_failed += 1;
           preview_failed += 1;
+          const reason = `streams_fetch_failed: ${String(e?.message ?? e)}`;
+          gps_fail_reasons.push({ activity_id: String(a.id), reason });
+          preview_fail_reasons.push({ activity_id: String(a.id), reason });
+          console.warn("[strava] streams fetch failed", a.id, e?.message ?? e);
         }
       }
     }
@@ -608,6 +644,8 @@ export async function POST() {
       gps_failed,
       preview_saved,
       preview_failed,
+      gps_fail_reasons: gps_fail_reasons.slice(0, 20),
+      preview_fail_reasons: preview_fail_reasons.slice(0, 20),
       last_synced_at: nowIso,
     });
   } catch (e: any) {
