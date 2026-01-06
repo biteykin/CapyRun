@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import WorkoutWeatherKpi from "@/components/workouts/WorkoutWeatherKpi";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -541,13 +542,14 @@ export default function WorkoutDetailPage() {
 
       {/* KPI STRIP */}
       <section>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
           <Card><CardContent className="p-3"><div className="text-xs text-muted-foreground">Дистанция</div><div className="mt-1 text-base font-semibold">{fmtKm(row.distance_m)}</div></CardContent></Card>
           <Card><CardContent className="p-3"><div className="text-xs text-muted-foreground">Длительность</div><div className="mt-1 text-base font-semibold">{fmtDuration(row.duration_sec)}</div></CardContent></Card>
           <Card><CardContent className="p-3"><div className="text-xs text-muted-foreground">{showRunPace ? "Темп" : "Скорость"}</div><div className="mt-1 text-base font-semibold">{showRunPace ? fmtPace(row.avg_pace_s_per_km) : computedSpeed}</div></CardContent></Card>
           <Card><CardContent className="p-3"><div className="text-xs text-muted-foreground">Пульс (ср)</div><div className="mt-1 text-base font-semibold">{isNum(row.avg_hr) ? `${row.avg_hr} bpm` : "—"}</div></CardContent></Card>
           <Card><CardContent className="p-3"><div className="text-xs text-muted-foreground">Набор</div><div className="mt-1 text-base font-semibold">{fmtM(row.elev_gain_m)}</div></CardContent></Card>
           <Card><CardContent className="p-3"><div className="text-xs text-muted-foreground">Старт</div><div className="mt-1 text-base font-semibold">{fmtTimeOfDay(row.start_time)}</div></CardContent></Card>
+          {weather ? <WorkoutWeatherKpi weather={weather} /> : null}
         </div>
       </section>
 
@@ -678,7 +680,7 @@ export default function WorkoutDetailPage() {
       </section>
 
       {/* HR ZONES + WEATHER */}
-      <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+      <section className="grid grid-cols-1 gap-6">
         {zonesData.length > 0 && (
           <Card className="overflow-hidden">
             <CardHeader className="pb-2">
@@ -699,24 +701,6 @@ export default function WorkoutDetailPage() {
                     <Bar dataKey="minutes" radius={8} fill="hsl(var(--chart-1))" />
                   </BarChart>
                 </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {weather && (
-          <Card className="lg:col-span-2">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Погода</CardTitle>
-              <CardDescription>условия в момент тренировки</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-3">
-                {isNum(weather.temp_c) && <KV k="Температура" v={`${weather.temp_c} °C`} />}
-                {isNum(weather.wind_kph) && <KV k="Ветер" v={`${weather.wind_kph} км/ч`} />}
-                {isNum(weather.humidity) && <KV k="Влажность" v={`${weather.humidity}%`} />}
-                {isNum(weather.pressure_hpa) && <KV k="Давление" v={`${weather.pressure_hpa} гПа`} />}
-                {isStr(weather.conditions) && <KV k="Условия" v={weather.conditions} />}
               </div>
             </CardContent>
           </Card>
@@ -754,14 +738,5 @@ export default function WorkoutDetailPage() {
         </AlertDialogContent>
       </AlertDialog>
     </main>
-  );
-}
-
-function KV({ k, v }: { k: string; v: React.ReactNode }) {
-  return (
-    <div>
-      <div className="text-xs text-muted-foreground">{k}</div>
-      <div className="font-medium">{v}</div>
-    </div>
   );
 }
