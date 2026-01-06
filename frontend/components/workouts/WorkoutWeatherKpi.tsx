@@ -2,11 +2,7 @@
 
 import * as React from "react";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "@/components/ui/hover-card";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { cn } from "@/lib/utils";
 import {
   Sun,
@@ -24,20 +20,19 @@ import {
 } from "lucide-react";
 
 type Weather = {
-  // existing
   temp_c?: number;
   wind_kph?: number;
   humidity?: number;
   pressure_hpa?: number;
   conditions?: string;
 
-  // optional extensions (if your ingestion provides them later)
   feelslike_c?: number;
   gust_kph?: number;
-  wind_degree?: number; // 0..360, meteorological: direction FROM which wind blows
-  wind_dir?: string; // "NW", etc.
+  wind_degree?: number;
+  wind_dir?: string;
+
   precip_mm?: number;
-  cloud?: number; // %
+  cloud?: number;
   uv?: number;
 
   [k: string]: unknown;
@@ -61,18 +56,11 @@ type WindFeel = "headwind" | "tailwind" | "crosswind" | null;
 
 export type WorkoutWeatherKpiProps = {
   weather: Weather;
-  /** Make it extra small for KPI strip */
   variant?: "default" | "compact";
-  /**
-   * Course/bearing of workout movement in degrees (0..360), where 0 = North, 90 = East.
-   * If you don't have it yet, omit.
-   */
   course_deg?: number | null;
-  /**
-   * Wind direction in degrees (0..360), meteorological "from".
-   * If your weather has wind_degree, you can omit and it will be picked.
-   */
   wind_from_deg?: number | null;
+  /** Enable background animation */
+  animated?: boolean;
 };
 
 function clampDeg(d: number) {
@@ -80,33 +68,23 @@ function clampDeg(d: number) {
   if (x < 0) x += 360;
   return x;
 }
-
 function deltaAngle(a: number, b: number) {
-  // minimal absolute delta between headings in degrees (0..180)
   const d = Math.abs(clampDeg(a) - clampDeg(b));
   return d > 180 ? 360 - d : d;
 }
-
 function windFeel(courseDeg: number, windFromDeg: number): WindFeel {
-  // Wind "from" direction means wind vector is coming FROM that heading and going TO opposite.
-  // For runner impact, compare course with wind FROM (headwind if you run into where wind comes from).
   const d = deltaAngle(courseDeg, windFromDeg);
-
-  // thresholds feel-good: <=45 head/tail, 45..135 cross, >=135 tail
   if (d <= 45) return "headwind";
   if (d >= 135) return "tailwind";
   return "crosswind";
 }
-
 function windFeelLabel(kind: WindFeel) {
   if (kind === "headwind") return "встречный ветер";
   if (kind === "tailwind") return "попутный ветер";
   if (kind === "crosswind") return "боковой ветер";
   return null;
 }
-
 function windFeelIcon(kind: WindFeel) {
-  // simple icons: headwind = ArrowUp (into wind), tailwind = ArrowUpRight-ish, crosswind = ArrowRight
   if (kind === "headwind") return ArrowUp;
   if (kind === "tailwind") return ArrowUpRight;
   if (kind === "crosswind") return ArrowRight;
@@ -118,7 +96,6 @@ function pickKind(w: Weather): Kind {
   const t = isNum(w.temp_c) ? w.temp_c : null;
   const wind = isNum(w.wind_kph) ? w.wind_kph : null;
 
-  // 1) by string conditions
   if (c.includes("snow") || c.includes("снег") || c.includes("snowfall")) return "snow";
   if (c.includes("rain") || c.includes("дожд") || c.includes("shower") || c.includes("storm")) return "rain";
   if (c.includes("fog") || c.includes("mist") || c.includes("туман") || c.includes("haze")) return "fog";
@@ -126,7 +103,6 @@ function pickKind(w: Weather): Kind {
   if (c.includes("cloud") || c.includes("облач")) return "cloudy";
   if (c.includes("sun") || c.includes("clear") || c.includes("ясно") || c.includes("солне")) return "sunny";
 
-  // 2) heuristics by numbers
   if (t !== null && t <= -2) return "cold";
   if (t !== null && t >= 27) return "hot";
   if (wind !== null && wind >= 28) return "wind";
@@ -215,15 +191,6 @@ function fmtHum(h?: number) {
 function fmtPress(p?: number) {
   return isNum(p) ? `${Math.round(p)} гПа` : null;
 }
-function fmtMm(v?: number) {
-  return isNum(v) ? `${v.toFixed(v >= 10 ? 0 : 1).replace(".", ",")} мм` : null;
-}
-function fmtUv(v?: number) {
-  return isNum(v) ? String(Math.round(v)) : null;
-}
-function fmtPct(v?: number) {
-  return isNum(v) ? `${Math.round(v)}%` : null;
-}
 
 function conditionsLabel(kind: Kind, w: Weather) {
   const t = isNum(w.temp_c) ? w.temp_c : null;
@@ -246,8 +213,68 @@ function conditionsLabel(kind: Kind, w: Weather) {
   return isStr(w.conditions) ? w.conditions!.toString() : "условия";
 }
 
+/** Lightweight animated background overlay */
+function WeatherBackdrop({ kind, intensity = 1 }: { kind: Kind; intensity?: 1 | 2 }) {
+  // intensity: 1 subtle, 2 stronger (e.g. heavy rain)
+  return (
+    <>
+      {/* Base soft texture */}
+      <div className="pointer-events-none absolute inset-0 opacity-[0.18] mix-blend-soft-light">
+        <div className="h-full w-full bg-[radial-gradient(circle_at_20%_10%,rgba(255,255,255,0.55),transparent_45%),radial-gradient(circle_at_80%_30%,rgba(255,255,255,0.35),transparent_55%)]" />
+      </div>
+
+      {/* Kind-specific */}
+      {kind === "rain" ? (
+        <div
+          className={cn(
+            "pointer-events-none absolute inset-0 opacity-30",
+            intensity === 2 && "opacity-40"
+          )}
+        >
+          <div className="absolute inset-0 cr-rain" />
+        </div>
+      ) : null}
+
+      {kind === "snow" || kind === "cold" ? (
+        <div
+          className={cn(
+            "pointer-events-none absolute inset-0",
+            intensity === 2 ? "opacity-45" : "opacity-35"
+          )}
+        >
+          <div className="absolute inset-0 cr-snow" />
+        </div>
+      ) : null}
+
+      {kind === "fog" ? (
+        <div className="pointer-events-none absolute inset-0 opacity-35">
+          <div className="absolute inset-0 cr-fog" />
+        </div>
+      ) : null}
+
+      {kind === "wind" ? (
+        <div className="pointer-events-none absolute inset-0 opacity-30">
+          <div className="absolute inset-0 cr-wind" />
+        </div>
+      ) : null}
+
+      {kind === "sunny" || kind === "hot" ? (
+        <div className="pointer-events-none absolute inset-0 opacity-35">
+          <div className="absolute inset-0 cr-sun" />
+        </div>
+      ) : null}
+
+      {kind === "partly" || kind === "cloudy" ? (
+        <div className="pointer-events-none absolute inset-0 opacity-25">
+          <div className="absolute inset-0 cr-clouds" />
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 export default function WorkoutWeatherKpi(props: WorkoutWeatherKpiProps) {
-  const { weather, variant = "default" } = props;
+  const { weather, variant = "default", animated = true } = props;
 
   const hasAny =
     isNum(weather.temp_c) ||
@@ -269,7 +296,6 @@ export default function WorkoutWeatherKpi(props: WorkoutWeatherKpiProps) {
   const hum = fmtHum(weather.humidity);
   const press = fmtPress(weather.pressure_hpa);
 
-  // wind direction + course => head/tail/cross
   const course = isNum(props.course_deg) ? clampDeg(props.course_deg) : null;
   const windFrom =
     isNum(props.wind_from_deg)
@@ -299,96 +325,100 @@ export default function WorkoutWeatherKpi(props: WorkoutWeatherKpiProps) {
   if (wfLabel) details.push({ k: "Относительно движения", v: wfLabel });
   if (isNum(weather.humidity)) details.push({ k: "Влажность", v: `${weather.humidity}%` });
   if (press) details.push({ k: "Давление", v: press });
-  const precip = fmtMm(weather.precip_mm);
-  if (precip) details.push({ k: "Осадки", v: precip });
-  const cloud = fmtPct(weather.cloud);
-  if (cloud) details.push({ k: "Облачность", v: cloud });
-  const uv = fmtUv(weather.uv);
-  if (uv) details.push({ k: "UV", v: uv });
   if (isStr(weather.conditions)) details.push({ k: "Условия", v: weather.conditions! });
 
   const compact = variant === "compact";
 
-  return (
-    <HoverCard openDelay={120}>
-      <HoverCardTrigger asChild>
-        <Card
-          className={cn(
-            "group relative overflow-hidden border transition-all",
-            "hover:-translate-y-[1px] hover:shadow-md",
-            ui.wrap
-          )}
-        >
-          {/* soft shine on hover */}
-          <div className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
-            <div className="absolute -left-1/3 top-0 h-full w-1/2 rotate-12 bg-white/35 blur-xl" />
-          </div>
+  // stronger rain/snow if we have precip_mm or low temp + precip, etc.
+  const intensity: 1 | 2 =
+    (kind === "rain" && isNum(weather.precip_mm) && weather.precip_mm >= 3) ||
+    (kind === "snow" && isNum(weather.wind_kph) && weather.wind_kph >= 20)
+      ? 2
+      : 1;
 
-          <CardContent className={cn(compact ? "p-2.5" : "p-3")}>
-            <div className={cn("text-xs text-muted-foreground", compact && "text-[11px]")}>
-              Погода
+  return (
+    <>
+      <HoverCard openDelay={120}>
+        <HoverCardTrigger asChild>
+          <Card
+            className={cn(
+              "group relative overflow-hidden border transition-all",
+              "hover:-translate-y-[1px] hover:shadow-md",
+              ui.wrap
+            )}
+          >
+            {/* animated background */}
+            {animated ? <WeatherBackdrop kind={kind} intensity={intensity} /> : null}
+
+            {/* soft shine on hover */}
+            <div className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+              <div className="absolute -left-1/3 top-0 h-full w-1/2 rotate-12 bg-white/35 blur-xl" />
             </div>
 
-            <div className={cn("mt-1 flex items-center gap-2", compact && "gap-2")}>
-              <div className={cn("grid place-items-center rounded-full", ui.chip, compact ? "h-7 w-7" : "h-7 w-7")}>
-                <Icon className={cn("h-4 w-4", ui.icon)} />
+            <CardContent className={cn(compact ? "p-2.5" : "p-3")}>
+              <div className={cn("text-xs text-muted-foreground", compact && "text-[11px]")}>
+                Погода
               </div>
 
-              <div className="min-w-0">
-                <div className={cn("flex items-baseline gap-2", compact && "gap-1.5")}>
-                  <div className={cn("font-semibold leading-none", compact ? "text-sm" : "text-base")}>
-                    {temp}
+              <div className={cn("mt-1 flex items-center gap-2", compact && "gap-2")}>
+                <div className={cn("grid h-7 w-7 place-items-center rounded-full", ui.chip)}>
+                  <Icon className={cn("h-4 w-4", ui.icon)} />
+                </div>
+
+                <div className="min-w-0">
+                  <div className={cn("flex items-baseline gap-2", compact && "gap-1.5")}>
+                    <div className={cn("font-semibold leading-none", compact ? "text-sm" : "text-base")}>
+                      {temp}
+                    </div>
+                    {feels && feels !== temp ? (
+                      <div className={cn("text-muted-foreground", compact ? "text-[11px]" : "text-xs")}>
+                        ощущ. {feels}
+                      </div>
+                    ) : null}
                   </div>
 
-                  {feels && feels !== temp ? (
-                    <div className={cn("text-muted-foreground", compact ? "text-[11px]" : "text-xs")}>
-                      ощущ. {feels}
+                  <div className={cn("mt-1 line-clamp-1 text-muted-foreground", compact ? "text-[11px]" : "text-[11px]")}>
+                    {subtitle || label}
+                  </div>
+
+                  {WfIcon && wind ? (
+                    <div className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
+                      <WfIcon className="h-3.5 w-3.5" />
+                      <span>{wfLabel}</span>
                     </div>
                   ) : null}
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+        </HoverCardTrigger>
 
-                <div className={cn("mt-1 line-clamp-1 text-muted-foreground", compact ? "text-[11px]" : "text-[11px]")}>
-                  {subtitle || label}
+        <HoverCardContent className="w-72">
+          <div className="text-sm font-medium">Погода во время тренировки</div>
+          <div className="mt-1 text-xs text-muted-foreground">{label}</div>
+
+          <div className="mt-3 space-y-1 text-sm">
+            {details.length > 0 ? (
+              details.map((d) => (
+                <div key={d.k} className="flex items-baseline justify-between gap-4">
+                  <span className="text-muted-foreground">{d.k}</span>
+                  <span className="font-medium">{d.v}</span>
                 </div>
-
-                {/* tiny wind feel icon row (only if we can compute it) */}
-                {WfIcon && wind ? (
-                  <div className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
-                    <WfIcon className="h-3.5 w-3.5" />
-                    <span>{wfLabel}</span>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </HoverCardTrigger>
-
-      <HoverCardContent className="w-72">
-        <div className="text-sm font-medium">Погода во время тренировки</div>
-        <div className="mt-1 text-xs text-muted-foreground">{label}</div>
-
-        <div className="mt-3 space-y-1 text-sm">
-          {details.length > 0 ? (
-            details.map((d) => (
-              <div key={d.k} className="flex items-baseline justify-between gap-4">
-                <span className="text-muted-foreground">{d.k}</span>
-                <span className="font-medium">{d.v}</span>
-              </div>
-            ))
-          ) : (
-            <div className="text-muted-foreground">Нет подробных данных</div>
-          )}
-        </div>
-
-        {(course !== null || windFrom !== null) && (
-          <div className="mt-3 text-xs text-muted-foreground">
-            {course !== null ? `Курс: ${Math.round(course)}°` : null}
-            {course !== null && windFrom !== null ? " · " : null}
-            {windFrom !== null ? `Ветер (откуда): ${Math.round(windFrom)}°` : null}
+              ))
+            ) : (
+              <div className="text-muted-foreground">Нет подробных данных</div>
+            )}
           </div>
-        )}
-      </HoverCardContent>
-    </HoverCard>
+
+          {(course !== null || windFrom !== null) && (
+            <div className="mt-3 text-xs text-muted-foreground">
+              {course !== null ? `Курс: ${Math.round(course)}°` : null}
+              {course !== null && windFrom !== null ? " · " : null}
+              {windFrom !== null ? `Ветер (откуда): ${Math.round(windFrom)}°` : null}
+            </div>
+          )}
+        </HoverCardContent>
+      </HoverCard>
+    </>
   );
 }

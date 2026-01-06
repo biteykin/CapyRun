@@ -240,6 +240,117 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/* ===== Weather KPI animated backdrops (utilities) ===== */
+@layer utilities {
+  @media (prefers-reduced-motion: reduce) {
+    .cr-rain,
+    .cr-snow,
+    .cr-fog,
+    .cr-wind,
+    .cr-sun,
+    .cr-clouds {
+      animation: none !important;
+    }
+  }
+
+  /* Rain: moving streaks */
+  .cr-rain {
+    background-image:
+      repeating-linear-gradient(
+        120deg,
+        rgba(255,255,255,0.0) 0px,
+        rgba(255,255,255,0.0) 6px,
+        rgba(255,255,255,0.18) 7px,
+        rgba(255,255,255,0.0) 9px
+      );
+    background-size: 24px 24px;
+    filter: blur(0.2px);
+    animation: cr-rain-fall 0.75s linear infinite;
+    mask-image: radial-gradient(circle at 50% 30%, rgba(0,0,0,0.9), transparent 70%);
+  }
+  @keyframes cr-rain-fall {
+    from { background-position: 0px -40px; }
+    to { background-position: 0px 40px; }
+  }
+
+  /* Snow: layered drifting flakes */
+  .cr-snow {
+    background-image:
+      radial-gradient(circle, rgba(255,255,255,0.85) 1.2px, rgba(255,255,255,0) 1.3px),
+      radial-gradient(circle, rgba(255,255,255,0.7) 1px, rgba(255,255,255,0) 1.1px),
+      radial-gradient(circle, rgba(255,255,255,0.5) 0.9px, rgba(255,255,255,0) 1px);
+    background-size: 26px 26px, 38px 38px, 54px 54px;
+    background-position: 0 0, 12px 18px, 24px 6px;
+    animation: cr-snow-fall 3.8s linear infinite;
+    mask-image: radial-gradient(circle at 40% 30%, rgba(0,0,0,0.85), transparent 72%);
+  }
+  @keyframes cr-snow-fall {
+    from { background-position: 0px -60px, 12px -90px, 24px -120px; }
+    to { background-position: 0px 60px, 12px 90px, 24px 120px; }
+  }
+
+  /* Fog: soft haze drift */
+  .cr-fog {
+    background-image:
+      radial-gradient(circle at 20% 40%, rgba(255,255,255,0.45), transparent 55%),
+      radial-gradient(circle at 70% 50%, rgba(255,255,255,0.35), transparent 60%),
+      radial-gradient(circle at 50% 80%, rgba(255,255,255,0.25), transparent 60%);
+    filter: blur(10px);
+    animation: cr-fog-drift 6s ease-in-out infinite alternate;
+    mask-image: radial-gradient(circle at 50% 50%, rgba(0,0,0,0.8), transparent 75%);
+  }
+  @keyframes cr-fog-drift {
+    from { transform: translate3d(-6px, 0, 0); }
+    to { transform: translate3d(6px, 0, 0); }
+  }
+
+  /* Wind: flowing lines */
+  .cr-wind {
+    background-image:
+      linear-gradient(90deg, rgba(255,255,255,0.0), rgba(255,255,255,0.22), rgba(255,255,255,0.0)),
+      linear-gradient(90deg, rgba(255,255,255,0.0), rgba(255,255,255,0.14), rgba(255,255,255,0.0));
+    background-size: 140px 2px, 180px 2px;
+    background-position: -160px 28%, -220px 62%;
+    background-repeat: no-repeat;
+    animation: cr-wind-flow 1.8s linear infinite;
+    filter: blur(0.2px);
+    mask-image: radial-gradient(circle at 40% 40%, rgba(0,0,0,0.85), transparent 70%);
+  }
+  @keyframes cr-wind-flow {
+    from { background-position: -160px 28%, -220px 62%; }
+    to { background-position: 320px 28%, 420px 62%; }
+  }
+
+  /* Sun: gentle glow pulse */
+  .cr-sun {
+    background-image:
+      radial-gradient(circle at 75% 30%, rgba(255,255,255,0.55), transparent 45%),
+      radial-gradient(circle at 65% 25%, rgba(255,255,255,0.35), transparent 55%);
+    animation: cr-sun-pulse 3.5s ease-in-out infinite;
+    mask-image: radial-gradient(circle at 70% 30%, rgba(0,0,0,0.9), transparent 72%);
+  }
+  @keyframes cr-sun-pulse {
+    0% { transform: translate3d(0,0,0); opacity: 0.8; }
+    50% { transform: translate3d(2px,-1px,0); opacity: 1; }
+    100% { transform: translate3d(0,0,0); opacity: 0.8; }
+  }
+
+  /* Clouds: slow parallax drift */
+  .cr-clouds {
+    background-image:
+      radial-gradient(circle at 25% 35%, rgba(255,255,255,0.35), transparent 55%),
+      radial-gradient(circle at 55% 30%, rgba(255,255,255,0.28), transparent 60%),
+      radial-gradient(circle at 75% 45%, rgba(255,255,255,0.22), transparent 58%);
+    filter: blur(6px);
+    animation: cr-clouds-drift 8s ease-in-out infinite alternate;
+    mask-image: radial-gradient(circle at 50% 35%, rgba(0,0,0,0.85), transparent 75%);
+  }
+  @keyframes cr-clouds-drift {
+    from { transform: translate3d(-8px, 0, 0); }
+    to { transform: translate3d(8px, 0, 0); }
+  }
+}
+
 /* ===== Base layer ===== */
 @layer base {
   html, body, :root { height: 100%; }
