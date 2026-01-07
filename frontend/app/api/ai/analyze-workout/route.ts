@@ -8,12 +8,12 @@ function isStr(v: unknown): v is string {
 
 export async function POST(req: NextRequest) {
   try {
-    const { workoutId, locale = "ru" } = await req.json();
+    const { workoutId, locale = "ru", force = false } = await req.json();
     if (!workoutId || !isStr(workoutId)) {
       return Response.json({ error: "workoutId is required" }, { status: 400 });
     }
 
-    const result = await analyzeWorkout({ workoutId, locale });
+    const result = await analyzeWorkout({ workoutId, locale, force: !!force });
     return Response.json(result);
   } catch (e: any) {
     console.error("/api/ai/analyze-workout error", e);

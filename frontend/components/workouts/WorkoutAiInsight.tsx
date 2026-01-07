@@ -19,6 +19,21 @@ function cx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(" ");
 }
 
+const MONTHS_RU_SHORT = [
+  "янв.", "фев.", "мар.", "апр.", "май", "июн.", "июл.", "авг.", "сент.", "окт.", "ноя.", "дек."
+];
+function fmtUpdatedRu(iso?: string | null) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const dd = d.getDate();
+  const mon = MONTHS_RU_SHORT[d.getMonth()];
+  const yyyy = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `Обновлено: ${dd} ${mon} ${yyyy}, ${hh}:${mm}`;
+}
+
 function emojiifyMd(md: string) {
   // Лёгкое “оживление” Markdown без ломания смысла
   // (безопасно: мы всё равно рендерим как текст)
@@ -99,8 +114,9 @@ export default function WorkoutAiInsight({ workoutId }: { workoutId: string }) {
 
       const res = await fetch(`/api/ai/analyze-workout`, {
         method: "POST",
+        cache: "no-store",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workoutId, locale: "ru" }),
+        body: JSON.stringify({ workoutId, locale: "ru", force: true }),
       });
 
       if (!res.ok) {
@@ -199,16 +215,11 @@ export default function WorkoutAiInsight({ workoutId }: { workoutId: string }) {
                 <span>{row.summary}</span>
               </div>
               <div className="text-xs text-muted-foreground">
-                {row.created_at ? `🕒 ${new Date(row.created_at).toLocaleString()}` : null}
+                {fmtUpdatedRu(row.created_at)}
               </div>
             </div>
 
-            <div
-              className={cx(
-                "rounded-2xl border bg-card/30 p-4",
-                generating && "opacity-80"
-              )}
-            >
+            <div className={cx("p-0", generating && "opacity-80")}>
               {generating && (
                 <div className="mb-3 text-xs text-muted-foreground inline-flex items-center gap-2">
                   AI готовит ответ <LoadingDots />

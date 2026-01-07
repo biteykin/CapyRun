@@ -7,6 +7,7 @@ import { createClient } from "@supabase/supabase-js";
 type AnalyzeWorkoutInput = {
   workoutId: string;
   locale?: string;
+  force?: boolean;
 };
 
 type WorkoutRow = {
@@ -101,7 +102,7 @@ function promptVersionLabel(ver: { version?: number | null; id?: string | null }
   return ver?.id ?? null;
 }
 
-export async function analyzeWorkout({ workoutId, locale = "ru" }: AnalyzeWorkoutInput) {
+export async function analyzeWorkout({ workoutId, locale = "ru", force = false }: AnalyzeWorkoutInput) {
   if (!process.env.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is not set");
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL) throw new Error("NEXT_PUBLIC_SUPABASE_URL is not set");
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) throw new Error("SUPABASE_SERVICE_ROLE_KEY is not set");
@@ -126,6 +127,27 @@ export async function analyzeWorkout({ workoutId, locale = "ru" }: AnalyzeWorkou
 
   const workout = w as WorkoutRow;
   const userId = workout.user_id;
+
+  // 2.1) Доп. заметки (если используешь таблицу notes)
+  // Это важно: пользователь мог писать комментарии не в workouts.description
+  const { data: notesRows, error: notesErr } = await supabaseAdmin
+    .from("notes")
+    .select("content")
+    .eq("user_id", userId)
+    .eq("entity_type", "workout")
+    .eq("entity_id", workoutId)
+    .order("created_at", { ascending: false })
+    .limit(10);
+  if (notesErr) {
+    // не фейлим анализ из-за notes
+    console.warn("notes fetch error", notesErr);
+  }
+  const extraNotes: string[] =
+    Array.isArray(notesRows)
+      ? notesRows
+          .map((r: any) => (typeof r?.content === "string" ? r.content.trim() : ""))
+          .filter((x: string) => x.length > 0)
+      : [];
 
   // 2) Профиль владельца тренировки (не обязателен)
   const { data: prof } = await supabaseAdmin
@@ -157,8 +179,16 @@ export async function analyzeWorkout({ workoutId, locale = "ru" }: AnalyzeWorkou
       max_hr: workout.max_hr,
       elevation_gain_m: workout.elev_gain_m ?? null,
       rpe: workout.perceived_exertion ?? null,
-      notes: workout.description ?? null,
+      // ВАЖНО: "notes" — это то, что модель обязана учитывать как пользовательский контекст
+      user_notes: workout.description ?? null,
+      extra_notes: extraNotes.length ? extraNotes : null,
     },
+    meta: force
+      ? {
+          // nonce гарантирует новый запрос даже если остальной input совпадает
+          nonce: `${Date.now()}-${crypto.randomBytes(6).toString("hex")}`,
+        }
+      : undefined,
   };
 
   // 3) Достаём активную версию промпта
