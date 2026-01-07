@@ -1,11 +1,22 @@
 // frontend/.storybook/preview.tsx
-import * as React from "react";            // ← добавили
+import * as React from "react";
 import type { Preview } from "@storybook/react";
+import { initialize, mswLoader } from "msw-storybook-addon";
 import "../app/globals.css";
 
+// инициализация MSW
+initialize();
+
 const preview: Preview = {
+  loaders: [mswLoader],
+
   parameters: {
-    controls: { matchers: { color: /(background|color)$/i, date: /Date$/i } },
+    controls: {
+      matchers: {
+        color: /(background|color)$/i,
+        date: /Date$/i,
+      },
+    },
     backgrounds: {
       default: "light",
       values: [
@@ -15,13 +26,14 @@ const preview: Preview = {
     },
     a11y: { test: "todo" },
   },
+
   decorators: [
     (Story, ctx) => {
       const isDark = ctx.globals?.backgrounds?.value === "#0e0e0e";
       if (typeof document !== "undefined") {
         document.documentElement.classList.toggle("dark", !!isDark);
       }
-      return <Story />;                   // JSX теперь ок
+      return <Story />;
     },
   ],
 };

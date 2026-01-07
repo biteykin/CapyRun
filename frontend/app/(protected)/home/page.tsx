@@ -4,7 +4,7 @@ export const revalidate = 0;
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createSupabaseServerClient } from "@/lib/supabaseServerApp";
-import MyWorkoutsDashboardClient from "@/components/workouts/MyWorkoutsDashboard.client";
+import MyWorkoutsDashboardClient from "@/components/workouts/MyWorkoutsDashboard.client"; // Это дашборд с данными по тренировкам
 
 export default async function ProtectedHomePage() {
   const supabase = await createSupabaseServerClient();
@@ -23,7 +23,7 @@ export default async function ProtectedHomePage() {
   }
 
   return (
-    <main>
+    <main className="space-y-6 p-6">
       <MyWorkoutsDashboardClient daysDefault={30} />
     </main>
   );

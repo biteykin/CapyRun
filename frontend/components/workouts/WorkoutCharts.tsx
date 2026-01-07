@@ -5,7 +5,6 @@ import { supabase } from "@/lib/supabaseBrowser";
 import {
   ResponsiveContainer,
   ComposedChart,
-  Area,
   Line,
   XAxis,
   YAxis,
@@ -37,6 +36,15 @@ type HrZone = { name: string; from: number; to: number };
 const HR_COLOR = "#EF3707"; // bg-red
 const PACE_COLOR = "#F6B021"; // bg-yellow
 const SERIES_OPACITY = 0.75;
+
+// ======== FIX CONFIG ========
+// Темп медленнее этого считаем “остановкой/пауза” и рвём линию.
+// 20:00/км = 1200 sec/km. Если хочешь более “мягко” — поставь 1800 (30:00/км)
+const PACE_STOP_CUTOFF_SEC_PER_KM = 20 * 60;
+
+// Доп. защита от совсем мусорных значений
+const PACE_MIN_SEC_PER_KM = 60; // быстрее 1:00/км не рисуем (слишком подозрительно)
+const PACE_MAX_SEC_PER_KM = 4 * 60 * 60; // 4 часа/км — явно мусор
 
 function isNum(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v);
@@ -181,6 +189,27 @@ function pickKmMarkers(
   return out;
 }
 
+// ====== NEW: sanitize pace to avoid “rest spikes” ======
+function sanitizePace(pace: unknown): number | null {
+  if (!isNum(pace)) return null;
+  if (pace <= 0) return null;
+  if (pace < PACE_MIN_SEC_PER_KM) return null;
+  if (pace > PACE_MAX_SEC_PER_KM) return null;
+  // ключевое: паузы/остановки
+  if (pace >= PACE_STOP_CUTOFF_SEC_PER_KM) return null;
+  return pace;
+}
+
+function quantile(xs: number[], q: number) {
+  if (!xs.length) return null;
+  const a = [...xs].sort((x, y) => x - y);
+  const pos = (a.length - 1) * q;
+  const base = Math.floor(pos);
+  const rest = pos - base;
+  if (a[base + 1] == null) return a[base];
+  return a[base] + rest * (a[base + 1] - a[base]);
+}
+
 type Mode = "both" | "hr" | "pace";
 
 export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
@@ -294,7 +323,8 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
       t, // seconds
       tMin: t / 60,
       hr: isNum(hr?.[i]) ? hr[i] : null,
-      pace: isNum(pace_s_per_km?.[i]) ? (pace_s_per_km[i] as number) : null, // sec/km
+      // ✅ ключевой фикс: темп чистим (паузы -> null)
+      pace: sanitizePace(pace_s_per_km?.[i]), // sec/km | null
     }));
 
     // чтобы всё летало + красивее по плотности
@@ -315,7 +345,7 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chartData.length]);
 
-  // X-domain для “зумнутого” окна (✅ вместо того, чтобы резать data и ломать Brush)
+  // X-domain для “зумнутого” окна
   const xDomain = React.useMemo(() => {
     if (!chartData.length) return [0, "dataMax"] as any;
     if (!brush) return [0, "dataMax"] as any;
@@ -329,7 +359,7 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
     return [x1, x2] as any;
   }, [chartData, brush]);
 
-  // derived (для KPI, маркеров, best splits) — считаем по полной серии (это ок)
+  // derived
   const derived = React.useMemo(() => {
     if (!chartData.length) return null;
 
@@ -400,8 +430,6 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
     };
   }, [chartData, derived]);
 
-  // Домены лучше считать из “видимого” окна, иначе шкала прыгает странно.
-  // Но т.к. мы не режем data, берём points, попадающие в xDomain.
   const visible = React.useMemo(() => {
     if (!chartData.length) return [];
     if (!brush) return chartData;
@@ -419,8 +447,13 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
 
   const paceDomain = React.useMemo(() => {
     if (!paceValues.length) return null;
-    const minP = Math.min(...paceValues); // fastest
-    const maxP = Math.max(...paceValues); // slowest
+
+    // ✅ домен по “устойчивым” значениям (обрежем крайние 2% чтобы мусор не ломал шкалу)
+    const q02 = quantile(paceValues, 0.02);
+    const q98 = quantile(paceValues, 0.98);
+
+    const minP = q02 != null ? q02 : Math.min(...paceValues); // fastest
+    const maxP = q98 != null ? q98 : Math.max(...paceValues); // slowest
     const pad = Math.max(6, Math.round((maxP - minP) * 0.12));
     return [maxP + pad, Math.max(1, minP - pad)] as [number, number]; // reversed
   }, [paceValues]);
@@ -440,7 +473,6 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
 
   const SexyTooltip = ({ active, payload }: any) => {
     if (!active || !payload?.length) return null;
-    // payload может содержать разные серии, берём исходный payload у первой
     const p = payload?.[0]?.payload;
     const tSec = p?.t;
     const hr = p?.hr;
@@ -478,7 +510,6 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
     strokeDasharray: "4 6",
   } as const;
 
-  // зоны рисуем как полупрозрачные полосы по HR оси (если есть hr_zones)
   const zoneBands = React.useMemo(() => {
     if (!hrZones?.length) return [];
     const fills = [
@@ -496,11 +527,9 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
 
   const showBrush = chartData.length > 120;
 
-  // ✅ маркеры “каждый км” в режиме both рисуем по темпу И по пульсу (две точки)
   const kmDots = React.useMemo(() => {
     const ms = derived?.kmMarkers ?? [];
     if (!ms.length) return [];
-    // ограничим, чтобы не заспамить
     return ms.slice(0, 40);
   }, [derived]);
 
@@ -535,7 +564,6 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
           )}
         </div>
 
-        {/* режимы */}
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <Button
@@ -566,13 +594,11 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
           </div>
         </div>
 
-        {/* best splits */}
         {derived && (
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {derived.best1k && (
               <Badge variant="outline" className="rounded-full">
-                Best 1k: {fmtDurationFromSeconds(derived.best1k.dt)} ({fmtMmSsFromSeconds(derived.best1k.dt)}{" "}
-                /км)
+                Best 1k: {fmtDurationFromSeconds(derived.best1k.dt)} ({fmtMmSsFromSeconds(derived.best1k.dt)} /км)
               </Badge>
             )}
             {derived.best5k && (
@@ -602,27 +628,6 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
                   data={chartData}
                   margin={{ top: 18, right: 18, left: 12, bottom: showBrush ? 10 : 14 }}
                 >
-                  <defs>
-                    {/* glow (оставим лёгкий, он не “подложка”) */}
-                    <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
-                      <feGaussianBlur stdDeviation="2.2" result="blur" />
-                      <feColorMatrix
-                        in="blur"
-                        type="matrix"
-                        values="
-                          1 0 0 0 0
-                          0 1 0 0 0
-                          0 0 1 0 0
-                          0 0 0 0.28 0"
-                        result="glow"
-                      />
-                      <feMerge>
-                        <feMergeNode in="glow" />
-                        <feMergeNode in="SourceGraphic" />
-                      </feMerge>
-                    </filter>
-                  </defs>
-
                   <CartesianGrid strokeDasharray="3 7" vertical={false} />
 
                   <XAxis
@@ -636,7 +641,6 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
                     tick={{ fontSize: 12 }}
                   />
 
-                  {/* HR */}
                   <YAxis
                     yAxisId="hr"
                     domain={hrDomain}
@@ -649,7 +653,6 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
                     hide={mode === "pace"}
                   />
 
-                  {/* Pace */}
                   <YAxis
                     yAxisId="pace"
                     orientation="right"
@@ -665,7 +668,6 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
 
                   <Tooltip cursor={cursorStyle as any} content={<SexyTooltip />} />
 
-                  {/* HR zones bands (оставляем) */}
                   {mode !== "pace" &&
                     zoneBands.map((z) => (
                       <ReferenceArea
@@ -679,7 +681,6 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
                       />
                     ))}
 
-                  {/* Best split windows highlight (оставляем) */}
                   {derived?.best1k && (
                     <ReferenceArea
                       x1={derived.best1k.startMin}
@@ -697,7 +698,6 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
                     />
                   )}
 
-                  {/* KM markers: ✅ в both показываем обе точки (HR и Pace) */}
                   {kmDots.map((m) => (
                     <React.Fragment key={`km-${m.km}`}>
                       {mode !== "pace" && (
@@ -734,19 +734,16 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
                     </React.Fragment>
                   ))}
 
-                  {/* ✅ 3) УБРАЛИ “подложку” (градиентные заливки): теперь только линии */}
-                  {/* HR series */}
                   {mode !== "pace" && (
                     <Line
                       yAxisId="hr"
-                      type="natural"
+                      type="monotone"
                       dataKey="hr"
                       stroke={HR_COLOR}
                       strokeWidth={2.2}
                       dot={false}
                       connectNulls
                       isAnimationActive={false}
-                      //filter="url(#softGlow)"
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       opacity={SERIES_OPACITY}
@@ -760,18 +757,19 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
                     />
                   )}
 
-                  {/* ✅ 2) Темп — полноценная линия (а не только точки) */}
+                  {/* ✅ главное: темп НЕ соединяет null => нет всплесков на отдыхе */}
                   {mode !== "hr" && (
                     <Line
                       yAxisId="pace"
-                      type="natural"
+                      // хотим соединять “паузы” (null) простой прямой линией между соседними точками
+                      // без overshoot — поэтому linear
+                      type="linear"
                       dataKey="pace"
                       stroke={PACE_COLOR}
                       strokeWidth={2.2}
                       dot={false}
                       connectNulls
                       isAnimationActive={false}
-                      //filter="url(#softGlow)"
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       opacity={SERIES_OPACITY}
@@ -785,7 +783,6 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
                     />
                   )}
 
-                  {/* ✅ 1) Переписанный Brush: теперь он работает по полной серии, а зум делаем через XAxis domain */}
                   {showBrush && (
                     <Brush
                       dataKey="tMin"
@@ -801,7 +798,6 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
                         const s = clamp(Number(v.startIndex ?? 0), 0, maxIdx);
                         const e = clamp(Number(v.endIndex ?? maxIdx), 0, maxIdx);
 
-                        // если выбрано почти всё — считаем, что зума нет
                         const full =
                           Math.min(s, e) <= 0 && Math.max(s, e) >= Math.max(0, maxIdx - 1);
 
@@ -813,7 +809,6 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
               </ResponsiveContainer>
             </div>
 
-            {/* legend */}
             <div className="flex flex-wrap items-center justify-between gap-3 px-4 pb-3">
               <div className="flex items-center gap-3 text-xs text-muted-foreground">
                 {mode !== "pace" && (

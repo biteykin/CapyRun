@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import WorkoutWeatherKpi from "@/components/workouts/WorkoutWeatherKpi";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { supabase } from "@/lib/supabaseBrowser";
+import WorkoutAiInsight from "@/components/workouts/WorkoutAiInsight";
 
+import WorkoutWeatherKpi from "@/components/workouts/WorkoutWeatherKpi";
 import {
   Card,
   CardContent,
@@ -542,14 +543,13 @@ export default function WorkoutDetailPage() {
 
       {/* KPI STRIP */}
       <section>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6">
           <Card><CardContent className="p-3"><div className="text-xs text-muted-foreground">Дистанция</div><div className="mt-1 text-base font-semibold">{fmtKm(row.distance_m)}</div></CardContent></Card>
           <Card><CardContent className="p-3"><div className="text-xs text-muted-foreground">Длительность</div><div className="mt-1 text-base font-semibold">{fmtDuration(row.duration_sec)}</div></CardContent></Card>
           <Card><CardContent className="p-3"><div className="text-xs text-muted-foreground">{showRunPace ? "Темп" : "Скорость"}</div><div className="mt-1 text-base font-semibold">{showRunPace ? fmtPace(row.avg_pace_s_per_km) : computedSpeed}</div></CardContent></Card>
           <Card><CardContent className="p-3"><div className="text-xs text-muted-foreground">Пульс (ср)</div><div className="mt-1 text-base font-semibold">{isNum(row.avg_hr) ? `${row.avg_hr} bpm` : "—"}</div></CardContent></Card>
           <Card><CardContent className="p-3"><div className="text-xs text-muted-foreground">Набор</div><div className="mt-1 text-base font-semibold">{fmtM(row.elev_gain_m)}</div></CardContent></Card>
           <Card><CardContent className="p-3"><div className="text-xs text-muted-foreground">Старт</div><div className="mt-1 text-base font-semibold">{fmtTimeOfDay(row.start_time)}</div></CardContent></Card>
-          {weather ? <WorkoutWeatherKpi weather={weather} /> : null}
         </div>
       </section>
 
@@ -567,6 +567,13 @@ export default function WorkoutDetailPage() {
                 </Card>
               </AppTooltip>
             ))}
+            {weather ? (
+              <WorkoutWeatherKpi
+                weather={weather}
+                variant="compact"
+                animated
+              />
+            ) : null}
           </div>
         </section>
       )}
@@ -623,7 +630,7 @@ export default function WorkoutDetailPage() {
         </div>
       </section>
 
-      {/* Note + AI Coach placeholder (должны быть выше графика) */}
+      {/* Note + AI insight (должны быть выше графика) */}
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader className="pb-2">
@@ -657,21 +664,8 @@ export default function WorkoutDetailPage() {
           </CardContent>
         </Card>
 
-        {/* AI Coach placeholder */}
-        <Card className="border-dashed">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Комментарии AI-тренера</CardTitle>
-            <CardDescription>заглушка — добавим анализ позже</CardDescription>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground space-y-2">
-            <div>Скоро здесь появятся:</div>
-            <ul className="list-disc pl-5 space-y-1">
-              <li>оценка нагрузки и восстановления</li>
-              <li>заметки по темпу/пульсу и декуплингу</li>
-              <li>рекомендации на следующую тренировку</li>
-            </ul>
-          </CardContent>
-        </Card>
+        {/* AI insight */}
+        <WorkoutAiInsight workoutId={row.id} />
       </section>
 
       {/* Charts (пульс/темп) — сразу под картой (после инсайтов+заметки) */}
@@ -680,7 +674,7 @@ export default function WorkoutDetailPage() {
       </section>
 
       {/* HR ZONES + WEATHER */}
-      <section className="grid grid-cols-1 gap-6">
+      <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {zonesData.length > 0 && (
           <Card className="overflow-hidden">
             <CardHeader className="pb-2">

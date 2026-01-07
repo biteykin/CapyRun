@@ -67,6 +67,8 @@
     "eslint-config-next": "15.5.7",
     "eslint-plugin-storybook": "^9.1.10",
     "https-localhost": "^4.7.1",
+    "msw": "^2.12.7",
+    "msw-storybook-addon": "^2.0.6",
     "pino": "^9.9.0",
     "pino-pretty": "^13.1.1",
     "playwright": "^1.56.0",
@@ -81,5 +83,10 @@
       "build": "next build",
       "start": "next start -p $PORT"
     }
+  },
+  "msw": {
+    "workerDirectory": [
+      "public"
+    ]
   }
 }

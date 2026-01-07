@@ -253,7 +253,7 @@
     }
   }
 
-  /* Rain: moving streaks */
+  /* пример для rain */
   .cr-rain {
     background-image:
       repeating-linear-gradient(
@@ -267,6 +267,7 @@
     filter: blur(0.2px);
     animation: cr-rain-fall 0.75s linear infinite;
     mask-image: radial-gradient(circle at 50% 30%, rgba(0,0,0,0.9), transparent 70%);
+    -webkit-mask-image: radial-gradient(circle at 50% 30%, rgba(0,0,0,0.9), transparent 70%);
   }
   @keyframes cr-rain-fall {
     from { background-position: 0px -40px; }
@@ -490,4 +491,38 @@
     border-color: hsl(var(--primary));
     box-shadow: 0 0 0 2px hsl(var(--ring));
   }
+
+
+
+  /* ===== Weather KPI keyframes (must be outside @layer for reliability) ===== */
+@keyframes cr-rain-fall {
+  from { background-position: 0px -40px; }
+  to { background-position: 0px 40px; }
+}
+
+@keyframes cr-snow-fall {
+  from { background-position: 0px -60px, 12px -90px, 24px -120px; }
+  to { background-position: 0px 60px, 12px 90px, 24px 120px; }
+}
+
+@keyframes cr-fog-drift {
+  from { transform: translate3d(-6px, 0, 0); }
+  to { transform: translate3d(6px, 0, 0); }
+}
+
+@keyframes cr-wind-flow {
+  from { background-position: -160px 28%, -220px 62%; }
+  to { background-position: 320px 28%, 420px 62%; }
+}
+
+@keyframes cr-sun-pulse {
+  0% { transform: translate3d(0,0,0); opacity: 0.8; }
+  50% { transform: translate3d(2px,-1px,0); opacity: 1; }
+  100% { transform: translate3d(0,0,0); opacity: 0.8; }
+}
+
+@keyframes cr-clouds-drift {
+  from { transform: translate3d(-8px, 0, 0); }
+  to { transform: translate3d(8px, 0, 0); }
+}
 }
