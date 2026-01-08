@@ -4,10 +4,15 @@ import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 // no extra deps
 
+export type WorkoutInsightTone = "supportive" | "tough" | "analyst";
+export type WorkoutInsightFocus = "recovery" | "performance" | "technique";
+
 type AnalyzeWorkoutInput = {
   workoutId: string;
   locale?: string;
   force?: boolean;
+  tone?: WorkoutInsightTone;
+  focus?: WorkoutInsightFocus;
 };
 
 type WorkoutRow = {
@@ -102,7 +107,13 @@ function promptVersionLabel(ver: { version?: number | null; id?: string | null }
   return ver?.id ?? null;
 }
 
-export async function analyzeWorkout({ workoutId, locale = "ru", force = false }: AnalyzeWorkoutInput) {
+export async function analyzeWorkout({
+  workoutId,
+  locale = "ru",
+  force = false,
+  tone = "supportive",
+  focus = "recovery",
+}: AnalyzeWorkoutInput) {
   if (!process.env.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is not set");
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL) throw new Error("NEXT_PUBLIC_SUPABASE_URL is not set");
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) throw new Error("SUPABASE_SERVICE_ROLE_KEY is not set");
@@ -191,6 +202,12 @@ export async function analyzeWorkout({ workoutId, locale = "ru", force = false }
       : undefined,
   };
 
+  const preferences = {
+    tone,
+    focus,
+    // можно расширять позже (например, "direct" / "more_detail")
+  };
+
   // 3) Достаём активную версию промпта
   const { data: tmpl, error: tmplErr } = await supabaseAdmin
     .from("prompt_templates")
@@ -217,54 +234,66 @@ export async function analyzeWorkout({ workoutId, locale = "ru", force = false }
     .eq("locale", locale)
     .maybeSingle();
 
-  const instructions = `${(loc?.prompt_md ?? ver.prompt_md) || ""}\n\nВерни только JSON.`;
+  const basePrompt = `${(loc?.prompt_md ?? ver.prompt_md) || ""}`.trim();
+  const prefsHint = [
+    "ПРЕДПОЧТЕНИЯ ПОЛЬЗОВАТЕЛЯ (важно):",
+    `- tone: ${tone} (supportive = поддерживающий, tough = строгий, analyst = аналитичный)`,
+    `- focus: ${focus} (recovery = восстановление/риски, performance = результат/качество, technique = техника)`,
+    "Адаптируй формулировки и акценты под эти предпочтения, не нарушая JSON-схему.",
+  ].join("\n");
+
+  const instructions = `${basePrompt}\n\n${prefsHint}\n\nВерни только JSON.`;
 
   // 4) Идемпотентность (на уровне ai_requests)
   const dedup_key = crypto
     .createHash("sha256")
-    .update(JSON.stringify({ workoutId, locale, template_version_id: ver.id, input }))
+    .update(
+      JSON.stringify({
+        workoutId,
+        locale,
+        template_version_id: ver.id,
+        input,
+        preferences,
+      })
+    )
     .digest("hex");
 
-  // 4.1) Быстрый кеш: если уже есть success по dedup_key — возвращаем результат без нового вызова OpenAI
-  const { data: cachedReq, error: cachedErr } = await supabaseAdmin
-    .from("ai_requests")
-    .select("id, output, status")
-    .eq("dedup_key", dedup_key)
-    .eq("status", "success")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (!cachedErr && cachedReq?.output) {
-    const content_md = buildContentMd(cachedReq.output);
-    return { ok: true, cached: true, data: cachedReq.output, request_id: cachedReq.id, dedup_key, content_md };
+  // (опционально) быстрый кэш, если force=false
+  if (!force) {
+    const { data: existingReq } = await supabaseAdmin
+      .from("ai_requests")
+      .select("id, output, status")
+      .eq("dedup_key", dedup_key)
+      .eq("status", "success")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingReq?.output) {
+      return {
+        ok: true,
+        cached: true,
+        data: existingReq.output,
+        request_id: existingReq.id ?? null,
+        dedup_key,
+      };
+    }
   }
 
   // 5) Вызов OpenAI Responses API (Structured Outputs)
   const outSchema = ver.output_schema as any;
   const jsonSchema = outSchema?.schema ?? outSchema; // поддержим оба формата на всякий случай
 
-  const temp =
-    supportsTemperature(ver.model) && isNum(ver.temperature)
-      ? Number(ver.temperature)
-      : undefined;
-
-  // Responses API НЕ принимает input-объект — только string или array of input items.
-  // Поэтому сериализуем input в JSON-строку.
-  const inputText = JSON.stringify(input);
-
+  // Responses API: input должен быть строкой или массивом input items.
+  // Самый надёжный способ: передаём JSON строкой + строгий text.format=json_schema.
   const r = await openai.responses.create({
     model: ver.model || "gpt-4o-mini",
     instructions,
-    input: inputText,
-    text: {
-      format: {
-        type: "json_schema",
-        name: outSchema?.name ?? "WorkoutAnalysis",
-        schema: jsonSchema,
-        strict: outSchema?.strict ?? true,
-      },
-    },
-    ...(temp !== undefined ? { temperature: temp } : {}),
+    input: JSON.stringify({
+      ...input,
+      preferences,
+    }),
+    text: { format: { type: "json_schema", json_schema: ver.output_schema as any } } as any,
   });
 
   const usage = (r as any).usage ?? {};
@@ -289,7 +318,7 @@ export async function analyzeWorkout({ workoutId, locale = "ru", force = false }
         model: ver.model,
         locale,
         purpose: "workout_analysis",
-        input,
+        input: { ...input, preferences },
         output: parsed,
         raw_response: r,
         status: parsed ? "success" : "failed",
@@ -346,16 +375,29 @@ export async function analyzeWorkout({ workoutId, locale = "ru", force = false }
       p_period_to: null,
       p_sport: p_sport,
       p_title: workout.name ?? "Разбор тренировки",
-      p_data: parsed,
+      p_data: { ...parsed, preferences },
       p_model: ver.model ?? null,
       p_prompt_version: promptVersionLabel(ver) ?? null,
       p_tokens: tokensTotal,
-      p_cost: 0.0,
+      p_cost: 0,
     });
 
     if (insightErr) throw new Error(insightErr.message);
-    return { ok: true, cached: false, data: parsed, request_id: reqRow?.id ?? null, dedup_key, content_md };
+    return {
+      ok: true,
+      cached: false,
+      data: parsed,
+      request_id: reqRow?.id ?? null,
+      dedup_key,
+      content_md,
+    };
   }
 
-  return { ok: false, cached: false, data: null, request_id: reqRow?.id ?? null, dedup_key, content_md: null };
+  return {
+    ok: !!parsed,
+    cached: false,
+    data: parsed,
+    request_id: reqRow?.id ?? null,
+    dedup_key,
+  };
 }
