@@ -423,73 +423,79 @@ export default function WorkoutAiInsight({ workoutId }: { workoutId: string }) {
         </div>
 
         {/* Preferences (compact, no clutter) */}
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <div className="text-xs text-muted-foreground mr-1">Режим:</div>
-          <div className="inline-flex rounded-full border bg-background p-0.5">
-            <Button
-              type="button"
-              size="sm"
-              variant={tone === "supportive" ? "secondary" : "ghost"}
-              className="h-7 rounded-full px-3 text-xs"
-              onClick={() => setTone("supportive")}
-              disabled={generating}
-            >
-              ✨ Поддержка
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant={tone === "tough" ? "secondary" : "ghost"}
-              className="h-7 rounded-full px-3 text-xs"
-              onClick={() => setTone("tough")}
-              disabled={generating}
-            >
-              🎯 Строго
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant={tone === "analyst" ? "secondary" : "ghost"}
-              className="h-7 rounded-full px-3 text-xs"
-              onClick={() => setTone("analyst")}
-              disabled={generating}
-            >
-              🧠 Аналитик
-            </Button>
+        <div className="mt-2 space-y-2">
+          {/* Row 1: Tone */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="text-xs text-muted-foreground mr-1">Режим:</div>
+            <div className="inline-flex rounded-full border bg-background p-0.5">
+              <Button
+                type="button"
+                size="sm"
+                variant={tone === "supportive" ? "secondary" : "ghost"}
+                className="h-7 rounded-full px-3 text-xs"
+                onClick={() => setTone("supportive")}
+                disabled={generating}
+              >
+                ✨ Поддержка
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={tone === "tough" ? "secondary" : "ghost"}
+                className="h-7 rounded-full px-3 text-xs"
+                onClick={() => setTone("tough")}
+                disabled={generating}
+              >
+                🎯 Строго
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={tone === "analyst" ? "secondary" : "ghost"}
+                className="h-7 rounded-full px-3 text-xs"
+                onClick={() => setTone("analyst")}
+                disabled={generating}
+              >
+                🧠 Аналитик
+              </Button>
+            </div>
           </div>
 
-          <div className="ml-2 text-xs text-muted-foreground mr-1">Фокус:</div>
-          <div className="inline-flex rounded-full border bg-background p-0.5">
-            <Button
-              type="button"
-              size="sm"
-              variant={focus === "recovery" ? "secondary" : "ghost"}
-              className="h-7 rounded-full px-3 text-xs"
-              onClick={() => setFocus("recovery")}
-              disabled={generating}
-            >
-              🫀 Восст.
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant={focus === "performance" ? "secondary" : "ghost"}
-              className="h-7 rounded-full px-3 text-xs"
-              onClick={() => setFocus("performance")}
-              disabled={generating}
-            >
-              🏃 Рез-т
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant={focus === "technique" ? "secondary" : "ghost"}
-              className="h-7 rounded-full px-3 text-xs"
-              onClick={() => setFocus("technique")}
-              disabled={generating}
-            >
-              🦶 Техн.
-            </Button>
+          {/* Row 2: Focus (new line) */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="text-xs text-muted-foreground mr-1">Фокус:</div>
+            <div className="inline-flex rounded-full border bg-background p-0.5">
+              <Button
+                type="button"
+                size="sm"
+                variant={focus === "recovery" ? "secondary" : "ghost"}
+                className="h-7 rounded-full px-3 text-xs"
+                onClick={() => setFocus("recovery")}
+                disabled={generating}
+              >
+                🫀 Восст.
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={focus === "performance" ? "secondary" : "ghost"}
+                className="h-7 rounded-full px-3 text-xs"
+                onClick={() => setFocus("performance")}
+                disabled={generating}
+              >
+                🏃 Рез-т
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={focus === "technique" ? "secondary" : "ghost"}
+                className="h-7 rounded-full px-3 text-xs"
+                onClick={() => setFocus("technique")}
+                disabled={generating}
+              >
+                🦶 Техн.
+              </Button>
+            </div>
           </div>
         </div>
       </CardHeader>
