@@ -6,6 +6,12 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -34,6 +40,19 @@ function fmtUpdatedRu(iso?: string | null) {
   const hh = String(d.getHours()).padStart(2, "0");
   const mm = String(d.getMinutes()).padStart(2, "0");
   return `Обновлено: ${dd} ${mon} ${yyyy}, ${hh}:${mm}`;
+}
+
+function stripDuplicateShortSection(md: string) {
+  // Убираем дублирующий блок "Кратко" в markdown (оставляем summary сверху виджета).
+  // Поддерживаем варианты:
+  //   ## Кратко
+  //   ## ✨ Кратко
+  //   ### Кратко
+  // и вырезаем до следующего заголовка уровня ##/### или конца.
+  const s = (md ?? "").replace(/\r/g, "");
+  const re =
+    /(^|\n)(#{2,3})\s*(?:✨\s*)?Кратко\s*\n([\s\S]*?)(?=\n#{2,3}\s|\s*$)/i;
+  return s.replace(re, "\n").trim();
 }
 
 function emojiifyMd(md: string) {
@@ -136,18 +155,18 @@ export default function WorkoutAiInsight({ workoutId }: { workoutId: string }) {
   return (
     <Card className="overflow-hidden">
       {/* Header: строгий, “премиальный”, без цветных заливок */}
-      <CardHeader className="pb-3">
+      <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3">
             <AiPulse />
-            <div className="space-y-1">
+            <div className="space-y-0.5">
               <CardTitle className="text-base flex items-center gap-2">
                 <span>AI-анализ тренировки</span>
                 <Badge variant="secondary" className="rounded-full">
                   AI-coach ✨
                 </Badge>
               </CardTitle>
-              <div className="text-xs text-muted-foreground">
+              <div className="text-xs text-muted-foreground leading-snug">
                 Инсайт + рекомендации на основе метрик (и твоих заметок ✍️)
               </div>
             </div>
@@ -171,11 +190,29 @@ export default function WorkoutAiInsight({ workoutId }: { workoutId: string }) {
             )}
           </Button>
         </div>
+
+        {/* 🔥 Главное улучшение: если есть инсайт — “кратко” прямо под подзаголовком,
+            чтобы не было огромной пустоты между header и контентом */}
+        {row && !loading && !err ? (
+          <div className={cx("mt-2", generating && "opacity-80")}>
+            <div className="text-[15px] font-semibold leading-snug">
+              {row.summary}
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              {fmtUpdatedRu(row.created_at)}
+            </div>
+            {generating ? (
+              <div className="mt-1 text-xs text-muted-foreground inline-flex items-center gap-2">
+                AI обновляет ответ <LoadingDots />
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </CardHeader>
 
-      <CardContent className="pt-2">
+      <CardContent className="pt-1">
         {loading ? (
-          <div className="space-y-3">
+          <div className="space-y-2">
             <div className="text-sm text-muted-foreground inline-flex items-center gap-2">
               Загружаем <LoadingDots />
             </div>
@@ -192,7 +229,7 @@ export default function WorkoutAiInsight({ workoutId }: { workoutId: string }) {
             <AlertDescription>{err}</AlertDescription>
           </Alert>
         ) : !row ? (
-          <div className="space-y-3">
+          <div className="space-y-2">
             <div className="rounded-2xl border p-4">
               <div className="text-sm font-semibold">
                 Перед стартом — дай 2–3 строки заметки ✍️
@@ -213,53 +250,39 @@ export default function WorkoutAiInsight({ workoutId }: { workoutId: string }) {
             </div>
           </div>
         ) : (
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-sm font-semibold inline-flex items-center gap-2">
-                <span>✨</span>
-                <span>{row.summary}</span>
-              </div>
-              <div className="text-xs text-muted-foreground">
-                {fmtUpdatedRu(row.created_at)}
-              </div>
-            </div>
+          <div className="space-y-2">
+            <div className="p-0">
+              <Accordion type="single" collapsible>
+                <AccordionItem value="details" className="border-0">
+                  <AccordionTrigger
+                    className={cx(
+                      "no-underline hover:no-underline",
+                      "py-2",
+                      "rounded-xl",
+                      "px-3 -mx-3",
+                      "hover:bg-muted/40",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      "[&>svg]:opacity-60"
+                    )}
+                  >
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg border bg-background">
+                        ✨
+                      </span>
+                      <span>Детальные рекомендации</span>
+                      <span className="text-xs text-muted-foreground font-normal">(раскрыть)</span>
+                    </div>
+                  </AccordionTrigger>
 
-            <div className={cx("p-0", generating && "opacity-80")}>
-              {generating && (
-                <div className="mb-3 text-xs text-muted-foreground inline-flex items-center gap-2">
-                  AI готовит ответ <LoadingDots />
-                </div>
-              )}
-              <div className="rounded-2xl border bg-muted/10 p-4">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  components={{
-                    h2: ({ children }) => (
-                      <h2 className="mt-3 mb-2 text-sm font-semibold text-foreground">
-                        {children}
-                      </h2>
-                    ),
-                    h3: ({ children }) => (
-                      <h3 className="mt-3 mb-2 text-sm font-semibold text-foreground">
-                        {children}
-                      </h3>
-                    ),
-                    ul: ({ children }) => (
-                      <ul className="list-disc pl-5 space-y-1 text-sm text-muted-foreground">
-                        {children}
-                      </ul>
-                    ),
-                    li: ({ children }) => <li>{children}</li>,
-                    p: ({ children }) => (
-                      <p className="text-sm leading-relaxed text-muted-foreground">
-                        {children}
-                      </p>
-                    ),
-                  }}
-                >
-                  {emojiifyMd(row.content_md)}
-                </ReactMarkdown>
-              </div>
+                  <AccordionContent className="pt-2">
+                    <div className="prose prose-sm max-w-none text-muted-foreground dark:prose-invert prose-headings:font-semibold prose-headings:text-foreground">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {stripDuplicateShortSection(emojiifyMd(row.content_md))}
+                      </ReactMarkdown>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
             </div>
           </div>
         )}
