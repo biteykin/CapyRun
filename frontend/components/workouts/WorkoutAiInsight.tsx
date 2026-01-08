@@ -6,6 +6,8 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 type AiInsight = {
   id: string;
@@ -35,11 +37,10 @@ function fmtUpdatedRu(iso?: string | null) {
 }
 
 function emojiifyMd(md: string) {
-  // Лёгкое “оживление” Markdown без ломания смысла
-  // (безопасно: мы всё равно рендерим как текст)
+  // Лёгкое “оживление” Markdown (теперь рендерим markdown, так что это прям будет красиво)
   return md
-    .replace(/^###\s*Итог\b/gm, "### 🧠 Итог")
-    .replace(/^##\s*Кратко\b/gm, "## 🧠 Кратко")
+    .replace(/^###\s*Итог\b/gm, "### ✨ Итог")
+    .replace(/^##\s*Кратко\b/gm, "## ✨ Кратко")
     .replace(/^###\s*Что было хорошо\b/gm, "### ✅ Что было хорошо")
     .replace(/^##\s*Что хорошо\b/gm, "## ✅ Что хорошо")
     .replace(/^###\s*Риски\s*\/\s*что улучшить\b/gm, "### ⚠️ Риски / что улучшить")
@@ -134,42 +135,43 @@ export default function WorkoutAiInsight({ workoutId }: { workoutId: string }) {
 
   return (
     <Card className="overflow-hidden">
-      {/* AI header (особенный виджет) */}
-      <div className="relative">
-        <div className="absolute inset-0 bg-gradient-to-r from-violet-500/10 via-fuchsia-500/10 to-cyan-500/10" />
-        <div className="absolute inset-0 [mask-image:radial-gradient(60%_60%_at_10%_0%,black,transparent)] bg-gradient-to-b from-white/10 to-transparent" />
-
-        <CardHeader className="relative pb-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-start gap-3">
-              <AiPulse />
-              <div className="space-y-1">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <span>AI-анализ тренировки</span>
-                  <Badge variant="secondary" className="rounded-full">
-                    ⚡ AI coach
-                  </Badge>
-                </CardTitle>
-                <div className="text-xs text-muted-foreground">
-                  Инсайт + рекомендации на основе метрик (и твоих заметок ✍️)
-                </div>
+      {/* Header: строгий, “премиальный”, без цветных заливок */}
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <AiPulse />
+            <div className="space-y-1">
+              <CardTitle className="text-base flex items-center gap-2">
+                <span>AI-анализ тренировки</span>
+                <Badge variant="secondary" className="rounded-full">
+                  AI-coach ✨
+                </Badge>
+              </CardTitle>
+              <div className="text-xs text-muted-foreground">
+                Инсайт + рекомендации на основе метрик (и твоих заметок ✍️)
               </div>
             </div>
-
-            <Button size="sm" variant="primary" onClick={generate} disabled={generating}>
-              {generating ? (
-                <span className="inline-flex items-center gap-2">
-                  Генерируем <LoadingDots />
-                </span>
-              ) : row ? (
-                "🔄 Обновить"
-              ) : (
-                "✨ Сгенерировать"
-              )}
-            </Button>
           </div>
-        </CardHeader>
-      </div>
+
+          <Button
+            size="sm"
+            variant={row ? "secondary" : "primary"}
+            onClick={generate}
+            disabled={generating}
+            className={cx("rounded-full")}
+          >
+            {generating ? (
+              <span className="inline-flex items-center gap-2">
+                Думаю <LoadingDots />
+              </span>
+            ) : row ? (
+              "🔄 Обновить"
+            ) : (
+              "✨ Сгенерировать"
+            )}
+          </Button>
+        </div>
+      </CardHeader>
 
       <CardContent className="pt-2">
         {loading ? (
@@ -191,27 +193,30 @@ export default function WorkoutAiInsight({ workoutId }: { workoutId: string }) {
           </Alert>
         ) : !row ? (
           <div className="space-y-3">
-            <div className="rounded-2xl border bg-card/40 p-4">
-              <div className="text-sm font-semibold">Перед генерацией — добавь заметку ✍️</div>
+            <div className="rounded-2xl border p-4">
+              <div className="text-sm font-semibold">
+                Перед стартом — дай 2–3 строки заметки ✍️
+              </div>
               <div className="mt-1 text-sm text-muted-foreground">
-                Лучше всего AI работает, когда ты пишешь пару строк: самочувствие, сон, стресс,
-                боль/дискомфорт, как дался темп. Тогда рекомендации будут точнее.
+                «Как дался темп», сон, стресс, боль/дискомфорт, настроение — это делает анализ
+                точнее. Тогда я буду тренировать тебя не “в среднем”, а <span className="font-medium">лично</span>.
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
-                <Badge variant="outline" className="rounded-full">📝 заметки → лучше контекст</Badge>
-                <Badge variant="outline" className="rounded-full">🎯 рекомендации → точнее</Badge>
-                <Badge variant="outline" className="rounded-full">🧩 меньше “общих слов”</Badge>
+                <Badge variant="outline" className="rounded-full">📝 контекст</Badge>
+                <Badge variant="outline" className="rounded-full">🎯 точность</Badge>
+                <Badge variant="outline" className="rounded-full">⚡ конкретика</Badge>
               </div>
             </div>
+
             <div className="text-sm text-muted-foreground">
-              Пока нет инсайта для этой тренировки. Нажми <span className="font-medium">«Сгенерировать»</span>.
+              Когда будешь готов — нажми <span className="font-medium">«Сгенерировать»</span> ✨
             </div>
           </div>
         ) : (
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-sm font-semibold inline-flex items-center gap-2">
-                <span>🧠</span>
+                <span>✨</span>
                 <span>{row.summary}</span>
               </div>
               <div className="text-xs text-muted-foreground">
@@ -225,9 +230,36 @@ export default function WorkoutAiInsight({ workoutId }: { workoutId: string }) {
                   AI готовит ответ <LoadingDots />
                 </div>
               )}
-              <pre className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
-                {emojiifyMd(row.content_md)}
-              </pre>
+              <div className="rounded-2xl border bg-muted/10 p-4">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    h2: ({ children }) => (
+                      <h2 className="mt-3 mb-2 text-sm font-semibold text-foreground">
+                        {children}
+                      </h2>
+                    ),
+                    h3: ({ children }) => (
+                      <h3 className="mt-3 mb-2 text-sm font-semibold text-foreground">
+                        {children}
+                      </h3>
+                    ),
+                    ul: ({ children }) => (
+                      <ul className="list-disc pl-5 space-y-1 text-sm text-muted-foreground">
+                        {children}
+                      </ul>
+                    ),
+                    li: ({ children }) => <li>{children}</li>,
+                    p: ({ children }) => (
+                      <p className="text-sm leading-relaxed text-muted-foreground">
+                        {children}
+                      </p>
+                    ),
+                  }}
+                >
+                  {emojiifyMd(row.content_md)}
+                </ReactMarkdown>
+              </div>
             </div>
           </div>
         )}
