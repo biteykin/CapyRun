@@ -181,19 +181,28 @@ export default function MyWorkoutsDashboardClient({ daysDefault = 30 }: { daysDe
       {/* Top bar: period switch + status */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <div className="text-sm text-muted-foreground">Период</div>
-          <div className="inline-flex rounded-xl border bg-background p-1">
-            {PERIOD_OPTIONS.map((n) => (
-              <Button
-                key={n}
-                size="sm"
-                variant={days === n ? "default" : "ghost"}
-                onClick={() => setDays(n)}
-                className="rounded-lg"
-              >
-                {n} дн.
-              </Button>
-            ))}
+          {/* Premium period switch (same style as AI widget) */}
+          <div className="grid items-center gap-2">
+            <div className="grid grid-cols-[72px_1fr] items-center gap-2">
+              <div className="text-sm text-muted-foreground">
+                Период
+              </div>
+              <div className="inline-flex w-full flex-wrap items-center rounded-full border bg-muted/10 p-0.5">
+                {PERIOD_OPTIONS.map((n) => (
+                  <Button
+                    key={n}
+                    type="button"
+                    size="sm"
+                    variant={days === n ? "secondary" : "ghost"}
+                    onClick={() => setDays(n)}
+                    className="h-7 rounded-full px-3 text-sm hover:bg-muted/40"
+                    disabled={loading}
+                  >
+                    {n} дн.
+                  </Button>
+                ))}
+              </div>
+            </div>
           </div>
           {loading ? (
             <Badge variant="secondary" className="ml-1">
