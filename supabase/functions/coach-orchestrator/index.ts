@@ -1,11 +1,8 @@
 // supabase/functions/coach-orchestrator/index.ts
-import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2?target=deno";
 
 Deno.serve(async (req) => {
   try {
-    // 1) Простая защита: разрешаем только cron/серверные вызовы.
-    // Supabase Scheduled Triggers шлёт этот header.
     const isCron = req.headers.get("x-supabase-cron") === "true";
     if (!isCron) {
       return new Response(JSON.stringify({ error: "Forbidden (not a cron trigger)" }), {
@@ -14,7 +11,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // 2) Инициализируем supabase client с service_role
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
@@ -29,16 +25,10 @@ Deno.serve(async (req) => {
       auth: { persistSession: false },
     });
 
-    // 3) Параметры (можно менять)
-    const limit = 50;        // сколько задач за один запуск
-    const onlyUserId = null; // обычно null
-    const doForecast = false;
-
-    // 4) Запускаем оркестратор
     const { data, error } = await supabase.rpc("run_coach_cycle", {
-      p_limit: limit,
-      p_only_user_id: onlyUserId,
-      p_do_forecast: doForecast,
+      p_limit: 50,
+      p_only_user_id: null,
+      p_do_forecast: false,
     });
 
     if (error) {
