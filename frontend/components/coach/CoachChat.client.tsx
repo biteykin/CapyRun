@@ -1,10 +1,9 @@
-// components/coach/CoachChat.client.tsx
 "use client";
 
 import * as React from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea"; // если нет — замени на свой
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
 
 type RawMessage = {
@@ -17,12 +16,6 @@ type RawMessage = {
   created_at: string;
 };
 
-export type CoachChatProps = {
-  threadId: string;
-  initialMessages: RawMessage[];
-  currentUserId: string;
-};
-
 type ChatMessageVM = {
   id: string;
   role: "user" | "coach" | "system";
@@ -30,16 +23,27 @@ type ChatMessageVM = {
   created_at: string;
 };
 
-export default function CoachChat({
-  threadId,
-  initialMessages,
-  currentUserId,
-}: CoachChatProps) {
+/**
+ * Почему был hydration mismatch:
+ * - внутри SSR/Client компонента мы рендерили время через toLocaleTimeString("ru-RU"),
+ *   а timezone/locale на сервере и в браузере могут отличаться => разные строки времени => mismatch.
+ *
+ * Фикс:
+ * - на серверном рендере показываем стабильный placeholder "—:—"
+ * - после hydration (useEffect) включаем форматирование времени на клиенте.
+ * Дополнительно оставили min-h-0 цепочку, чтобы чат скроллился внутри фиксированной высоты родителя.
+ */
+export default function CoachChat(props: {
+  threadId: string;
+  initialMessages: any[];
+  currentUserId: string;
+}) {
+  const { threadId, initialMessages } = props;
+
   const [messages, setMessages] = React.useState<ChatMessageVM[]>(() =>
-    (initialMessages ?? []).map((m) => ({
+    (initialMessages ?? []).map((m: any) => ({
       id: m.id,
-      role: m.type === "coach" ? "coach" :
-            m.type === "system" ? "system" : "user",
+      role: m.type === "coach" ? "coach" : m.type === "system" ? "system" : "user",
       body: m.body,
       created_at: m.created_at,
     }))
@@ -49,9 +53,25 @@ export default function CoachChat({
   const [isSending, setIsSending] = React.useState(false);
   const bottomRef = React.useRef<HTMLDivElement | null>(null);
 
+  const [hydrated, setHydrated] = React.useState(false);
   React.useEffect(() => {
+    setHydrated(true);
+  }, []);
+
+  React.useEffect(() => {
+    // auto-scroll после добавления сообщений
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
+
+  const formatTime = React.useCallback(
+    (iso: string) => {
+      if (!hydrated) return "—:—";
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return "—:—";
+      return d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+    },
+    [hydrated]
+  );
 
   const handleSend = async () => {
     const text = input.trim();
@@ -60,7 +80,7 @@ export default function CoachChat({
     setIsSending(true);
     setInput("");
 
-    // Оптимистично добавляем сообщение пользователя
+    // ⚠️ tempId не должен зависеть от Date.now() для SSR — он создаётся только по клику (клиент), ок.
     const tempId = `temp-${Date.now()}`;
     const optimisticUser: ChatMessageVM = {
       id: tempId,
@@ -74,22 +94,16 @@ export default function CoachChat({
       const res = await fetch("/api/coach/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          threadId, // можно null / string — на бэке мы это обрабатываем
-          message: text, // 👈 важное изменение: поле message вместо text
-        }),
+        body: JSON.stringify({ threadId, message: text }),
       });
 
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-      const data = await res.json() as {
+      const data = (await res.json()) as {
         userMessage: RawMessage;
         coachMessage: RawMessage;
       };
 
-      // Заменяем оптимистичное сообщение реальным и добавляем ответ тренера
       setMessages((prev) => {
         const withoutTemp = prev.filter((m) => m.id !== tempId);
         const userMsg: ChatMessageVM = {
@@ -108,9 +122,7 @@ export default function CoachChat({
       });
     } catch (e) {
       console.error("coach send error", e);
-      // Возвращаем текст обратно в инпут
       setInput(text);
-      // Убираем оптимистичное
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
       alert("Не удалось отправить сообщение тренеру. Попробуй ещё раз.");
     } finally {
@@ -126,24 +138,18 @@ export default function CoachChat({
   };
 
   return (
-    <Card className="flex h-[70vh] flex-col">
-      <CardContent className="flex flex-1 flex-col gap-3 p-4">
-        {/* Лента сообщений */}
-        <div className="flex-1 overflow-y-auto rounded-md border bg-muted/10 p-3 space-y-3">
+    <Card className="flex h-full min-h-0 flex-col">
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-3 p-4">
+        <div className="min-h-0 flex-1 overflow-y-auto rounded-md border bg-muted/10 p-3 space-y-3">
           {messages.length === 0 && (
             <div className="text-xs text-muted-foreground">
-              Пока сообщений нет. Напиши тренеру, расскажи о своих целях и последней тренировке — он ответит и предложит, с чего начать.
+              Пока сообщений нет. Напиши тренеру, расскажи о своих целях и последней тренировке — он ответит и предложит,
+              с чего начать.
             </div>
           )}
 
           {messages.map((m) => (
-            <div
-              key={m.id}
-              className={cn(
-                "flex",
-                m.role === "user" ? "justify-end" : "justify-start"
-              )}
-            >
+            <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
               <div
                 className={cn(
                   "max-w-[75%] rounded-lg px-3 py-2 text-xs leading-relaxed",
@@ -157,20 +163,20 @@ export default function CoachChat({
                     Тренер
                   </div>
                 )}
+
                 {m.body}
+
                 <div className="mt-1 text-[9px] text-muted-foreground opacity-80">
-                  {new Date(m.created_at).toLocaleTimeString("ru-RU", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
+                  {/* стабильно на SSR, красиво на клиенте */}
+                  {formatTime(m.created_at)}
                 </div>
               </div>
             </div>
           ))}
+
           <div ref={bottomRef} />
         </div>
 
-        {/* Инпут */}
         <div className="mt-2 flex flex-col gap-2 border-t pt-2">
           <Textarea
             value={input}
@@ -180,13 +186,7 @@ export default function CoachChat({
             placeholder="Задай вопрос тренеру или опиши, как прошла тренировка… (Enter — отправить, Shift+Enter — новая строка)"
           />
           <div className="flex items-center justify-end gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              disabled={isSending}
-              onClick={() => setInput("")}
-            >
+            <Button type="button" variant="secondary" size="sm" disabled={isSending} onClick={() => setInput("")}>
               Очистить
             </Button>
             <Button

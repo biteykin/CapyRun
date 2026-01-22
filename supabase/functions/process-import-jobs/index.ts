@@ -252,6 +252,10 @@ async function parseFIT(ab: ArrayBuffer) {
   const startIso = session?.start_time ? new Date(session.start_time).toISOString() : null;
   const duration = toInt(session?.total_timer_time) ?? toInt(session?.total_elapsed_time)
                 ?? (ts.length >= 2 ? Math.max(0, Math.round(ts[ts.length - 1] - ts[0])) : null);
+
+  // NOTE: workouts.time_s в нашей схеме — фактическая длительность в секундах (используем moving, если посчитали)
+  // заполним позже при апдейте workouts (см. блок update ниже)
+
   const distance = toInt(session?.total_distance);
   const avgSpeedMs =
     Number.isFinite(Number(session?.avg_speed)) ? Number(session.avg_speed)
@@ -506,7 +510,7 @@ Deno.serve(async () => {
         .from("import_jobs")
         .update({
           status: "running",
-          started_at: new Date().toISOString(),
+          start_time: new Date().toISOString(),
           attempt: (j.attempt ?? 0) + 1,
           locked_by: "edge-fn",
           locked_at: new Date().toISOString(),
@@ -575,6 +579,19 @@ Deno.serve(async () => {
         const { error: werr } = await admin
           .from("workouts")
           .update({
+            // === НОРМАЛИЗАЦИЯ ВРЕМЕНИ ДЛЯ ТЕКУЩЕЙ СХЕМЫ ===
+            // В БД есть time_s (int4) и time_min (float8). В старом коде использовались started_at/time_sec.
+            // Теперь:
+            // - start_time уже пишем
+            // - time_s пишем из moving_time_sec (если есть), иначе duration_sec
+            // - time_min считаем из time_s
+
+            time_s: ((upd as any).moving_time_sec ?? (upd as any).duration_sec) ?? null,
+            time_min:
+              Number.isFinite(Number(((upd as any).moving_time_sec ?? (upd as any).duration_sec)))
+                ? Number((((upd as any).moving_time_sec ?? (upd as any).duration_sec) / 60).toFixed(2))
+                : null,
+
             // даты
             start_time: (upd as any).start_time ?? null,
             local_date: (upd as any).local_date ?? null,
