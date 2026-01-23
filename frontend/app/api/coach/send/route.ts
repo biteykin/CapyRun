@@ -2,11 +2,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabaseServerApp";
 import OpenAI from "openai";
+import { z } from "zod";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+// -----------------------------
+// Types / Schemas
+// -----------------------------
 type RawMessage = {
   id: string;
   thread_id: string;
@@ -17,7 +21,7 @@ type RawMessage = {
   created_at: string;
 };
 
-type WorkoutRow = {
+type WorkoutFact = {
   id: string;
   sport: string | null;
   start_time: string | null;
@@ -28,82 +32,337 @@ type WorkoutRow = {
   max_hr: number | null;
 };
 
-function safeNum(n: any): number | null {
-  const v = Number(n);
-  return Number.isFinite(v) ? v : null;
+const PlannerSchema = z.object({
+  // high-level intent (universal)
+  intent: z.enum([
+    "simple_fact", // factual Q about workouts/metrics
+    "plan", // "what should I do today"
+    "forecast", // "predict 10k time"
+    "analysis", // analyze last workouts / progress
+    "injury", // pain / injury / recovery
+    "nutrition", // food, calories, weight loss
+    "strength", // gym / strength plans
+    "other_sport", // swimming/cycling/etc
+    "account_app", // app/how to use / bugs
+    "unknown",
+  ]),
+
+  // responder mode
+  response_mode: z.enum(["answer", "clarify"]).default("answer"),
+  clarify_question: z.string().nullable().optional(),
+
+  // what data is needed
+  needs: z.object({
+    workouts_window_days: z.number().int().min(0).max(365).default(14),
+    workouts_limit: z.number().int().min(1).max(100).default(30),
+    include_coach_home: z.boolean().default(false),
+    include_thread_memory: z.boolean().default(true),
+    include_geo: z.boolean().default(false), // future
+    include_calendar: z.boolean().default(false), // future
+  }),
+
+  // fast-path suggestion (optional)
+  fast_path: z
+    .object({
+      enabled: z.boolean().default(false),
+      kind: z
+        .enum(["count_workouts", "list_workouts", "last_workout", "longest_workout"])
+        .optional(),
+      window_days: z.number().int().min(1).max(365).optional(),
+    })
+    .optional(),
+
+  // memory patch for thread (lightweight state)
+  memory_patch: z
+    .object({
+      goal: z.string().max(300).optional(), // e.g. "10k < 55min"
+      constraints: z.string().max(300).optional(), // e.g. "knee pain"
+      injury: z.string().max(300).optional(),
+      preferred_days_per_week: z.number().int().min(0).max(14).optional(),
+      preferred_session_minutes: z.number().int().min(5).max(240).optional(),
+      sports_focus: z.array(z.string().max(40)).max(10).optional(),
+    })
+    .optional(),
+
+  // optional explanation/debug for meta
+  debug: z
+    .object({
+      rationale_short: z.string().max(600).optional(),
+    })
+    .optional(),
+});
+
+type PlannerOut = z.infer<typeof PlannerSchema>;
+
+// -----------------------------
+// Helpers
+// -----------------------------
+function safeJsonParse(input: string) {
+  try {
+    return JSON.parse(input);
+  } catch {
+    return null;
+  }
 }
 
-function fmtKm(distance_m: number | null): string | null {
-  const m = safeNum(distance_m);
-  if (!m || m <= 0) return null;
-  const km = m / 1000;
-  // 1 знак, но если почти целое — показываем целое
-  const r1 = Math.round(km * 10) / 10;
-  const isInt = Math.abs(r1 - Math.round(km)) < 0.05;
-  return isInt ? `${Math.round(km)} км` : `${r1.toFixed(1)} км`;
+function clamp(n: number, a: number, b: number) {
+  return Math.max(a, Math.min(b, n));
 }
 
-function fmtMin(sec: number | null): string | null {
-  const s = safeNum(sec);
-  if (!s || s <= 0) return null;
+function fmtKm(distance_m: number | null) {
+  if (!Number.isFinite(Number(distance_m))) return "нет данных";
+  const km = Number(distance_m) / 1000;
+  return `${km.toFixed(1)} км`;
+}
+
+function fmtSecToMinSec(sec: number | null) {
+  if (!Number.isFinite(Number(sec))) return "нет данных";
+  const s = Math.max(0, Math.round(Number(sec)));
   const mm = Math.floor(s / 60);
-  const ss = Math.round(s - mm * 60);
+  const ss = s % 60;
   return `${mm}:${String(ss).padStart(2, "0")}`;
 }
 
-function isoOrNull(s: any): string | null {
-  const v = typeof s === "string" ? s : null;
-  return v && v.length >= 10 ? v : null;
+function fmtDateIsoToYMD(iso: string | null) {
+  if (!iso) return "нет данных";
+  try {
+    return new Date(iso).toISOString().slice(0, 10);
+  } catch {
+    return "нет данных";
+  }
 }
 
-// компактный контекст тренировки, чтобы модель не фантазировала
-function buildWorkoutsContext(workouts: WorkoutRow[]) {
-  if (!workouts.length) {
-    return {
-      text:
-        "Тренировки за последние 14 дней: данных нет (или нет start_time в этих тренировках).",
-      usedIds: [],
+function pickRecentHistory(history: any[] | null | undefined, limit = 14) {
+  const arr = Array.isArray(history) ? history : [];
+  if (arr.length <= limit) return arr;
+  return arr.slice(arr.length - limit);
+}
+
+function buildFastPathAnswer(
+  kind: NonNullable<NonNullable<PlannerOut["fast_path"]>["kind"]>,
+  workouts: WorkoutFact[],
+  windowDays: number
+) {
+  if (kind === "count_workouts") {
+    return `За последние ${windowDays} дней у тебя ${workouts.length} тренировок.`;
+  }
+
+  if (kind === "last_workout") {
+    const w = workouts[0];
+    if (!w) return `За последние ${windowDays} дней тренировок не найдено.`;
+    return [
+      `Последняя тренировка (за последние ${windowDays} дней):`,
+      `• Дата: ${fmtDateIsoToYMD(w.start_time)}`,
+      `• Спорт: ${w.sport ?? "нет данных"}`,
+      `• Дистанция: ${fmtKm(w.distance_m)}`,
+      `• Длительность: ${w.duration_sec != null ? `${w.duration_sec} сек` : "нет данных"} (${fmtSecToMinSec(
+        w.duration_sec
+      )})`,
+      `• Moving time: ${w.moving_time_sec != null ? `${w.moving_time_sec} сек` : "нет данных"} (${fmtSecToMinSec(
+        w.moving_time_sec
+      )})`,
+      `• Пульс: avg ${w.avg_hr ?? "нет данных"} / max ${w.max_hr ?? "нет данных"}`,
+    ].join("\n");
+  }
+
+  if (kind === "longest_workout") {
+    const withDist = workouts.filter((w) => Number.isFinite(Number(w.distance_m)));
+    if (!withDist.length) return `Не вижу дистанции в тренировках за последние ${windowDays} дней (нет данных).`;
+    const max = withDist.reduce((a, b) => (Number(b.distance_m) > Number(a.distance_m) ? b : a), withDist[0]);
+    const same = withDist.filter((w) => Number(w.distance_m) === Number(max.distance_m));
+    if (same.length > 1) {
+      return `Самая длинная тренировка за последние ${windowDays} дней — ${fmtKm(max.distance_m)} (их ${same.length}: ${same
+        .map((w) => fmtDateIsoToYMD(w.start_time))
+        .join(", ")}).`;
+    }
+    return `Самая длинная тренировка за последние ${windowDays} дней — ${fmtKm(max.distance_m)} (${fmtDateIsoToYMD(
+      max.start_time
+    )}).`;
+  }
+
+  // list_workouts
+  if (!workouts.length) return `За последние ${windowDays} дней тренировок не найдено.`;
+  const lines = workouts.map((w, i) => {
+    return [
+      `${i + 1}) ${fmtDateIsoToYMD(w.start_time)} • ${w.sport ?? "нет данных"}`,
+      `   дистанция: ${fmtKm(w.distance_m)}`,
+      `   duration_sec: ${w.duration_sec ?? "нет данных"}`,
+      `   moving_time_sec: ${w.moving_time_sec ?? "нет данных"}`,
+      `   avg_hr: ${w.avg_hr ?? "нет данных"}`,
+      `   max_hr: ${w.max_hr ?? "нет данных"}`,
+    ].join("\n");
+  });
+  return `Вот тренировки за последние ${windowDays} дней:\n${lines.join("\n")}`;
+}
+
+// -----------------------------
+// Planner
+// -----------------------------
+async function runPlanner(args: {
+  userText: string;
+  threadMemory: any | null;
+  recentHistory: { type: string; body: string; created_at: string }[];
+}) {
+  const { userText, threadMemory, recentHistory } = args;
+
+  const plannerSystem = [
+    "Ты — Planner для фитнес-коуча внутри приложения.",
+    "Твоя задача: определить intent, какие данные нужны, нужен ли уточняющий вопрос, и обновить 'memory'.",
+    "",
+    "ПРАВИЛА:",
+    "1) Верни СТРОГО JSON (без Markdown, без текста вокруг).",
+    "2) Не придумывай данные. Если сомневаешься — response_mode='clarify' и один короткий вопрос.",
+    "3) Не хардкодь ответы. Только планирование: intent + needs + fast_path + memory_patch.",
+    "4) fast_path включай только для очень простых вопросов про тренировки (count/list/last/longest).",
+    "5) Если вопрос про боль/травму — intent='injury' (fast_path=false).",
+    "6) Если вопрос про 10к прогноз — intent='forecast' (fast_path=false).",
+    "7) Если вопрос просит конкретный план на X минут сегодня/завтра — intent='plan'.",
+    "",
+    "СХЕМА:",
+    JSON.stringify(PlannerSchema.shape, null, 2),
+  ].join("\n");
+
+  const plannerUser = JSON.stringify(
+    {
+      user_text: userText,
+      thread_memory: threadMemory,
+      recent_dialogue: recentHistory.slice(-10),
+    },
+    null,
+    2
+  );
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4.1-mini",
+    temperature: 0.1,
+    max_tokens: 450,
+    messages: [
+      { role: "system", content: plannerSystem },
+      { role: "user", content: plannerUser },
+    ],
+    // if model supports it, it helps; otherwise it's ignored safely
+    response_format: { type: "json_object" } as any,
+  });
+
+  const raw = completion.choices[0]?.message?.content ?? "{}";
+  const parsed = safeJsonParse(raw) ?? {};
+  const validated = PlannerSchema.safeParse(parsed);
+
+  if (!validated.success) {
+    // ultra-safe fallback
+    const fallback: PlannerOut = {
+      intent: "unknown",
+      response_mode: "answer",
+      clarify_question: null,
+      needs: {
+        workouts_window_days: 14,
+        workouts_limit: 30,
+        include_coach_home: false,
+        include_thread_memory: true,
+        include_geo: false,
+        include_calendar: false,
+      },
+      fast_path: { enabled: false },
+      memory_patch: {},
+      debug: { rationale_short: "planner_parse_failed_fallback" },
     };
+    return fallback;
   }
 
-  const lines: string[] = [];
-  for (const w of workouts) {
-    const dateIso = isoOrNull(w.start_time);
-    const day = dateIso ? dateIso.slice(0, 10) : "дата неизвестна";
-    const sport = (w.sport || "other").toLowerCase();
-
-    const dist = fmtKm(w.distance_m);
-    const dur = fmtMin(w.duration_sec);
-    const mov = fmtMin(w.moving_time_sec);
-
-    const avgHr = safeNum(w.avg_hr);
-    const maxHr = safeNum(w.max_hr);
-
-    lines.push(
-      [
-        `- ${day} • ${sport}`,
-        dist ? `• дистанция: ${dist}` : `• дистанция: нет данных`,
-        dur ? `• время: ${dur}` : `• время: нет данных`,
-        mov ? `• moving: ${mov}` : `• moving: нет данных`,
-        avgHr ? `• avgHR: ${Math.round(avgHr)}` : `• avgHR: нет данных`,
-        maxHr ? `• maxHR: ${Math.round(maxHr)}` : `• maxHR: нет данных`,
-        `• workout_id: ${w.id}`,
-      ].join(" ")
-    );
-  }
-
-  return {
-    text:
-      "Тренировки за последние 14 дней (используй ТОЛЬКО эти данные, ничего не выдумывай):\n" +
-      lines.join("\n"),
-    usedIds: workouts.map((w) => w.id),
-  };
+  // sanitize a bit
+  const out = validated.data;
+  out.needs.workouts_window_days = clamp(out.needs.workouts_window_days ?? 14, 1, 365);
+  out.needs.workouts_limit = clamp(out.needs.workouts_limit ?? 30, 1, 100);
+  return out;
 }
 
+// -----------------------------
+// Responder
+// -----------------------------
+async function runResponder(args: {
+  userText: string;
+  planner: PlannerOut;
+  threadMemory: any | null;
+  workouts: WorkoutFact[];
+  coachHome: any | null;
+  recentHistory: { type: string; body: string; created_at: string }[];
+}) {
+  const { userText, planner, threadMemory, workouts, coachHome, recentHistory } = args;
+
+  const responderSystem = [
+    "Ты — дружелюбный и мотивирующий персональный тренер для любителя.",
+    "Пиши по-русски, тепло и поддерживающе, но без воды.",
+    "",
+    "КЛЮЧЕВОЕ:",
+    "— СНАЧАЛА дай прямой ответ на вопрос пользователя (самое нужное).",
+    "— Затем (если уместно) добавь 1–3 конкретных совета или план.",
+    "— Заканчивай ОДНИМ уточняющим вопросом, только если это реально нужно.",
+    "",
+    "ОГРАНИЧЕНИЯ ТОЧНОСТИ:",
+    "— Факты о тренировках (дата/дистанция/время/HR) бери ТОЛЬКО из WORKOUTS_FACTS.",
+    "— Если поле отсутствует — пиши «нет данных».",
+    "— Не выдумывай геолокацию, маршрут, текущее время, погоду, устройства — если нет данных, так и скажи.",
+    "",
+    "АНТИ-ПОПУГАЙ:",
+    "— Не повторяй одни и те же 1–2 тренировки в каждом ответе.",
+    "— Не начинай каждый ответ с анализа прошлого, если вопрос про другое.",
+    "— Не предлагай «план на 40 минут», если пользователь спрашивает прогноз/травму/гео.",
+    "",
+    "Безопасность:",
+    "— При боли/травме: не мотивируй «терпи и беги». Дай осторожные шаги, и красные флаги.",
+    "",
+    "Ниже: планировщик передал intent и требования. Следуй им.",
+  ].join("\n");
+
+  const plannerBlock = `PLANNER_JSON:\n${JSON.stringify(planner, null, 2)}`;
+  const memoryBlock = `THREAD_MEMORY_JSON:\n${JSON.stringify(threadMemory ?? {}, null, 2)}`;
+  const factsBlock = `WORKOUTS_FACTS_JSON (source of truth):\n${JSON.stringify(
+    {
+      window_days: planner.needs.workouts_window_days,
+      workouts,
+    },
+    null,
+    2
+  )}`;
+
+  const coachHomeBlock = `COACH_HOME_JSON (may be null):\n${JSON.stringify(coachHome ?? null, null, 2)}`;
+
+  const convo = pickRecentHistory(recentHistory, 14).map((m) => {
+    if (m.type === "user") return { role: "user" as const, content: m.body };
+    if (m.type === "coach") return { role: "assistant" as const, content: m.body };
+    return { role: "system" as const, content: m.body };
+  });
+
+  // Ensure last user message is present
+  convo.push({ role: "user", content: userText });
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4.1-mini",
+    temperature: 0.6,
+    max_tokens: 950,
+    messages: [
+      { role: "system", content: responderSystem },
+      { role: "system", content: plannerBlock },
+      { role: "system", content: memoryBlock },
+      { role: "system", content: factsBlock },
+      { role: "system", content: coachHomeBlock },
+      ...convo,
+    ],
+  });
+
+  return (
+    completion.choices[0]?.message?.content?.trim() ||
+    "Извини, не получилось сформировать ответ. Попробуй ещё раз."
+  );
+}
+
+// -----------------------------
+// Main Route
+// -----------------------------
 export async function POST(req: NextRequest) {
   try {
-    // --- 1) Читаем тело запроса максимально мягко ---
-    let body: any = null;
+    // 1) Parse body softly
+    let body: any = {};
     try {
       body = await req.json();
     } catch (e) {
@@ -111,20 +370,14 @@ export async function POST(req: NextRequest) {
       body = {};
     }
 
-    // допускаем разные формы: {text}, {message}, {content}
-    const rawText =
-      (body?.text ?? body?.message ?? body?.content ?? "") as string | undefined;
-
-    const text = (rawText ?? "").toString().trim();
-
-    // даже если текст пустой — НЕ возвращаем 400, а подставим дефолт
+    const rawText = (body?.text ?? body?.message ?? body?.content ?? "") as string;
+    const userText = (rawText ?? "").toString().trim();
     const finalText =
-      text ||
-      "Пользователь не задал конкретный вопрос, но хочет получить рекомендации по тренировкам.";
+      userText || "Пользователь не задал конкретный вопрос, но хочет получить рекомендации по тренировкам.";
 
     const reqThreadId = (body?.threadId ?? null) as string | null;
 
-    // --- 2) Проверка пользователя через Supabase ---
+    // 2) Auth via Supabase
     const supabase = await createSupabaseServerClient();
     const {
       data: { user },
@@ -136,13 +389,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
 
-    // --- 3) Находим / создаём тред с тренером ---
+    // 3) Resolve thread
     let threadId: string | null = reqThreadId;
 
     if (threadId) {
       const { data: threadRow, error: tErr } = await supabase
         .from("coach_threads")
-        .select("id, user_id")
+        .select("id, user_id, meta")
         .eq("id", threadId)
         .maybeSingle();
 
@@ -178,16 +431,14 @@ export async function POST(req: NextRequest) {
             subject: "Мой тренер",
             scope: "general",
             created_by: user.id,
+            meta: {}, // ensure meta exists
           })
           .select("id")
           .single();
 
         if (createErr || !created) {
           console.error("coach_send: thread_create_error", createErr);
-          return NextResponse.json(
-            { error: "thread_create_failed" },
-            { status: 500 }
-          );
+          return NextResponse.json({ error: "thread_create_failed" }, { status: 500 });
         }
 
         threadId = created.id;
@@ -195,13 +446,22 @@ export async function POST(req: NextRequest) {
     }
 
     if (!threadId) {
-      return NextResponse.json(
-        { error: "thread_resolve_failed" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "thread_resolve_failed" }, { status: 500 });
     }
 
-    // --- 4) Сохраняем сообщение пользователя ---
+    // 3.1) Read thread meta (memory)
+    const { data: threadMetaRow, error: tMetaErr } = await supabase
+      .from("coach_threads")
+      .select("id, meta")
+      .eq("id", threadId)
+      .maybeSingle();
+
+    if (tMetaErr) console.error("coach_send: thread_meta_read_error", tMetaErr);
+
+    const threadMeta = (threadMetaRow as any)?.meta ?? {};
+    const threadMemory = (threadMeta?.memory ?? null) as any | null;
+
+    // 4) Insert user message
     const { data: userMsgRow, error: userMsgErr } = await supabase
       .from("coach_messages")
       .insert({
@@ -216,127 +476,253 @@ export async function POST(req: NextRequest) {
 
     if (userMsgErr || !userMsgRow) {
       console.error("coach_send: user_message_insert_error", userMsgErr);
-      return NextResponse.json(
-        { error: "user_message_insert_failed" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "user_message_insert_failed" }, { status: 500 });
     }
 
-    // --- 5) История треда (последние 30 сообщений) ---
-    const { data: history, error: histErr } = await supabase
+    // 5) Load recent history (compact)
+    const { data: historyAll, error: histErr } = await supabase
       .from("coach_messages")
       .select("type, body, created_at")
       .eq("thread_id", threadId)
       .order("created_at", { ascending: true })
-      .limit(30);
+      .limit(60);
 
-    if (histErr) {
-      console.error("coach_send: history_error", histErr);
+    if (histErr) console.error("coach_send: history_error", histErr);
+    const recentHistory = pickRecentHistory(historyAll ?? [], 30);
+
+    // 6) Planner
+    const planner = await runPlanner({
+      userText: finalText,
+      threadMemory,
+      recentHistory,
+    });
+
+    // 6.1) Apply memory patch (no extra LLM calls)
+    if (planner?.memory_patch && Object.keys(planner.memory_patch).length) {
+      const nextMemory = {
+        ...(threadMemory ?? {}),
+        ...planner.memory_patch,
+        updated_at: new Date().toISOString(),
+      };
+      const nextMeta = {
+        ...(threadMeta ?? {}),
+        memory: nextMemory,
+      };
+
+      const { error: upMetaErr } = await supabase
+        .from("coach_threads")
+        .update({ meta: nextMeta })
+        .eq("id", threadId);
+
+      if (upMetaErr) console.error("coach_send: thread_meta_update_error", upMetaErr);
     }
 
-    // --- 5.1) Тренировки за 14 дней (контекст) ---
-    // Берём только те поля, которые у тебя реально есть и уже используются.
-    const { data: workouts14d, error: wErr } = await supabase
+    // 7) If clarify: reply with a single clarifying question
+    if (planner.response_mode === "clarify") {
+      const clarifyText =
+        (planner.clarify_question ?? "").trim() ||
+        "Подскажи, пожалуйста, чуть больше деталей — что именно ты хочешь получить от тренера?";
+
+      const coachMeta = {
+        model: "gpt-4.1-mini",
+        source: "api/coach/send",
+        stage: "clarify_only",
+        planner,
+      };
+
+      const { data: coachMsgRow, error: coachMsgErr } = await supabase
+        .from("coach_messages")
+        .insert({
+          thread_id: threadId,
+          author_id: user.id,
+          type: "coach",
+          body: clarifyText,
+          meta: coachMeta as any,
+        })
+        .select("*")
+        .single();
+
+      if (coachMsgErr || !coachMsgRow) {
+        return NextResponse.json(
+          {
+            threadId,
+            userMessage: userMsgRow,
+            coachMessage: {
+              id: "temp-coach",
+              thread_id: threadId,
+              author_id: user.id,
+              type: "coach",
+              body: clarifyText,
+              meta: coachMeta as any,
+              created_at: new Date().toISOString(),
+            },
+          },
+          { status: 200 }
+        );
+      }
+
+      return NextResponse.json(
+        {
+          threadId,
+          userMessage: userMsgRow,
+          coachMessage: coachMsgRow,
+        },
+        { status: 200 }
+      );
+    }
+
+    // 8) Data loader (workouts window + optional coach_home)
+    const WORKOUTS_WINDOW_DAYS = clamp(planner.needs.workouts_window_days ?? 14, 1, 365);
+    const WORKOUTS_LIMIT = clamp(planner.needs.workouts_limit ?? 30, 1, 100);
+
+    const windowFromIso = new Date(Date.now() - WORKOUTS_WINDOW_DAYS * 24 * 3600 * 1000).toISOString();
+
+    const { data: workoutsRaw, error: wErr } = await supabase
       .from("workouts")
-      .select(
-        "id, sport, start_time, distance_m, duration_sec, moving_time_sec, avg_hr, max_hr"
-      )
+      .select("id, sport, start_time, distance_m, duration_sec, moving_time_sec, avg_hr, max_hr")
       .eq("user_id", user.id)
-      .not("start_time", "is", null)
-      .gte("start_time", new Date(Date.now() - 14 * 24 * 3600 * 1000).toISOString())
+      .gte("start_time", windowFromIso)
       .order("start_time", { ascending: false })
-      .limit(12);
+      .limit(WORKOUTS_LIMIT);
 
-    if (wErr) {
-      console.error("coach_send: workouts_context_error", wErr);
+    if (wErr) console.error("coach_send: workouts_window_error", wErr);
+
+    const workouts: WorkoutFact[] = (workoutsRaw ?? []).map((w: any) => ({
+      id: w.id,
+      sport: w.sport ?? null,
+      start_time: w.start_time ?? null,
+      distance_m: Number.isFinite(Number(w.distance_m)) ? Number(w.distance_m) : w.distance_m ?? null,
+      duration_sec: w.duration_sec ?? null,
+      moving_time_sec: w.moving_time_sec ?? null,
+      avg_hr: w.avg_hr ?? null,
+      max_hr: w.max_hr ?? null,
+    }));
+
+    const usedWorkoutIds = workouts.map((w) => w.id).filter(Boolean);
+
+    let coachHome: any | null = null;
+    if (planner.needs.include_coach_home) {
+      const { data: coachHomeData, error: coachHomeErr } = await supabase.rpc("get_coach_home", {
+        p_scope: "global",
+        p_goal_id: null,
+        p_include_snapshot_payload: false,
+      });
+      if (coachHomeErr) console.error("coach_send: coach_home_error", coachHomeErr);
+      coachHome = coachHomeData ?? null;
     }
 
-    const workouts: WorkoutRow[] = (workouts14d ?? []) as any;
-    const workoutsCtx = buildWorkoutsContext(workouts);
+    // 9) Fast-path (no LLM) for simple facts
+    const fp = planner.fast_path;
+    if (fp?.enabled && fp.kind) {
+      const fpWindow = clamp(fp.window_days ?? WORKOUTS_WINDOW_DAYS, 1, 365);
+      // If planner asks different window, we can reuse current workouts only if window matches;
+      // otherwise do a quick refetch (still cheap)
+      let fpWorkouts = workouts;
+      if (fpWindow !== WORKOUTS_WINDOW_DAYS) {
+        const fpFromIso = new Date(Date.now() - fpWindow * 24 * 3600 * 1000).toISOString();
+        const { data: w2, error: w2Err } = await supabase
+          .from("workouts")
+          .select("id, sport, start_time, distance_m, duration_sec, moving_time_sec, avg_hr, max_hr")
+          .eq("user_id", user.id)
+          .gte("start_time", fpFromIso)
+          .order("start_time", { ascending: false })
+          .limit(80);
+        if (w2Err) console.error("coach_send: workouts_fastpath_refetch_error", w2Err);
+        fpWorkouts = (w2 ?? []).map((w: any) => ({
+          id: w.id,
+          sport: w.sport ?? null,
+          start_time: w.start_time ?? null,
+          distance_m: Number.isFinite(Number(w.distance_m)) ? Number(w.distance_m) : w.distance_m ?? null,
+          duration_sec: w.duration_sec ?? null,
+          moving_time_sec: w.moving_time_sec ?? null,
+          avg_hr: w.avg_hr ?? null,
+          max_hr: w.max_hr ?? null,
+        }));
+      }
 
-    // --- 6) Сообщения в OpenAI ---
-    const messages: any[] = [];
+      const fastAnswer = buildFastPathAnswer(fp.kind, fpWorkouts, fpWindow);
 
-    // Системные правила: дружелюбно, мотивирующе, но без фантазий.
-    messages.push({
-      role: "system",
-      content:
-        [
-          "Ты персональный тренер для любителя (бег/ОФП). Пиши по-русски, дружелюбно и мотивирующе (как хороший тренер), но без воды.",
-          "",
-          "КРИТИЧЕСКОЕ ПРАВИЛО ПРО ДАННЫЕ:",
-          "- Если тебя спрашивают про тренировки/цифры/даты — используй ТОЛЬКО данные из блока «Тренировки за последние 14 дней».",
-          "- НИЧЕГО НЕ ВЫДУМЫВАЙ. Если поля нет (например калории/темп/пульсовые зоны) — так и скажи: «нет данных».",
-          "- Если пользователь просит «последние N тренировок», бери N из этого блока (если их меньше — скажи сколько есть).",
-          "",
-          "СТИЛЬ:",
-          "- Короткие абзацы, списки, понятные пояснения.",
-          "- 1–2 предложения поддержки/подбадривания там, где уместно.",
-          "- Если запрос про план на сегодня — предложи 1 вариант тренировки + как размяться/замяться + ориентиры по усилию (RPE/пульс если есть).",
-          "",
-          "ФОРМАТ ОТВЕТА (если вопрос про анализ тренировок):",
-          "1) Короткий вывод (1–2 строки).",
-          "2) Факты по тренировкам (список с датой и цифрами).",
-          "3) Рекомендация на сегодня/ближайшие 2–3 дня (1 вариант).",
-          "4) Уточняющий вопрос (1 шт.) если нужно для точности.",
-        ].join("\n"),
-    });
+      const coachMeta = {
+        model: "fast_path_no_llm",
+        source: "api/coach/send",
+        fast_path: fp,
+        used_workout_ids: fpWorkouts.map((w) => w.id).filter(Boolean),
+        workouts_window_days: fpWindow,
+        planner,
+      };
 
-    // Добавляем контекст тренировок отдельным system сообщением
-    messages.push({
-      role: "system",
-      content: workoutsCtx.text,
-    });
+      const { data: coachMsgRow, error: coachMsgErr } = await supabase
+        .from("coach_messages")
+        .insert({
+          thread_id: threadId,
+          author_id: user.id,
+          type: "coach",
+          body: fastAnswer,
+          meta: coachMeta as any,
+        })
+        .select("*")
+        .single();
 
-    // История диалога
-    for (const m of history ?? []) {
-      if (m.type === "user") messages.push({ role: "user", content: m.body });
-      else if (m.type === "coach") messages.push({ role: "assistant", content: m.body });
-      else if (m.type === "system" || m.type === "note")
-        messages.push({ role: "system", content: m.body });
+      if (coachMsgErr || !coachMsgRow) {
+        return NextResponse.json(
+          {
+            threadId,
+            userMessage: userMsgRow,
+            coachMessage: {
+              id: "temp-coach",
+              thread_id: threadId,
+              author_id: user.id,
+              type: "coach",
+              body: fastAnswer,
+              meta: coachMeta as any,
+              created_at: new Date().toISOString(),
+            },
+          },
+          { status: 200 }
+        );
+      }
+
+      return NextResponse.json(
+        { threadId, userMessage: userMsgRow, coachMessage: coachMsgRow },
+        { status: 200 }
+      );
     }
 
-    // страховка: если история пустая — кладём вопрос
-    if (!history || history.length === 0) {
-      messages.push({ role: "user", content: finalText });
-    }
-
-    // --- 7) Вызов OpenAI ---
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4.1-mini",
-      messages,
-      temperature: 0.55,
-      max_tokens: 900,
+    // 10) Responder (LLM)
+    const answer = await runResponder({
+      userText: finalText,
+      planner,
+      threadMemory: (threadMeta?.memory ?? null) as any,
+      workouts,
+      coachHome,
+      recentHistory,
     });
 
-    const answer =
-      completion.choices[0]?.message?.content?.trim() ||
-      "Извини, сейчас не получилось сформировать ответ. Попробуй ещё раз.";
-
-    // --- 8) Сохраняем ответ «тренера» + meta (для отладки: какие тренировки использовались) ---
     const coachMeta = {
-      used_workout_ids: workoutsCtx.usedIds,
-      workouts_window_days: 14,
-      source: "api/coach/send",
       model: "gpt-4.1-mini",
+      source: "api/coach/send",
+      stage: "answer",
+      planner,
+      workouts_window_days: WORKOUTS_WINDOW_DAYS,
+      used_workout_ids: usedWorkoutIds,
+      has_coach_home: !!coachHome,
+      style_version: "v1_intent_planner_fastpath_memory",
     };
 
     const { data: coachMsgRow, error: coachMsgErr } = await supabase
       .from("coach_messages")
       .insert({
         thread_id: threadId,
-        author_id: user.id, // пока нет отдельного coach-пользователя
+        author_id: user.id,
         type: "coach",
         body: answer,
-        meta: coachMeta,
+        meta: coachMeta as any,
       })
       .select("*")
       .single();
 
     if (coachMsgErr || !coachMsgRow) {
       console.error("coach_send: coach_message_insert_error", coachMsgErr);
-
-      // Даже если не сохранили — всё равно отдаём ответ на фронт
       return NextResponse.json(
         {
           error: "coach_message_insert_failed",
@@ -348,15 +734,14 @@ export async function POST(req: NextRequest) {
             author_id: user.id,
             type: "coach",
             body: answer,
-            meta: coachMeta,
+            meta: coachMeta as any,
             created_at: new Date().toISOString(),
-          } as RawMessage,
+          },
         },
-        { status: 500 }
+        { status: 200 }
       );
     }
 
-    // --- 9) Отдаём формат, который ждёт CoachChat.client.tsx ---
     return NextResponse.json(
       {
         threadId,
