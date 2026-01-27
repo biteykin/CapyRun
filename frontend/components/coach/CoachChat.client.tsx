@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
+import { Activity } from "lucide-react";
 
 type RawMessage = {
   id: string;
@@ -20,31 +21,23 @@ type ChatMessageVM = {
   id: string;
   role: "user" | "coach" | "system";
   body: string;
+  meta?: any;
   created_at: string;
 };
 
-/**
- * Почему был hydration mismatch:
- * - внутри SSR/Client компонента мы рендерили время через toLocaleTimeString("ru-RU"),
- *   а timezone/locale на сервере и в браузере могут отличаться => разные строки времени => mismatch.
- *
- * Фикс:
- * - на серверном рендере показываем стабильный placeholder "—:—"
- * - после hydration (useEffect) включаем форматирование времени на клиенте.
- * Дополнительно оставили min-h-0 цепочку, чтобы чат скроллился внутри фиксированной высоты родителя.
- */
 export default function CoachChat(props: {
   threadId: string;
-  initialMessages: any[];
+  initialMessages: RawMessage[];
   currentUserId: string;
 }) {
   const { threadId, initialMessages } = props;
 
   const [messages, setMessages] = React.useState<ChatMessageVM[]>(() =>
-    (initialMessages ?? []).map((m: any) => ({
+    (initialMessages ?? []).map((m) => ({
       id: m.id,
       role: m.type === "coach" ? "coach" : m.type === "system" ? "system" : "user",
       body: m.body,
+      meta: m.meta,
       created_at: m.created_at,
     }))
   );
@@ -59,7 +52,6 @@ export default function CoachChat(props: {
   }, []);
 
   React.useEffect(() => {
-    // auto-scroll после добавления сообщений
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
 
@@ -80,7 +72,6 @@ export default function CoachChat(props: {
     setIsSending(true);
     setInput("");
 
-    // ⚠️ tempId не должен зависеть от Date.now() для SSR — он создаётся только по клику (клиент), ок.
     const tempId = `temp-${Date.now()}`;
     const optimisticUser: ChatMessageVM = {
       id: tempId,
@@ -106,19 +97,22 @@ export default function CoachChat(props: {
 
       setMessages((prev) => {
         const withoutTemp = prev.filter((m) => m.id !== tempId);
-        const userMsg: ChatMessageVM = {
-          id: data.userMessage.id,
-          role: "user",
-          body: data.userMessage.body,
-          created_at: data.userMessage.created_at,
-        };
-        const coachMsg: ChatMessageVM = {
-          id: data.coachMessage.id,
-          role: "coach",
-          body: data.coachMessage.body,
-          created_at: data.coachMessage.created_at,
-        };
-        return [...withoutTemp, userMsg, coachMsg];
+        return [
+          ...withoutTemp,
+          {
+            id: data.userMessage.id,
+            role: "user",
+            body: data.userMessage.body,
+            created_at: data.userMessage.created_at,
+          },
+          {
+            id: data.coachMessage.id,
+            role: "coach",
+            body: data.coachMessage.body,
+            meta: data.coachMessage.meta,
+            created_at: data.coachMessage.created_at,
+          },
+        ];
       });
     } catch (e) {
       console.error("coach send error", e);
@@ -143,36 +137,49 @@ export default function CoachChat(props: {
         <div className="min-h-0 flex-1 overflow-y-auto rounded-md border bg-muted/10 p-3 space-y-3">
           {messages.length === 0 && (
             <div className="text-xs text-muted-foreground">
-              Пока сообщений нет. Напиши тренеру, расскажи о своих целях и последней тренировке — он ответит и предложит,
-              с чего начать.
+              Пока сообщений нет. Напиши тренеру — он ответит и подскажет, как двигаться дальше.
             </div>
           )}
 
-          {messages.map((m) => (
-            <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
+          {messages.map((m) => {
+            const isWorkoutFirst =
+              m.role === "coach" && m.meta?.kind === "workout_first_message";
+
+            return (
               <div
-                className={cn(
-                  "max-w-[75%] rounded-lg px-3 py-2 text-xs leading-relaxed",
-                  m.role === "user"
-                    ? "bg-[color:var(--btn-primary-main,#E58B21)] text-[color:var(--btn-primary-text,#0E0E0E)]"
-                    : "bg-muted text-foreground"
-                )}
+                key={m.id}
+                className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}
               >
-                {m.role === "coach" && (
-                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    Тренер
+                <div
+                  className={cn(
+                    "max-w-[75%] rounded-lg px-3 py-2 text-xs leading-relaxed",
+                    m.role === "user"
+                      ? "bg-[color:var(--btn-primary-main,#E58B21)] text-[color:var(--btn-primary-text,#0E0E0E)]"
+                      : "bg-muted text-foreground"
+                  )}
+                >
+                  {isWorkoutFirst && (
+                    <div className="mb-1 flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                      <Activity className="h-3 w-3" />
+                      Комментарий по новой тренировке
+                    </div>
+                  )}
+
+                  {m.role === "coach" && !isWorkoutFirst && (
+                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Тренер
+                    </div>
+                  )}
+
+                  {m.body}
+
+                  <div className="mt-1 text-[9px] text-muted-foreground opacity-80">
+                    {formatTime(m.created_at)}
                   </div>
-                )}
-
-                {m.body}
-
-                <div className="mt-1 text-[9px] text-muted-foreground opacity-80">
-                  {/* стабильно на SSR, красиво на клиенте */}
-                  {formatTime(m.created_at)}
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
 
           <div ref={bottomRef} />
         </div>
@@ -183,10 +190,16 @@ export default function CoachChat(props: {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             rows={2}
-            placeholder="Задай вопрос тренеру или опиши, как прошла тренировка… (Enter — отправить, Shift+Enter — новая строка)"
+            placeholder="Задай вопрос тренеру или опиши, как прошла тренировка…"
           />
           <div className="flex items-center justify-end gap-2">
-            <Button type="button" variant="secondary" size="sm" disabled={isSending} onClick={() => setInput("")}>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={isSending}
+              onClick={() => setInput("")}
+            >
               Очистить
             </Button>
             <Button
