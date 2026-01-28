@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as React from "react";
+import { supabase } from "@/lib/supabaseBrowser";
 import { AppTooltip } from "@/components/ui/AppTooltip";
 import {
   Sidebar as UISidebar,
@@ -37,14 +38,131 @@ const TOP: Item[] = [
   { href: "/goals",    label: "Цели",       icon: Target },
 ];
 
+function UnreadBadge({ count, collapsed }: { count: number; collapsed: boolean }) {
+  if (!count || count <= 0) return null;
+
+  // в collapsed режиме покажем маленькую точку, чтобы не ломать верстку
+  if (collapsed) {
+    return (
+      <span
+        className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-background"
+        aria-label={`Новых: ${count}`}
+        title={`Новых: ${count}`}
+      />
+    );
+  }
+
+  return (
+    <span
+      className="ml-auto inline-flex min-w-[22px] items-center justify-center rounded-full bg-primary px-2 py-0.5 text-[11px] font-semibold leading-none text-primary-foreground"
+      aria-label={`Новых: ${count}`}
+      title={`Новых: ${count}`}
+    >
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
+
+function useCoachUnreadCount(opts: { enabled: boolean }) {
+  const { enabled } = opts;
+  const [count, setCount] = React.useState(0);
+  const uidRef = React.useRef<string | null>(null);
+
+  const refresh = React.useCallback(async () => {
+    if (!enabled) return;
+    const uid = uidRef.current;
+    if (!uid) {
+      setCount(0);
+      return;
+    }
+    const { data, error } = await supabase.rpc("get_unread_count_global");
+    if (error) {
+      console.warn("[coach] get_unread_count_global failed", error);
+      return;
+    }
+    setCount(Number(data) || 0);
+  }, [enabled]);
+
+  React.useEffect(() => {
+    if (!enabled) return;
+    let mounted = true;
+    let chMsgs: ReturnType<typeof supabase.channel> | null = null;
+    let chReads: ReturnType<typeof supabase.channel> | null = null;
+
+    (async () => {
+      const { data: sess } = await supabase.auth.getSession();
+      const uid = sess?.session?.user?.id ?? null;
+      uidRef.current = uid;
+      if (!mounted) return;
+      await refresh();
+
+      if (!uid) return;
+
+      // 1) Любое новое сообщение -> если не наше, пересчитаем unread через RPC
+      // (да, подписка без фильтра; в рамках одного проекта это нормально, а корректность дает RPC)
+      chMsgs = supabase
+        .channel(`coach-unread-messages-${uid}`)
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "coach_messages" },
+          (payload) => {
+            const m = payload.new as any;
+            if (!m) return;
+            if (m.author_id && m.author_id === uid) return;
+            refresh();
+          }
+        )
+        .subscribe();
+
+      // 2) Когда мы отмечаем прочитанным (coach_mark_thread_read пишет в coach_thread_reads) -> тоже обновим
+      chReads = supabase
+        .channel(`coach-unread-reads-${uid}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "coach_thread_reads",
+            filter: `user_id=eq.${uid}`,
+          },
+          () => refresh()
+        )
+        .subscribe();
+    })();
+
+    // auth changes => переинициализируем uid и пересчитаем
+    const { data: sub } = supabase.auth.onAuthStateChange(async (_evt, session) => {
+      uidRef.current = session?.user?.id ?? null;
+      await refresh();
+    });
+
+    return () => {
+      mounted = false;
+      try {
+        sub?.subscription?.unsubscribe();
+      } catch {}
+      try {
+        if (chMsgs) supabase.removeChannel(chMsgs);
+      } catch {}
+      try {
+        if (chReads) supabase.removeChannel(chReads);
+      } catch {}
+    };
+  }, [enabled, refresh]);
+
+  return { unreadCount: count, refresh };
+}
+
 function NavItem({
   item,
   active,
   collapsed,
+  right,
 }: {
   item: Item;
   active: boolean;
   collapsed: boolean;
+  right?: React.ReactNode;
 }) {
   const Icon = item.icon;
   const btnClass = collapsed ? "justify-center px-2 w-8 h-8" : "gap-3";
@@ -52,8 +170,12 @@ function NavItem({
   const Btn = (
     <SidebarMenuButton asChild isActive={active} className={btnClass}>
       <Link href={item.href}>
-        <Icon className="h-5 w-5" />
+        <span className={collapsed ? "relative" : "contents"}>
+          <Icon className="h-5 w-5" />
+          {collapsed ? right : null}
+        </span>
         <span className="truncate">{item.label}</span>
+        {!collapsed ? right : null}
       </Link>
     </SidebarMenuButton>
   );
@@ -80,6 +202,9 @@ export default function Sidebar() {
     (href: string) => pathname === href || pathname?.startsWith(href + "/"),
     [pathname]
   );
+
+  // unread для "Тренер"
+  const { unreadCount: coachUnread } = useCoachUnreadCount({ enabled: true });
 
   return (
     <UISidebar
@@ -129,6 +254,11 @@ export default function Sidebar() {
                   item={it}
                   active={isActive(it.href)}
                   collapsed={collapsed}
+                  right={
+                    it.href === "/coach" ? (
+                      <UnreadBadge count={coachUnread} collapsed={collapsed} />
+                    ) : null
+                  }
                 />
               ))}
             </SidebarMenu>

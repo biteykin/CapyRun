@@ -22,39 +22,30 @@ type ChatMessageVM = {
   role: "user" | "coach" | "system";
   body: string;
   created_at: string;
+  author_id?: string;
+  meta?: any;
 };
-
-function toVM(m: any): ChatMessageVM {
-  const role: ChatMessageVM["role"] =
-    m.type === "coach" ? "coach" : m.type === "system" ? "system" : "user";
-  return {
-    id: m.id,
-    role,
-    body: m.body ?? "",
-    created_at: m.created_at,
-  };
-}
-
-function uniqByIdAsc(list: ChatMessageVM[]) {
-  const map = new Map<string, ChatMessageVM>();
-  for (const m of list) map.set(m.id, m);
-  return Array.from(map.values()).sort((a, b) => {
-    const ta = new Date(a.created_at).getTime();
-    const tb = new Date(b.created_at).getTime();
-    return ta - tb;
-  });
-}
 
 export default function CoachChat(props: {
   threadId: string;
   initialMessages: any[];
   currentUserId: string;
+  initialUnreadCount?: number;
 }) {
-  const { threadId, initialMessages } = props;
+  const { threadId, initialMessages, currentUserId, initialUnreadCount = 0 } = props;
 
   const [messages, setMessages] = React.useState<ChatMessageVM[]>(() =>
-    uniqByIdAsc((initialMessages ?? []).map(toVM))
+    (initialMessages ?? []).map((m: any) => ({
+      id: m.id,
+      role: m.type === "coach" ? "coach" : m.type === "system" ? "system" : "user",
+      body: m.body,
+      created_at: m.created_at,
+      author_id: m.author_id,
+      meta: m.meta,
+    }))
   );
+
+  const [unreadCount, setUnreadCount] = React.useState<number>(Number(initialUnreadCount) || 0);
 
   const [input, setInput] = React.useState("");
   const [isSending, setIsSending] = React.useState(false);
@@ -64,6 +55,54 @@ export default function CoachChat(props: {
   React.useEffect(() => {
     setHydrated(true);
   }, []);
+
+  // 1) Mark thread as read on first chat open
+  React.useEffect(() => {
+    (async () => {
+      const { error } = await supabase.rpc("coach_mark_thread_read", {
+        p_thread_id: threadId,
+      });
+      if (error) {
+        console.warn("[coach] mark read failed", error);
+      }
+    })();
+  }, [threadId]);
+
+  // 2) Realtime subscription to new messages, no duplicates by id
+  React.useEffect(() => {
+    const channel = supabase
+      .channel(`coach-thread-${threadId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "coach_messages",
+          filter: `thread_id=eq.${threadId}`,
+        },
+        (payload) => {
+          const m = payload.new as RawMessage;
+
+          setMessages((prev) => {
+            if (prev.some((x) => x.id === m.id)) return prev;
+            return [
+              ...prev,
+              {
+                id: m.id,
+                role: m.type === "coach" ? "coach" : m.type === "system" ? "system" : "user",
+                body: m.body,
+                created_at: m.created_at,
+              },
+            ];
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [threadId]);
 
   React.useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -79,51 +118,34 @@ export default function CoachChat(props: {
     [hydrated]
   );
 
-  // 1) Клиентский refetch последних сообщений (чтобы UI был актуален даже без full reload)
-  const refetchLatest = React.useCallback(async () => {
-    const { data, error } = await supabase
-      .from("coach_messages")
-      .select("id, thread_id, author_id, type, body, meta, created_at")
-      .eq("thread_id", threadId)
-      .order("created_at", { ascending: true })
-      .limit(50);
+  // --- UI: не спамим чат сотней одинаковых авто-сообщений ---
+  const AUTO_LIMIT = 10;
+  const [showAllAuto, setShowAllAuto] = React.useState(false);
 
-    if (error) {
-      console.error("coach_messages refetch error", error);
-      return;
-    }
-    setMessages(uniqByIdAsc((data ?? []).map(toVM)));
+  const displayMessages = React.useMemo(() => {
+    const auto = messages.filter((m) => m.meta?.kind === "workout_first_message");
+    if (showAllAuto) return messages;
+    if (auto.length <= AUTO_LIMIT) return messages;
+
+    // скрываем старые авто-сообщения, оставляем только последние AUTO_LIMIT
+    const autoIdsToKeep = new Set(
+      auto
+        .slice(-AUTO_LIMIT)
+        .map((m) => m.id)
+    );
+    return messages.filter((m) => m.meta?.kind !== "workout_first_message" || autoIdsToKeep.has(m.id));
+  }, [messages, showAllAuto]);
+
+  const hiddenAutoCount = React.useMemo(() => {
+    const auto = messages.filter((m) => m.meta?.kind === "workout_first_message").length;
+    return Math.max(0, auto - AUTO_LIMIT);
+  }, [messages]);
+
+  // markRead isn't strictly needed anymore for read-on-open, but we keep for manual "mark read" button
+  const markRead = React.useCallback(async () => {
+    const { error } = await supabase.rpc("coach_mark_thread_read", { p_thread_id: threadId });
+    if (!error) setUnreadCount(0);
   }, [threadId]);
-
-  // 2) Realtime: слушаем INSERT по coach_messages для этого thread
-  React.useEffect(() => {
-    // сразу подтянем актуальные (на случай, если SSR-страница уже устарела)
-    void refetchLatest();
-
-    const channel = supabase
-      .channel(`coach_messages:${threadId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "coach_messages",
-          filter: `thread_id=eq.${threadId}`,
-        },
-        (payload) => {
-          const row = payload.new as RawMessage;
-          setMessages((prev) => uniqByIdAsc([...prev, toVM(row)]));
-        }
-      )
-      .subscribe((status) => {
-        // optional debug
-        // console.log("realtime status", status);
-      });
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [threadId, refetchLatest]);
 
   const handleSend = async () => {
     const text = input.trim();
@@ -132,14 +154,15 @@ export default function CoachChat(props: {
     setIsSending(true);
     setInput("");
 
-    const tempId = `temp-${Date.now()}`;
+    const tempId = `temp-${crypto.randomUUID()}`;
     const optimisticUser: ChatMessageVM = {
       id: tempId,
       role: "user",
       body: text,
       created_at: new Date().toISOString(),
+      author_id: currentUserId,
     };
-    setMessages((prev) => uniqByIdAsc([...prev, optimisticUser]));
+    setMessages((prev) => [...prev, optimisticUser]);
 
     try {
       const res = await fetch("/api/coach/send", {
@@ -157,14 +180,36 @@ export default function CoachChat(props: {
 
       setMessages((prev) => {
         const withoutTemp = prev.filter((m) => m.id !== tempId);
-        const userMsg: ChatMessageVM = toVM(data.userMessage);
-        const coachMsg: ChatMessageVM = toVM(data.coachMessage);
-        return uniqByIdAsc([...withoutTemp, userMsg, coachMsg]);
+
+        // avoid duplicate user/coach messages if realtime already received.
+        const hasUser = withoutTemp.some((m) => m.id === data.userMessage.id);
+        const hasCoach = withoutTemp.some((m) => m.id === data.coachMessage.id);
+
+        const userMsg: ChatMessageVM = {
+          id: data.userMessage.id,
+          role: "user",
+          body: data.userMessage.body,
+          created_at: data.userMessage.created_at,
+        };
+        const coachMsg: ChatMessageVM = {
+          id: data.coachMessage.id,
+          role: "coach",
+          body: data.coachMessage.body,
+          created_at: data.coachMessage.created_at,
+        };
+        return [
+          ...withoutTemp,
+          ...(hasUser ? [] : [userMsg]),
+          ...(hasCoach ? [] : [coachMsg]),
+        ];
       });
+
+      // we are in the chat, so we consider it read
+      await markRead();
     } catch (e) {
       console.error("coach send error", e);
       setInput(text);
-      setMessages((prev) => prev.filter((m) => m.id !== tempId));
+      setMessages((prev) => prev.filter((m) => !m.id?.startsWith?.("temp-")));
       alert("Не удалось отправить сообщение тренеру. Попробуй ещё раз.");
     } finally {
       setIsSending(false);
@@ -181,23 +226,39 @@ export default function CoachChat(props: {
   return (
     <Card className="flex h-full min-h-0 flex-col">
       <CardContent className="flex min-h-0 flex-1 flex-col gap-3 p-4">
-        <div className="flex items-center justify-between gap-2">
-          <div className="text-xs text-muted-foreground">
-            Диалог: <span className="font-medium">{threadId.slice(0, 8)}</span>
-          </div>
-          <Button type="button" variant="outline" size="sm" onClick={refetchLatest}>
-            Обновить
-          </Button>
+        {/* мини-хедер чата с бейджем */}
+        <div className="flex items-center justify-between">
+          <div className="text-xs text-muted-foreground">Общий чат с тренером</div>
+          {unreadCount > 0 ? (
+            <button
+              type="button"
+              onClick={markRead}
+              title="Новые сообщения"
+              className="inline-flex h-6 min-w-6 items-center justify-center rounded-full px-2 text-[11px] font-bold leading-none text-white transition hover:opacity-90"
+              style={{ backgroundColor: "#E15425" }}
+            >
+              {unreadCount}
+            </button>
+          ) : null}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto rounded-md border bg-muted/10 p-3 space-y-3">
-          {messages.length === 0 && (
-            <div className="text-xs text-muted-foreground">
-              Пока сообщений нет. Загрузи тренировку или напиши тренеру — он ответит.
+          {hiddenAutoCount > 0 && !showAllAuto && (
+            <div className="flex items-center justify-center">
+              <Button variant="secondary" size="sm" onClick={() => setShowAllAuto(true)}>
+                Показать ещё авто-отчёты ({hiddenAutoCount})
+              </Button>
             </div>
           )}
 
-          {messages.map((m) => (
+          {messages.length === 0 && (
+            <div className="text-xs text-muted-foreground">
+              Пока сообщений нет. Напиши тренеру, расскажи о своих целях и последней тренировке — он ответит и предложит,
+              с чего начать.
+            </div>
+          )}
+
+          {displayMessages.map((m) => (
             <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
               <div
                 className={cn(
@@ -215,9 +276,7 @@ export default function CoachChat(props: {
 
                 {m.body}
 
-                <div className="mt-1 text-[9px] text-muted-foreground opacity-80">
-                  {formatTime(m.created_at)}
-                </div>
+                <div className="mt-1 text-[9px] text-muted-foreground opacity-80">{formatTime(m.created_at)}</div>
               </div>
             </div>
           ))}
@@ -231,7 +290,7 @@ export default function CoachChat(props: {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             rows={2}
-            placeholder="Задай вопрос тренеру… (Enter — отправить, Shift+Enter — новая строка)"
+            placeholder="Задай вопрос тренеру или опиши, как прошла тренировка… (Enter — отправить, Shift+Enter — новая строка)"
           />
           <div className="flex items-center justify-end gap-2">
             <Button type="button" variant="secondary" size="sm" disabled={isSending} onClick={() => setInput("")}>

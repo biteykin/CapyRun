@@ -25,19 +25,16 @@ export default async function CoachPage() {
     redirect("/login");
   }
 
-  // A) Coach Home (состояние)
+  // A) Coach Home
   const { data: coachHome, error: coachHomeErr } = await supabase.rpc("get_coach_home", {
     p_scope: "global",
     p_goal_id: null,
     p_include_snapshot_payload: false,
   });
 
-  // (не валим страницу — просто покажем "пусто", но ошибку залогируем)
-  if (coachHomeErr) {
-    console.error("get_coach_home rpc error", coachHomeErr);
-  }
+  if (coachHomeErr) console.error("get_coach_home rpc error", coachHomeErr);
 
-  // B) Ищем/создаём основной тред "Мой тренер"
+  // B) Основной тред "Мой тренер" (general)
   let { data: thread, error: threadErr } = await supabase
     .from("coach_threads")
     .select("*")
@@ -47,9 +44,7 @@ export default async function CoachPage() {
     .limit(1)
     .maybeSingle();
 
-  if (threadErr) {
-    console.error("coach_threads select error", threadErr);
-  }
+  if (threadErr) console.error("coach_threads select error", threadErr);
 
   if (!thread) {
     const { data: inserted, error: insertErr } = await supabase
@@ -70,39 +65,59 @@ export default async function CoachPage() {
     thread = inserted;
   }
 
-  // C) Подтягиваем последние сообщения по треду
-  const { data: messages, error: msgErr } = await supabase
+  // C) ВАЖНО: берём ПОСЛЕДНИЕ 200 сообщений (иначе можно видеть только самые первые)
+  const { data: messagesDesc, error: msgErr } = await supabase
     .from("coach_messages")
     .select("id, thread_id, author_id, type, body, meta, created_at")
     .eq("thread_id", thread.id)
     .order("created_at", { ascending: true })
-    .limit(50);
+    .limit(200);
 
   if (msgErr) {
     console.error("coach_messages select error", msgErr);
   }
 
+  // Рендерим “старые -> новые”
+  const messages = messagesDesc ?? [];
+
+  // D) unread count (server-side)
+  const { data: unreadCount, error: unreadErr } = await supabase.rpc("get_thread_unread_count", {
+    p_thread_id: thread.id,
+  });
+
+  if (unreadErr) console.error("get_thread_unread_count rpc error", unreadErr);
+
   return (
     <main className="w-full space-y-5">
-      <h1 className="text-2xl font-extrabold">Тренер</h1>
-      <p className="text-sm text-muted-foreground">
-        Здесь можно задавать вопросы тренеру, получать комментарии по тренировкам и рекомендации по плану.
-      </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-extrabold">Тренер</h1>
+          <p className="text-sm text-muted-foreground">
+            Здесь можно задавать вопросы тренеру, получать комментарии по тренировкам и рекомендации по плану.
+          </p>
+        </div>
 
-      {/* Coach Home */}
+        {/* Мини-бейдж в заголовке (на сейчас) */}
+        {Number(unreadCount ?? 0) > 0 ? (
+          <div className="rounded-full bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground">
+            Новых: {Number(unreadCount)}
+          </div>
+        ) : null}
+      </div>
+
       <CoachHome
         data={coachHome ?? null}
         error={coachHomeErr ? String((coachHomeErr as any).message ?? coachHomeErr) : null}
       />
 
-      {/* Chat */}
-      {/* 
-        Делаем фиксированную область (и flex-контекст), чтобы чат НЕ вылезал по высоте.
-        Внутри CoachChat должен быть контейнер со скроллом (обычно messages-list: overflow-y-auto; min-h-0).
-      */}
       <section className="flex min-h-0 flex-col">
         <div className="h-[520px] max-h-[70vh] min-h-0 flex flex-col">
-          <CoachChat threadId={thread.id} initialMessages={messages ?? []} currentUserId={user.id} />
+          <CoachChat
+            threadId={thread.id}
+            initialMessages={messages}
+            currentUserId={user.id}
+            initialUnreadCount={Number(unreadCount ?? 0)}
+          />
         </div>
       </section>
     </main>
