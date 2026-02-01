@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as React from "react";
-import { supabase } from "@/lib/supabaseBrowser";
 import { AppTooltip } from "@/components/ui/AppTooltip";
+import { supabase } from "@/lib/supabaseBrowser";
 import {
   Sidebar as UISidebar,
   SidebarContent,
@@ -38,144 +38,37 @@ const TOP: Item[] = [
   { href: "/goals",    label: "Цели",       icon: Target },
 ];
 
-function UnreadBadge({ count, collapsed }: { count: number; collapsed: boolean }) {
-  if (!count || count <= 0) return null;
-
-  // в collapsed режиме покажем маленькую точку, чтобы не ломать верстку
-  if (collapsed) {
-    return (
-      <span
-        className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-background"
-        aria-label={`Новых: ${count}`}
-        title={`Новых: ${count}`}
-      />
-    );
-  }
-
-  return (
-    <span
-      className="ml-auto inline-flex min-w-[22px] items-center justify-center rounded-full bg-primary px-2 py-0.5 text-[11px] font-semibold leading-none text-primary-foreground"
-      aria-label={`Новых: ${count}`}
-      title={`Новых: ${count}`}
-    >
-      {count > 99 ? "99+" : count}
-    </span>
-  );
-}
-
-function useCoachUnreadCount(opts: { enabled: boolean }) {
-  const { enabled } = opts;
-  const [count, setCount] = React.useState(0);
-  const uidRef = React.useRef<string | null>(null);
-
-  const refresh = React.useCallback(async () => {
-    if (!enabled) return;
-    const uid = uidRef.current;
-    if (!uid) {
-      setCount(0);
-      return;
-    }
-    const { data, error } = await supabase.rpc("get_unread_count_global");
-    if (error) {
-      console.warn("[coach] get_unread_count_global failed", error);
-      return;
-    }
-    setCount(Number(data) || 0);
-  }, [enabled]);
-
-  React.useEffect(() => {
-    if (!enabled) return;
-    let mounted = true;
-    let chMsgs: ReturnType<typeof supabase.channel> | null = null;
-    let chReads: ReturnType<typeof supabase.channel> | null = null;
-
-    (async () => {
-      const { data: sess } = await supabase.auth.getSession();
-      const uid = sess?.session?.user?.id ?? null;
-      uidRef.current = uid;
-      if (!mounted) return;
-      await refresh();
-
-      if (!uid) return;
-
-      // 1) Любое новое сообщение -> если не наше, пересчитаем unread через RPC
-      // (да, подписка без фильтра; в рамках одного проекта это нормально, а корректность дает RPC)
-      chMsgs = supabase
-        .channel(`coach-unread-messages-${uid}`)
-        .on(
-          "postgres_changes",
-          { event: "INSERT", schema: "public", table: "coach_messages" },
-          (payload) => {
-            const m = payload.new as any;
-            if (!m) return;
-            if (m.author_id && m.author_id === uid) return;
-            refresh();
-          }
-        )
-        .subscribe();
-
-      // 2) Когда мы отмечаем прочитанным (coach_mark_thread_read пишет в coach_thread_reads) -> тоже обновим
-      chReads = supabase
-        .channel(`coach-unread-reads-${uid}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "coach_thread_reads",
-            filter: `user_id=eq.${uid}`,
-          },
-          () => refresh()
-        )
-        .subscribe();
-    })();
-
-    // auth changes => переинициализируем uid и пересчитаем
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_evt, session) => {
-      uidRef.current = session?.user?.id ?? null;
-      await refresh();
-    });
-
-    return () => {
-      mounted = false;
-      try {
-        sub?.subscription?.unsubscribe();
-      } catch {}
-      try {
-        if (chMsgs) supabase.removeChannel(chMsgs);
-      } catch {}
-      try {
-        if (chReads) supabase.removeChannel(chReads);
-      } catch {}
-    };
-  }, [enabled, refresh]);
-
-  return { unreadCount: count, refresh };
-}
-
 function NavItem({
   item,
   active,
   collapsed,
-  right,
+  coachUnreadCount,
 }: {
   item: Item;
   active: boolean;
   collapsed: boolean;
-  right?: React.ReactNode;
+  coachUnreadCount: number;
 }) {
   const Icon = item.icon;
   const btnClass = collapsed ? "justify-center px-2 w-8 h-8" : "gap-3";
 
+  const showCoachBadge = item.href === "/coach" && coachUnreadCount > 0;
+  const badgeText = coachUnreadCount > 9 ? "9+" : String(coachUnreadCount);
+
   const Btn = (
     <SidebarMenuButton asChild isActive={active} className={btnClass}>
       <Link href={item.href}>
-        <span className={collapsed ? "relative" : "contents"}>
-          <Icon className="h-5 w-5" />
-          {collapsed ? right : null}
-        </span>
+        <Icon className="h-5 w-5" />
         <span className="truncate">{item.label}</span>
-        {!collapsed ? right : null}
+        {!collapsed && showCoachBadge ? (
+          <span
+            className="ml-auto inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#E15425] text-[11px] font-extrabold leading-none text-white"
+            aria-label={`Непрочитанных: ${coachUnreadCount}`}
+            title={`Непрочитанных: ${coachUnreadCount}`}
+          >
+            {badgeText}
+          </span>
+        ) : null}
       </Link>
     </SidebarMenuButton>
   );
@@ -183,8 +76,24 @@ function NavItem({
   return (
     <SidebarMenuItem>
       {collapsed ? (
-        <AppTooltip content={item.label} side="right">
-          {Btn}
+        <AppTooltip
+          content={
+            showCoachBadge
+              ? `${item.label} • новых: ${coachUnreadCount}`
+              : item.label
+          }
+          side="right"
+        >
+          <div className="relative">
+            {Btn}
+            {/* В свернутом состоянии показываем маленькую точку-уведомление */}
+            {showCoachBadge ? (
+              <span
+                className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-[#E15425]"
+                aria-hidden
+              />
+            ) : null}
+          </div>
         </AppTooltip>
       ) : (
         Btn
@@ -198,13 +107,48 @@ export default function Sidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
 
+  const [coachUnreadCount, setCoachUnreadCount] = React.useState<number>(0);
+
+  const refreshUnread = React.useCallback(async () => {
+    // Если сессии нет (в момент гидрации) — просто не падаем.
+    const { data, error } = await supabase.rpc("get_unread_count_global");
+    if (error) return;
+    setCoachUnreadCount(Number(data ?? 0) || 0);
+  }, []);
+
+  // 1) Первичная загрузка + когда вкладка снова активна
+  React.useEffect(() => {
+    refreshUnread();
+
+    const onFocus = () => refreshUnread();
+    window.addEventListener("focus", onFocus);
+
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refreshUnread]);
+
+  // 2) Realtime: любые новые сообщения → обновим счетчик
+  React.useEffect(() => {
+    const channel = supabase
+      .channel("coach-unread-badge")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "coach_messages" },
+        () => {
+          // не увеличиваем руками (чтобы не ошибиться), а просто рефетчим
+          refreshUnread();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [refreshUnread]);
+
   const isActive = React.useCallback(
     (href: string) => pathname === href || pathname?.startsWith(href + "/"),
     [pathname]
   );
-
-  // unread для "Тренер"
-  const { unreadCount: coachUnread } = useCoachUnreadCount({ enabled: true });
 
   return (
     <UISidebar
@@ -254,11 +198,7 @@ export default function Sidebar() {
                   item={it}
                   active={isActive(it.href)}
                   collapsed={collapsed}
-                  right={
-                    it.href === "/coach" ? (
-                      <UnreadBadge count={coachUnread} collapsed={collapsed} />
-                    ) : null
-                  }
+                  coachUnreadCount={coachUnreadCount}
                 />
               ))}
             </SidebarMenu>

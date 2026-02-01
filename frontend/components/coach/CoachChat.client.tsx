@@ -32,7 +32,7 @@ export default function CoachChat(props: {
   currentUserId: string;
   initialUnreadCount?: number;
 }) {
-  const { threadId, initialMessages, currentUserId, initialUnreadCount = 0 } = props;
+  const { threadId, initialMessages, currentUserId } = props;
 
   const [messages, setMessages] = React.useState<ChatMessageVM[]>(() =>
     (initialMessages ?? []).map((m: any) => ({
@@ -44,8 +44,6 @@ export default function CoachChat(props: {
       meta: m.meta,
     }))
   );
-
-  const [unreadCount, setUnreadCount] = React.useState<number>(Number(initialUnreadCount) || 0);
 
   const [input, setInput] = React.useState("");
   const [isSending, setIsSending] = React.useState(false);
@@ -143,8 +141,7 @@ export default function CoachChat(props: {
 
   // markRead isn't strictly needed anymore for read-on-open, but we keep for manual "mark read" button
   const markRead = React.useCallback(async () => {
-    const { error } = await supabase.rpc("coach_mark_thread_read", { p_thread_id: threadId });
-    if (!error) setUnreadCount(0);
+    await supabase.rpc("coach_mark_thread_read", { p_thread_id: threadId });
   }, [threadId]);
 
   const handleSend = async () => {
@@ -226,21 +223,7 @@ export default function CoachChat(props: {
   return (
     <Card className="flex h-full min-h-0 flex-col">
       <CardContent className="flex min-h-0 flex-1 flex-col gap-3 p-4">
-        {/* мини-хедер чата с бейджем */}
-        <div className="flex items-center justify-between">
-          <div className="text-xs text-muted-foreground">Общий чат с тренером</div>
-          {unreadCount > 0 ? (
-            <button
-              type="button"
-              onClick={markRead}
-              title="Новые сообщения"
-              className="inline-flex h-6 min-w-6 items-center justify-center rounded-full px-2 text-[11px] font-bold leading-none text-white transition hover:opacity-90"
-              style={{ backgroundColor: "#E15425" }}
-            >
-              {unreadCount}
-            </button>
-          ) : null}
-        </div>
+        <div className="text-xs text-muted-foreground">Общий чат с тренером</div>
 
         <div className="min-h-0 flex-1 overflow-y-auto rounded-md border bg-muted/10 p-3 space-y-3">
           {hiddenAutoCount > 0 && !showAllAuto && (
