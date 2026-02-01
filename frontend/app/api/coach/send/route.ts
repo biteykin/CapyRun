@@ -4,6 +4,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServerApp";
 import OpenAI from "openai";
 import { z } from "zod";
 
+const IS_DEV = process.env.NODE_ENV !== "production";
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -136,6 +137,26 @@ function pickRecentHistory(history: any[] | null | undefined, limit = 14) {
   const arr = Array.isArray(history) ? history : [];
   if (arr.length <= limit) return arr;
   return arr.slice(arr.length - limit);
+}
+
+function getClientNonceFromMeta(meta: any): string | null {
+  const v = meta?.client_nonce;
+  return typeof v === "string" && v.length ? v : null;
+}
+
+function didSaveToWorkoutDescription(meta: any): boolean {
+  return meta?.saved_to_workout_description === true;
+}
+
+function buildFallbackCoachText(didSave: boolean) {
+  // ВАЖНО: не обещаем "сохранил", если не сохранили
+  const savedLine = didSave
+    ? "Принял! Мы сохранили твой ответ как примечание к тренировке (это был первый ответ на вопросы)."
+    : "Принял! Ответ получил.";
+  return [
+    savedLine,
+    "Сейчас у нас временная ошибка при генерации ответа тренера — попробуй отправить ещё раз.",
+  ].join("\n");
 }
 
 function buildFastPathAnswer(
@@ -361,6 +382,11 @@ async function runResponder(args: {
 // -----------------------------
 export async function POST(req: NextRequest) {
   try {
+    // For "late fail" fallback (avoid UI duplicates + 500 after user insert)
+    let insertedThreadId: string | null = null;
+    let insertedUserId: string | null = null;
+    let insertedUserMsg: any | null = null;
+
     // 1) Parse body softly
     let body: any = {};
     try {
@@ -372,6 +398,7 @@ export async function POST(req: NextRequest) {
 
     const rawText = (body?.text ?? body?.message ?? body?.content ?? "") as string;
     const userText = (rawText ?? "").toString().trim();
+    const client_nonce = (body?.client_nonce ?? null) as string | null;
     const finalText =
       userText || "Пользователь не задал конкретный вопрос, но хочет получить рекомендации по тренировкам.";
 
@@ -388,6 +415,7 @@ export async function POST(req: NextRequest) {
       console.error("coach_send: auth error", userErr);
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
+    insertedUserId = user.id;
 
     // 3) Resolve thread
     let threadId: string | null = reqThreadId;
@@ -448,6 +476,7 @@ export async function POST(req: NextRequest) {
     if (!threadId) {
       return NextResponse.json({ error: "thread_resolve_failed" }, { status: 500 });
     }
+    insertedThreadId = threadId;
 
     // 3.1) Read thread meta (memory)
     const { data: threadMetaRow, error: tMetaErr } = await supabase
@@ -469,15 +498,37 @@ export async function POST(req: NextRequest) {
         author_id: user.id,
         type: "user",
         body: finalText,
-        meta: null,
+        meta: client_nonce ? { client_nonce } : null,
       })
       .select("*")
       .single();
 
     if (userMsgErr || !userMsgRow) {
       console.error("coach_send: user_message_insert_error", userMsgErr);
-      return NextResponse.json({ error: "user_message_insert_failed" }, { status: 500 });
+      return NextResponse.json(
+        {
+          error: "user_message_insert_failed",
+          dbg: IS_DEV
+            ? {
+                code: (userMsgErr as any)?.code ?? null,
+                message: (userMsgErr as any)?.message ?? null,
+                details: (userMsgErr as any)?.details ?? null,
+              }
+            : undefined,
+        },
+        { status: 500 }
+      );
     }
+    insertedUserMsg = userMsgRow;
+
+    // 4.1) Re-read the row to see trigger-updated meta (saved_to_workout_description, etc.)
+    const { data: userMsgFresh, error: userFreshErr } = await supabase
+      .from("coach_messages")
+      .select("*")
+      .eq("id", userMsgRow.id)
+      .maybeSingle();
+    const userMessage = userFreshErr || !userMsgFresh ? userMsgRow : userMsgFresh;
+    const didSave = didSaveToWorkoutDescription((userMessage as any)?.meta);
 
     // 5) Load recent history (compact)
     const { data: historyAll, error: histErr } = await supabase
@@ -491,11 +542,34 @@ export async function POST(req: NextRequest) {
     const recentHistory = pickRecentHistory(historyAll ?? [], 30);
 
     // 6) Planner
-    const planner = await runPlanner({
-      userText: finalText,
-      threadMemory,
-      recentHistory,
-    });
+    let planner: PlannerOut;
+    try {
+      planner = await runPlanner({
+        userText: finalText,
+        threadMemory,
+        recentHistory,
+      });
+    } catch (e) {
+      console.error("coach_send: planner_failed", e);
+      const fallbackText = buildFallbackCoachText(didSave);
+      return NextResponse.json(
+        {
+          threadId,
+          userMessage,
+          coachMessage: {
+            id: "temp-coach",
+            thread_id: threadId,
+            author_id: user.id,
+            type: "coach",
+            body: fallbackText,
+            meta: { stage: "planner_failed", client_nonce, didSave },
+            created_at: new Date().toISOString(),
+          },
+          dbg: IS_DEV ? { stage: "planner_failed", err: String(e) } : undefined,
+        },
+        { status: 200 }
+      );
+    }
 
     // 6.1) Apply memory patch (no extra LLM calls)
     if (planner?.memory_patch && Object.keys(planner.memory_patch).length) {
@@ -546,7 +620,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           {
             threadId,
-            userMessage: userMsgRow,
+            userMessage,
             coachMessage: {
               id: "temp-coach",
               thread_id: threadId,
@@ -564,7 +638,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           threadId,
-          userMessage: userMsgRow,
+          userMessage,
           coachMessage: coachMsgRow,
         },
         { status: 200 }
@@ -667,7 +741,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           {
             threadId,
-            userMessage: userMsgRow,
+            userMessage,
             coachMessage: {
               id: "temp-coach",
               thread_id: threadId,
@@ -683,20 +757,28 @@ export async function POST(req: NextRequest) {
       }
 
       return NextResponse.json(
-        { threadId, userMessage: userMsgRow, coachMessage: coachMsgRow },
+        { threadId, userMessage, coachMessage: coachMsgRow },
         { status: 200 }
       );
     }
 
     // 10) Responder (LLM)
-    const answer = await runResponder({
-      userText: finalText,
-      planner,
-      threadMemory: (threadMeta?.memory ?? null) as any,
-      workouts,
-      coachHome,
-      recentHistory,
-    });
+    let answer: string;
+    let responderError: string | null = null;
+    try {
+      answer = await runResponder({
+        userText: finalText,
+        planner,
+        threadMemory: (threadMeta?.memory ?? null) as any,
+        workouts,
+        coachHome,
+        recentHistory,
+      });
+    } catch (e) {
+      console.error("coach_send: responder_failed", e);
+      responderError = String(e);
+      answer = buildFallbackCoachText(didSave);
+    }
 
     const coachMeta = {
       model: "gpt-4.1-mini",
@@ -707,6 +789,10 @@ export async function POST(req: NextRequest) {
       used_workout_ids: usedWorkoutIds,
       has_coach_home: !!coachHome,
       style_version: "v1_intent_planner_fastpath_memory",
+      client_nonce,
+      didSave,
+      responder_failed: responderError ? true : false,
+      responder_error: IS_DEV ? responderError : null,
     };
 
     const { data: coachMsgRow, error: coachMsgErr } = await supabase
@@ -727,7 +813,7 @@ export async function POST(req: NextRequest) {
         {
           error: "coach_message_insert_failed",
           threadId,
-          userMessage: userMsgRow,
+          userMessage,
           coachMessage: {
             id: "temp-coach",
             thread_id: threadId,
@@ -737,6 +823,13 @@ export async function POST(req: NextRequest) {
             meta: coachMeta as any,
             created_at: new Date().toISOString(),
           },
+          dbg: IS_DEV
+            ? {
+                code: (coachMsgErr as any)?.code ?? null,
+                message: (coachMsgErr as any)?.message ?? null,
+                details: (coachMsgErr as any)?.details ?? null,
+              }
+            : undefined,
         },
         { status: 200 }
       );
@@ -745,13 +838,38 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         threadId,
-        userMessage: userMsgRow,
+        userMessage,
         coachMessage: coachMsgRow,
       },
       { status: 200 }
     );
   } catch (err) {
     console.error("coach_send: unexpected_error", err);
+
+    // Если user-сообщение УЖЕ вставили — не возвращаем 500, иначе UI будет считать, что отправка не удалась,
+    // хотя запись уже есть в БД → дубли/исчезновения/модалка.
+    // To get didSave/nonce, we re-use insertedUserMsg/meta if available, but fallback is only possible if somehow we inserted and errored later.
+    // We can't refetch because we haven't preserved their ids. So safest fallback:
+    if (insertedUserMsg && insertedThreadId && insertedUserId) {
+      const didSave = didSaveToWorkoutDescription(insertedUserMsg.meta);
+      return NextResponse.json(
+        {
+          threadId: insertedThreadId,
+          userMessage: insertedUserMsg,
+          coachMessage: {
+            id: "temp-coach",
+            thread_id: insertedThreadId,
+            author_id: insertedUserId,
+            type: "coach",
+            body: buildFallbackCoachText(didSave),
+            meta: { temp: true, error: "internal_error_after_user_insert", didSave },
+            created_at: new Date().toISOString(),
+          },
+        },
+        { status: 200 }
+      );
+    }
+
     return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
 }

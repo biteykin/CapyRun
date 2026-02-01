@@ -14,6 +14,10 @@ const badgeVariants = cva(
           "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
         destructive:
           "border-transparent bg-destructive text-destructive-foreground shadow hover:bg-destructive/80",
+        // Для счетчиков непрочитанных: круглый, компактный, цвет из сторизбука btn-secondary-border
+        // Шрифт оставляем из базового класса (text-xs font-semibold)
+        unread:
+          "border-transparent bg-[#E15425] text-white rounded-full px-1.5 py-0.5 min-w-[20px] h-5 justify-center leading-none tabular-nums",
         outline: "text-foreground",
       },
     },

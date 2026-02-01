@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as React from "react";
 import { AppTooltip } from "@/components/ui/AppTooltip";
+import UnreadCountBadge from "@/components/ui/unread-count-badge";
 import { supabase } from "@/lib/supabaseBrowser";
 import {
   Sidebar as UISidebar,
@@ -42,33 +43,22 @@ function NavItem({
   item,
   active,
   collapsed,
-  coachUnreadCount,
+  rightSlot,
 }: {
   item: Item;
   active: boolean;
   collapsed: boolean;
-  coachUnreadCount: number;
+  rightSlot?: React.ReactNode;
 }) {
   const Icon = item.icon;
   const btnClass = collapsed ? "justify-center px-2 w-8 h-8" : "gap-3";
-
-  const showCoachBadge = item.href === "/coach" && coachUnreadCount > 0;
-  const badgeText = coachUnreadCount > 9 ? "9+" : String(coachUnreadCount);
 
   const Btn = (
     <SidebarMenuButton asChild isActive={active} className={btnClass}>
       <Link href={item.href}>
         <Icon className="h-5 w-5" />
         <span className="truncate">{item.label}</span>
-        {!collapsed && showCoachBadge ? (
-          <span
-            className="ml-auto inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#E15425] text-[11px] font-extrabold leading-none text-white"
-            aria-label={`Непрочитанных: ${coachUnreadCount}`}
-            title={`Непрочитанных: ${coachUnreadCount}`}
-          >
-            {badgeText}
-          </span>
-        ) : null}
+        {!collapsed ? <span className="ml-auto">{rightSlot}</span> : null}
       </Link>
     </SidebarMenuButton>
   );
@@ -77,22 +67,12 @@ function NavItem({
     <SidebarMenuItem>
       {collapsed ? (
         <AppTooltip
-          content={
-            showCoachBadge
-              ? `${item.label} • новых: ${coachUnreadCount}`
-              : item.label
-          }
+          content={item.label}
           side="right"
         >
           <div className="relative">
             {Btn}
-            {/* В свернутом состоянии показываем маленькую точку-уведомление */}
-            {showCoachBadge ? (
-              <span
-                className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-[#E15425]"
-                aria-hidden
-              />
-            ) : null}
+            {rightSlot}
           </div>
         </AppTooltip>
       ) : (
@@ -107,43 +87,43 @@ export default function Sidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
 
-  const [coachUnreadCount, setCoachUnreadCount] = React.useState<number>(0);
+  const [coachUnread, setCoachUnread] = React.useState<number>(0);
 
-  const refreshUnread = React.useCallback(async () => {
-    // Если сессии нет (в момент гидрации) — просто не падаем.
-    const { data, error } = await supabase.rpc("get_unread_count_global");
-    if (error) return;
-    setCoachUnreadCount(Number(data ?? 0) || 0);
+  const refetchUnread = React.useCallback(async () => {
+    try {
+      // важно: rpc возвращает { data, error }, это НЕ промис с .catch()
+      const { data, error } = await supabase.rpc("get_unread_count_global");
+      if (error) {
+        console.warn("[sidebar] get_unread_count_global error", error);
+        return;
+      }
+      setCoachUnread(Number(data) || 0);
+    } catch (e) {
+      console.warn("[sidebar] get_unread_count_global failed", e);
+    }
   }, []);
 
-  // 1) Первичная загрузка + когда вкладка снова активна
+  // 1) при старте + при смене роута
   React.useEffect(() => {
-    refreshUnread();
+    refetchUnread();
+  }, [refetchUnread, pathname]);
 
-    const onFocus = () => refreshUnread();
-    window.addEventListener("focus", onFocus);
-
-    return () => window.removeEventListener("focus", onFocus);
-  }, [refreshUnread]);
-
-  // 2) Realtime: любые новые сообщения → обновим счетчик
+  // 2) при возвращении на вкладку
   React.useEffect(() => {
-    const channel = supabase
-      .channel("coach-unread-badge")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "coach_messages" },
-        () => {
-          // не увеличиваем руками (чтобы не ошибиться), а просто рефетчим
-          refreshUnread();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
+    const onVis = () => {
+      if (document.visibilityState === "visible") refetchUnread();
     };
-  }, [refreshUnread]);
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [refetchUnread]);
+
+  // 3) лёгкий polling (потом заменим на realtime без таймера)
+  React.useEffect(() => {
+    const t = window.setInterval(() => {
+      refetchUnread();
+    }, 15000);
+    return () => window.clearInterval(t);
+  }, [refetchUnread]);
 
   const isActive = React.useCallback(
     (href: string) => pathname === href || pathname?.startsWith(href + "/"),
@@ -198,7 +178,15 @@ export default function Sidebar() {
                   item={it}
                   active={isActive(it.href)}
                   collapsed={collapsed}
-                  coachUnreadCount={coachUnreadCount}
+                  rightSlot={
+                    it.href === "/coach" ? (
+                      <UnreadCountBadge
+                        count={coachUnread}
+                        // если collapsed — позиционирование делаем через wrapper в NavItem
+                        className={collapsed ? "absolute -top-1 -right-1" : ""}
+                      />
+                    ) : null
+                  }
                 />
               ))}
             </SidebarMenu>

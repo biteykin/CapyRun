@@ -1,12 +1,14 @@
 "use client";
 
 import * as React from "react";
+import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseBrowser";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
 
+// --- Types ---
 type RawMessage = {
   id: string;
   thread_id: string;
@@ -26,6 +28,47 @@ type ChatMessageVM = {
   meta?: any;
 };
 
+// --- Helpers ---
+function makeNonce() {
+  // достаточно для дедупа в UI
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function msgKey(m: Partial<RawMessage> & { meta?: any }) {
+  // 1) иначе по client_nonce (важно для optimistic и temp-coach)
+  const cn = m?.meta?.client_nonce;
+  if (typeof cn === "string" && cn.length) {
+    const t = (m as any)?.type ?? "unknown";
+    return `cn:${cn}:t:${t}`;
+  }
+  // 2) стабильный ключ по id
+  if (m?.id) return `id:${m.id}`;
+  // 3) fallback
+  return `fb:${m.type}:${m.created_at}:${(m.body ?? "").slice(0, 24)}`;
+}
+
+function mergeDedup(prev: RawMessage[], incoming: RawMessage[]) {
+  // merge так, чтобы:
+  // - server message заменял optimistic по client_nonce
+  // - temp сообщения не исчезали при refetch, пока не приехал серверный аналог
+
+  const map = new Map<string, RawMessage>();
+  // 1) кладём prev
+  for (const m of prev) map.set(msgKey(m), m);
+  // 2) кладём incoming (перезаписывает prev, если тот же key)
+  for (const m of incoming) map.set(msgKey(m), m);
+  // 3) если пришло серверное сообщение с id, но у нас был optimistic по client_nonce,
+  //    то оставим серверное, а optimistic не дублируем.
+  // (это уже достигается одинаковым key cn:..., потому что мы прокидываем client_nonce в meta)
+  const arr = Array.from(map.values());
+  arr.sort((a, b) => {
+    const ta = new Date(a.created_at).getTime();
+    const tb = new Date(b.created_at).getTime();
+    return ta - tb;
+  });
+  return arr;
+}
+
 export default function CoachChat(props: {
   threadId: string;
   initialMessages: any[];
@@ -34,18 +77,21 @@ export default function CoachChat(props: {
 }) {
   const { threadId, initialMessages, currentUserId } = props;
 
-  const [messages, setMessages] = React.useState<ChatMessageVM[]>(() =>
-    (initialMessages ?? []).map((m: any) => ({
+  // Инициализация сообщений (history)
+  const [messages, setMessages] = React.useState<RawMessage[]>(() => {
+    const msgArr: RawMessage[] = (initialMessages ?? []).map((m: any) => ({
       id: m.id,
-      role: m.type === "coach" ? "coach" : m.type === "system" ? "system" : "user",
-      body: m.body,
-      created_at: m.created_at,
+      thread_id: m.thread_id,
       author_id: m.author_id,
+      type: m.type,
+      body: m.body,
       meta: m.meta,
-    }))
-  );
+      created_at: m.created_at,
+    }));
+    return msgArr;
+  });
 
-  const [input, setInput] = React.useState("");
+  const [text, setText] = React.useState("");
   const [isSending, setIsSending] = React.useState(false);
   const bottomRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -66,7 +112,7 @@ export default function CoachChat(props: {
     })();
   }, [threadId]);
 
-  // 2) Realtime subscription to new messages, no duplicates by id
+  // 2) Realtime subscription to new messages, no duplicates by key
   React.useEffect(() => {
     const channel = supabase
       .channel(`coach-thread-${threadId}`)
@@ -80,19 +126,7 @@ export default function CoachChat(props: {
         },
         (payload) => {
           const m = payload.new as RawMessage;
-
-          setMessages((prev) => {
-            if (prev.some((x) => x.id === m.id)) return prev;
-            return [
-              ...prev,
-              {
-                id: m.id,
-                role: m.type === "coach" ? "coach" : m.type === "system" ? "system" : "user",
-                body: m.body,
-                created_at: m.created_at,
-              },
-            ];
-          });
+          setMessages((prev) => mergeDedup(prev, [m]));
         }
       )
       .subscribe();
@@ -120,11 +154,10 @@ export default function CoachChat(props: {
   const AUTO_LIMIT = 10;
   const [showAllAuto, setShowAllAuto] = React.useState(false);
 
-  const displayMessages = React.useMemo(() => {
+  const displayMessages = useMemo(() => {
     const auto = messages.filter((m) => m.meta?.kind === "workout_first_message");
     if (showAllAuto) return messages;
     if (auto.length <= AUTO_LIMIT) return messages;
-
     // скрываем старые авто-сообщения, оставляем только последние AUTO_LIMIT
     const autoIdsToKeep = new Set(
       auto
@@ -134,7 +167,7 @@ export default function CoachChat(props: {
     return messages.filter((m) => m.meta?.kind !== "workout_first_message" || autoIdsToKeep.has(m.id));
   }, [messages, showAllAuto]);
 
-  const hiddenAutoCount = React.useMemo(() => {
+  const hiddenAutoCount = useMemo(() => {
     const auto = messages.filter((m) => m.meta?.kind === "workout_first_message").length;
     return Math.max(0, auto - AUTO_LIMIT);
   }, [messages]);
@@ -144,70 +177,87 @@ export default function CoachChat(props: {
     await supabase.rpc("coach_mark_thread_read", { p_thread_id: threadId });
   }, [threadId]);
 
+  // Загрузка истории — пример реализации для дальнейшей интеграции при необходимости
+  // async function loadHistory() {
+  //   try {
+  //     const res = await fetch(`/api/coach/history?threadId=${threadId}`, { method: "GET" });
+  //     if (!res.ok) return;
+  //     const data = await res.json();
+  //     const serverMsgs: RawMessage[] = (data.messages ?? []) as RawMessage[];
+  //     setMessages((prev) => mergeDedup(prev, serverMsgs));
+  //   } catch {}
+  // }
+
   const handleSend = async () => {
-    const text = input.trim();
-    if (!text || isSending) return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
 
     setIsSending(true);
-    setInput("");
 
-    const tempId = `temp-${crypto.randomUUID()}`;
-    const optimisticUser: ChatMessageVM = {
-      id: tempId,
-      role: "user",
-      body: text,
-      created_at: new Date().toISOString(),
+    const client_nonce = makeNonce();
+    const nowIso = new Date().toISOString();
+
+    // optimistic user message (ONE)
+    const optimisticUser: RawMessage = {
+      id: `temp-user-${client_nonce}`,
+      thread_id: threadId,
       author_id: currentUserId,
+      type: "user",
+      body: trimmed,
+      meta: { client_nonce, temp: true },
+      created_at: nowIso,
     };
-    setMessages((prev) => [...prev, optimisticUser]);
+
+    setMessages((prev) => mergeDedup(prev, [optimisticUser]));
+    setText("");
 
     try {
       const res = await fetch("/api/coach/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ threadId, message: text }),
+        body: JSON.stringify({ threadId, text: trimmed, client_nonce }),
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const data = (await res.json()) as {
+        threadId: string;
         userMessage: RawMessage;
-        coachMessage: RawMessage;
+        coachMessage?: RawMessage;
       };
 
-      setMessages((prev) => {
-        const withoutTemp = prev.filter((m) => m.id !== tempId);
+      const userMsg = data.userMessage as RawMessage;
+      const coachMsg = data.coachMessage as RawMessage | undefined;
 
-        // avoid duplicate user/coach messages if realtime already received.
-        const hasUser = withoutTemp.some((m) => m.id === data.userMessage.id);
-        const hasCoach = withoutTemp.some((m) => m.id === data.coachMessage.id);
+      // ВАЖНО:
+      // 1) гарантируем, что у server userMessage в meta сохранён client_nonce (у вас он вставляется в route.ts)
+      // 2) если по какой-то причине meta пустая — подставим nonce, чтобы заменить optimistic
+      const patchedUser = {
+        ...userMsg,
+        meta: { ...(userMsg.meta ?? {}), client_nonce },
+      } as RawMessage;
 
-        const userMsg: ChatMessageVM = {
-          id: data.userMessage.id,
-          role: "user",
-          body: data.userMessage.body,
-          created_at: data.userMessage.created_at,
-        };
-        const coachMsg: ChatMessageVM = {
-          id: data.coachMessage.id,
-          role: "coach",
-          body: data.coachMessage.body,
-          created_at: data.coachMessage.created_at,
-        };
-        return [
-          ...withoutTemp,
-          ...(hasUser ? [] : [userMsg]),
-          ...(hasCoach ? [] : [coachMsg]),
-        ];
-      });
+      let newMsgs: RawMessage[] = [patchedUser];
+      if (coachMsg) {
+        // coachMessage тоже пометим client_nonce, чтобы temp-coach не исчезал при refetch/мердже
+        const patchedCoach = {
+          ...coachMsg,
+          meta: { ...(coachMsg.meta ?? {}), client_nonce },
+        } as RawMessage;
+        newMsgs.push(patchedCoach);
+      }
+
+      setMessages((prev) => mergeDedup(prev, newMsgs));
 
       // we are in the chat, so we consider it read
       await markRead();
+      // optional: мягкий refetch истории, если нужно
+      // await loadHistory();
     } catch (e) {
-      console.error("coach send error", e);
-      setInput(text);
-      setMessages((prev) => prev.filter((m) => !m.id?.startsWith?.("temp-")));
-      alert("Не удалось отправить сообщение тренеру. Попробуй ещё раз.");
+      // если упали после вставки userMsg на сервере — мы уже показываем optimistic.
+      // НЕ показываем модалку, которая провоцирует повторную отправку и дубли.
+      console.error("coach_send_failed", e);
+      // можно показать тихий toast, если у вас есть
     } finally {
       setIsSending(false);
     }
@@ -219,6 +269,12 @@ export default function CoachChat(props: {
       handleSend();
     }
   };
+
+  function getRole(m: RawMessage): "user" | "coach" | "system" {
+    if (m.type === "coach") return "coach";
+    if (m.type === "system") return "system";
+    return "user";
+  }
 
   return (
     <Card className="flex h-full min-h-0 flex-col">
@@ -242,16 +298,16 @@ export default function CoachChat(props: {
           )}
 
           {displayMessages.map((m) => (
-            <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
+            <div key={msgKey(m)} className={cn("flex", getRole(m) === "user" ? "justify-end" : "justify-start")}>
               <div
                 className={cn(
-                  "max-w-[75%] rounded-lg px-3 py-2 text-xs leading-relaxed",
-                  m.role === "user"
+                  "max-w-[75%] rounded-lg px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap break-words",
+                  getRole(m) === "user"
                     ? "bg-[color:var(--btn-primary-main,#E58B21)] text-[color:var(--btn-primary-text,#0E0E0E)]"
                     : "bg-muted text-foreground"
                 )}
               >
-                {m.role === "coach" && (
+                {getRole(m) === "coach" && (
                   <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                     Тренер
                   </div>
@@ -269,21 +325,21 @@ export default function CoachChat(props: {
 
         <div className="mt-2 flex flex-col gap-2 border-t pt-2">
           <Textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}
             rows={2}
             placeholder="Задай вопрос тренеру или опиши, как прошла тренировка… (Enter — отправить, Shift+Enter — новая строка)"
           />
           <div className="flex items-center justify-end gap-2">
-            <Button type="button" variant="secondary" size="sm" disabled={isSending} onClick={() => setInput("")}>
+            <Button type="button" variant="secondary" size="sm" disabled={isSending} onClick={() => setText("")}>
               Очистить
             </Button>
             <Button
               type="button"
               variant="primary"
               size="sm"
-              disabled={isSending || !input.trim()}
+              disabled={isSending || !text.trim()}
               onClick={handleSend}
             >
               {isSending ? "Отправляем…" : "Отправить тренеру"}
