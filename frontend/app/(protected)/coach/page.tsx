@@ -65,20 +65,21 @@ export default async function CoachPage() {
     thread = inserted;
   }
 
-  // C) ВАЖНО: берём ПОСЛЕДНИЕ 200 сообщений (иначе можно видеть только самые первые)
+  // C) ВАЖНО: берём ПОСЛЕДНИЕ 200 сообщений.
+  // Для этого сначала сортируем по created_at DESC и берём limit,
+  // затем разворачиваем в ASC для нормального рендера "старые -> новые".
   const { data: messagesDesc, error: msgErr } = await supabase
     .from("coach_messages")
     .select("id, thread_id, author_id, type, body, meta, created_at")
     .eq("thread_id", thread.id)
-    .order("created_at", { ascending: true })
+    .order("created_at", { ascending: false })
     .limit(200);
 
   if (msgErr) {
     console.error("coach_messages select error", msgErr);
   }
 
-  // Рендерим “старые -> новые”
-  const messages = messagesDesc ?? [];
+  const messages = (messagesDesc ?? []).slice().reverse();
 
   // D) unread count (server-side)
   const { data: unreadCount, error: unreadErr } = await supabase.rpc("get_thread_unread_count", {

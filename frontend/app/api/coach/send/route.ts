@@ -9,6 +9,8 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+type CoachInsertResult = { row: any | null; error: any | null };
+
 // -----------------------------
 // Types / Schemas
 // -----------------------------
@@ -157,6 +159,28 @@ function buildFallbackCoachText(didSave: boolean) {
     savedLine,
     "Сейчас у нас временная ошибка при генерации ответа тренера — попробуй отправить ещё раз.",
   ].join("\n");
+}
+
+async function insertCoachMessage(args: {
+  supabase: any;
+  threadId: string;
+  userId: string;
+  body: string;
+  meta: any;
+}): Promise<CoachInsertResult> {
+  const { supabase, threadId, userId, body, meta } = args;
+  const { data, error } = await supabase
+    .from("coach_messages")
+    .insert({
+      thread_id: threadId,
+      author_id: userId,
+      type: "coach",
+      body,
+      meta,
+    })
+    .select("*")
+    .single();
+  return { row: data ?? null, error };
 }
 
 function buildFastPathAnswer(
@@ -381,11 +405,12 @@ async function runResponder(args: {
 // Main Route
 // -----------------------------
 export async function POST(req: NextRequest) {
+  // For "late fail" fallback (avoid UI duplicates + 500 after user insert)
+  let insertedThreadId: string | null = null;
+  let insertedUserId: string | null = null;
+  let insertedUserMsg: any | null = null;
+
   try {
-    // For "late fail" fallback (avoid UI duplicates + 500 after user insert)
-    let insertedThreadId: string | null = null;
-    let insertedUserId: string | null = null;
-    let insertedUserMsg: any | null = null;
 
     // 1) Parse body softly
     let body: any = {};
@@ -552,19 +577,37 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       console.error("coach_send: planner_failed", e);
       const fallbackText = buildFallbackCoachText(didSave);
+
+      // ✅ Persist fallback coach message so it won't disappear after reload
+      const fallbackMeta = {
+        stage: "planner_failed",
+        client_nonce,
+        didSave,
+        temp: false,
+      };
+      const ins = await insertCoachMessage({
+        supabase,
+        threadId,
+        userId: user.id,
+        body: fallbackText,
+        meta: fallbackMeta,
+      });
+
       return NextResponse.json(
         {
           threadId,
           userMessage,
-          coachMessage: {
-            id: "temp-coach",
-            thread_id: threadId,
-            author_id: user.id,
-            type: "coach",
-            body: fallbackText,
-            meta: { stage: "planner_failed", client_nonce, didSave },
-            created_at: new Date().toISOString(),
-          },
+          coachMessage:
+            ins.row ??
+            ({
+              id: "temp-coach",
+              thread_id: threadId,
+              author_id: user.id,
+              type: "coach",
+              body: fallbackText,
+              meta: { ...fallbackMeta, temp: true },
+              created_at: new Date().toISOString(),
+            } as any),
           dbg: IS_DEV ? { stage: "planner_failed", err: String(e) } : undefined,
         },
         { status: 200 }
@@ -795,17 +838,13 @@ export async function POST(req: NextRequest) {
       responder_error: IS_DEV ? responderError : null,
     };
 
-    const { data: coachMsgRow, error: coachMsgErr } = await supabase
-      .from("coach_messages")
-      .insert({
-        thread_id: threadId,
-        author_id: user.id,
-        type: "coach",
-        body: answer,
-        meta: coachMeta as any,
-      })
-      .select("*")
-      .single();
+    const { row: coachMsgRow, error: coachMsgErr } = await insertCoachMessage({
+      supabase,
+      threadId,
+      userId: user.id,
+      body: answer,
+      meta: coachMeta as any,
+    });
 
     if (coachMsgErr || !coachMsgRow) {
       console.error("coach_send: coach_message_insert_error", coachMsgErr);
@@ -852,22 +891,58 @@ export async function POST(req: NextRequest) {
     // We can't refetch because we haven't preserved their ids. So safest fallback:
     if (insertedUserMsg && insertedThreadId && insertedUserId) {
       const didSave = didSaveToWorkoutDescription(insertedUserMsg.meta);
-      return NextResponse.json(
-        {
+      try {
+        const supabase = await createSupabaseServerClient();
+        const fallbackText = buildFallbackCoachText(didSave);
+        const fallbackMeta = {
+          stage: "internal_error_after_user_insert",
+          didSave,
+          temp: false,
+        };
+        const ins = await insertCoachMessage({
+          supabase,
           threadId: insertedThreadId,
-          userMessage: insertedUserMsg,
-          coachMessage: {
-            id: "temp-coach",
-            thread_id: insertedThreadId,
-            author_id: insertedUserId,
-            type: "coach",
-            body: buildFallbackCoachText(didSave),
-            meta: { temp: true, error: "internal_error_after_user_insert", didSave },
-            created_at: new Date().toISOString(),
+          userId: insertedUserId,
+          body: fallbackText,
+          meta: fallbackMeta,
+        });
+        return NextResponse.json(
+          {
+            threadId: insertedThreadId,
+            userMessage: insertedUserMsg,
+            coachMessage:
+              ins.row ??
+              ({
+                id: "temp-coach",
+                thread_id: insertedThreadId,
+                author_id: insertedUserId,
+                type: "coach",
+                body: fallbackText,
+                meta: { ...fallbackMeta, temp: true },
+                created_at: new Date().toISOString(),
+              } as any),
           },
-        },
-        { status: 200 }
-      );
+          { status: 200 }
+        );
+      } catch (e) {
+        // worst-case: still return temp, but at least UI won't duplicate user msg
+        return NextResponse.json(
+          {
+            threadId: insertedThreadId,
+            userMessage: insertedUserMsg,
+            coachMessage: {
+              id: "temp-coach",
+              thread_id: insertedThreadId,
+              author_id: insertedUserId,
+              type: "coach",
+              body: buildFallbackCoachText(didSave),
+              meta: { temp: true, error: "internal_error_after_user_insert", didSave },
+              created_at: new Date().toISOString(),
+            },
+          },
+          { status: 200 }
+        );
+      }
     }
 
     return NextResponse.json({ error: "internal_error" }, { status: 500 });
