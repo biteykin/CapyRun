@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabaseServerApp";
 import OpenAI from "openai";
-import { z } from "zod";
+// import type { Json } from "@/lib/database.types"; // не используется — держим закомментированным
 
 import { runPlanner } from "@/lib/coach/planner";
 import { runResponder } from "@/lib/coach/responder";
@@ -23,6 +23,7 @@ import {
 
 import { getDialogState, setDialogState, resetDialogState } from "@/lib/coach/dialogState";
 import { routeIntent } from "@/lib/coach/intentRouter";
+import { loadCoachMemoryV1, applyPlannerMemoryPatch } from "@/lib/coach/memoryStore";
 
 export const runtime = "nodejs";
 
@@ -156,7 +157,22 @@ export async function POST(req: NextRequest) {
     if (tMetaErr) console.error("coach_send: thread_meta_read_error", tMetaErr);
 
     const threadMeta = (threadMetaRow as any)?.meta ?? {};
-    const threadMemory = (threadMeta?.memory ?? null) as any | null;
+    const legacyThreadMemory = (threadMeta?.memory ?? null) as any | null;
+
+    // ✅ Memory Engine v1: source-of-truth = coach_memory_items
+    // Возвращаем компактный объект (goal/constraints/injury/preferences...), и отдаём его в planner/responder.
+    const memV1 = await loadCoachMemoryV1({
+      supabase,
+      category: null,
+      goalId: null,
+      sport: null,
+      limit: 50,
+      minImportance: 1,
+      minConfidence: 0,
+      status: "active",
+      query: null,
+    });
+    const threadMemory = Object.keys(memV1 ?? {}).length ? memV1 : legacyThreadMemory;
 
     const dialogState = getDialogState(threadMeta);
 
@@ -201,6 +217,25 @@ export async function POST(req: NextRequest) {
     const userMessage = userFreshErr || !userMsgFresh ? userMsgRow : userMsgFresh;
     const didSave = didSaveToWorkoutDescription((userMessage as any)?.meta);
 
+    // 🚫 HARD DEDUP: если на это userMessage уже есть coach-ответ — ничего больше не делаем
+    const { data: existingCoach } = await supabase
+      .from("coach_messages")
+      .select("id")
+      .eq("thread_id", threadId)
+      .eq("meta->>reply_to", userMessage.id)
+      .limit(1);
+
+    if (existingCoach && existingCoach.length > 0) {
+      return NextResponse.json(
+        {
+          threadId,
+          userMessage,
+          coachMessage: null,
+        },
+        { status: 200 }
+      );
+    }
+
     // 5) Load recent history
     const { data: historyAll, error: histErr } = await supabase
       .from("coach_messages")
@@ -212,6 +247,22 @@ export async function POST(req: NextRequest) {
     if (histErr) console.error("coach_send: history_error", histErr);
     let recentHistory = pickRecentHistory(historyAll ?? [], 30);
 
+    // 5.05) Build unified context EARLY
+    // IMPORTANT: context is used by scenario router and local handlers; must exist before routeIntent/scenario steps.
+    const context = await buildCoachContext({
+      supabase,
+      userId: user.id,
+      threadId,
+      plannerNeeds: {
+        workouts_window_days: 14,
+        workouts_limit: 30,
+        include_coach_home: false,
+        include_thread_memory: true,
+        include_geo: false,
+        include_calendar: false,
+      } as any,
+    });
+
     // 5.1) EARLY LOCAL: user answered coach RPE question (легко/норм/тяжело) => do NOT call planner/responder
     // Причина: иначе LLM часто "попугаит" прошлый ответ и повторяет вопрос.
     const userShort = finalText.trim().toLowerCase();
@@ -222,26 +273,18 @@ export async function POST(req: NextRequest) {
       /легко\/норм\/тяжело\?/i.test(lastCoachMsg.body);
 
     if (isRpeWord && coachAskedRpe) {
-      const context = await buildCoachContext({
-        supabase,
-        userId: user.id,
-        threadId,
-        plannerNeeds: {
-          workouts_window_days: 14,
-          workouts_limit: 30,
-          include_coach_home: false,
-          include_thread_memory: true,
-          include_geo: false,
-          include_calendar: false,
-        } as any,
-      });
+      const localFn = buildLocalRpeFollowupAnswer as any;
+      const localText =
+        typeof localFn === "function"
+          ? localFn(context?.workouts?.[0] ?? null, userShort)
+          : "Понял. Тогда следующую тренировку сделаем спокойной: 30–40 минут лёгкого бега в комфортном темпе + разминка/заминка. Хочешь, распишу конкретно по минутам?";
 
-      const localText = buildLocalRpeFollowupAnswer(context?.workouts?.[0] ?? null, userShort);
       const coachMeta = {
         model: "local",
         source: "api/coach/send",
         stage: "local_rpe_followup",
         rpe: userShort,
+        client_nonce,
       };
 
       const { data: coachMsgRow, error: coachMsgErr } = await supabase
@@ -251,7 +294,7 @@ export async function POST(req: NextRequest) {
           author_id: user.id,
           type: "coach",
           body: localText,
-          meta: coachMeta as any,
+          meta: { ...(coachMeta as any), reply_to: userMessage.id },
         })
         .select("*")
         .single();
@@ -268,7 +311,7 @@ export async function POST(req: NextRequest) {
                   author_id: user.id,
                   type: "coach",
                   body: localText,
-                  meta: { ...coachMeta, temp: true } as any,
+                  meta: { ...coachMeta, reply_to: userMessage.id, temp: true } as any,
                   created_at: new Date().toISOString(),
                 }
               : coachMsgRow,
@@ -313,10 +356,27 @@ export async function POST(req: NextRequest) {
 
     // 6.1) Apply memory patch
     if (planner?.memory_patch && Object.keys(planner.memory_patch).length) {
-      const nextMemory = { ...(threadMemory ?? {}), ...planner.memory_patch, updated_at: new Date().toISOString() };
-      const nextMeta = { ...(threadMeta ?? {}), memory: nextMemory };
+      // ✅ Пишем в coach_memory_items через RPC (source of truth)
+      await applyPlannerMemoryPatch({
+        supabase,
+        patch: planner.memory_patch,
+        sourceRef: `thread:${threadId}`,
+        source: "user",
+        goalId: null,
+        sport: null,
+      });
 
-      const { error: upMetaErr } = await supabase.from("coach_threads").update({ meta: nextMeta }).eq("id", threadId);
+      // (опционально) оставляем легаси-кэш в coach_threads.meta.memory, чтобы ничего не ломать в старых местах UI
+      const nextLegacy = {
+        ...(legacyThreadMemory ?? {}),
+        ...planner.memory_patch,
+        updated_at: new Date().toISOString(),
+      };
+      const nextMeta = { ...(threadMeta ?? {}), memory: nextLegacy };
+      const { error: upMetaErr } = await supabase
+        .from("coach_threads")
+        .update({ meta: nextMeta })
+        .eq("id", threadId);
       if (upMetaErr) console.error("coach_send: thread_meta_update_error", upMetaErr);
     }
 
@@ -351,7 +411,7 @@ export async function POST(req: NextRequest) {
             author_id: user.id,
             type: "coach",
             body: clarifyText,
-            meta: coachMeta as any,
+            meta: { ...(coachMeta as any), reply_to: userMessage.id },
           })
           .select("*")
           .single();
@@ -363,7 +423,7 @@ export async function POST(req: NextRequest) {
               author_id: user.id,
               type: "coach",
               body: clarifyText,
-              meta: coachMeta as any,
+              meta: { ...(coachMeta as any), reply_to: userMessage.id },
               created_at: new Date().toISOString(),
             } },
           { status: 200 }
@@ -376,7 +436,7 @@ export async function POST(req: NextRequest) {
       const nextMeta = setDialogState(threadMeta, {
         scenario: "workout_review",
         step: "await_feedback",
-        workout_id: context.workouts[0]?.id,
+        workout_id: context?.workouts?.[0]?.id ?? null,
       });
       await supabase.from("coach_threads").update({ meta: nextMeta }).eq("id", threadId);
     }
@@ -385,12 +445,27 @@ export async function POST(req: NextRequest) {
       // продолжаем без повторных вопросов
     }
 
-    // 8) Build unified context
-    const context = await buildCoachContext({
+    // 8) Enrich context with plannerNeeds window (optional re-fetch)
+    // If planner asked different window/limit, rebuild context for responder/fast-path accuracy.
+    const context2 = await buildCoachContext({
       supabase,
       userId: user.id,
       threadId,
       plannerNeeds: planner.needs,
+    });
+
+    // ✅ Обновим память для responder из актуального источника (coach_memory_items),
+    // чтобы сразу учитывалась свежезаписанная memory_patch.
+    const memV1b = await loadCoachMemoryV1({
+      supabase,
+      category: null,
+      goalId: null,
+      sport: null,
+      limit: 50,
+      minImportance: 1,
+      minConfidence: 0,
+      status: "active",
+      query: null,
     });
 
     // 9) Fast-path
@@ -398,8 +473,9 @@ export async function POST(req: NextRequest) {
     if (fp?.enabled && fp.kind) {
       const fastAnswer = buildFastPathAnswer(
         fp.kind,
-        context.workouts,
-        fp.window_days ?? planner.needs.workouts_window_days ?? 14
+        context2.workouts,
+        fp.window_days ?? planner.needs.workouts_window_days ?? 14,
+        (fp as any)?.nth
       );
 
       const coachMeta = {
@@ -407,7 +483,7 @@ export async function POST(req: NextRequest) {
         source: "api/coach/send",
         client_nonce, // ✅ важно для дедупликации optimistic/temp на фронте
         fast_path: fp,
-        used_workout_ids: context.workouts.map((w: any) => w.id).filter(Boolean),
+        used_workout_ids: context2.workouts.map((w: any) => w.id).filter(Boolean),
         workouts_window_days: fp.window_days ?? planner.needs.workouts_window_days ?? 14,
         planner,
       };
@@ -419,7 +495,7 @@ export async function POST(req: NextRequest) {
           author_id: user.id,
           type: "coach",
           body: fastAnswer,
-          meta: coachMeta as any,
+          meta: { ...(coachMeta as any), reply_to: userMessage.id },
         })
         .select("*")
         .single();
@@ -431,7 +507,7 @@ export async function POST(req: NextRequest) {
             author_id: user.id,
             type: "coach",
             body: fastAnswer,
-            meta: coachMeta as any,
+            meta: { ...(coachMeta as any), reply_to: userMessage.id },
             created_at: new Date().toISOString(),
           } : coachMsgRow },
         { status: 200 }
@@ -447,26 +523,25 @@ export async function POST(req: NextRequest) {
         openai,
         userText: finalText,
         planner,
+        threadMemory: Object.keys(memV1b ?? {}).length ? memV1b : (context2.memory ?? null),
+        workouts: context2.workouts ?? [],
+        coachHome: context2.coachHome ?? null,
         recentHistory,
-        context,
       });
     } catch (e) {
       console.error("coach_send: responder_failed", e);
       responderError = String(e);
 
-      const workouts = context?.workouts ?? [];
-
-      // 🔥 LOCAL FALLBACK: analysis
+      // 🔥 LOCAL FALLBACK FOR ANALYSIS QUESTIONS
+      const workouts = context2 && context2.workouts ? context2.workouts : [];
       if (planner.intent === "analysis" && workouts.length > 0) {
-        answer = buildLocalWorkoutAnalysis(workouts[0]) ?? buildFallbackCoachText(didSave);
-      }
-
-      // 🔥 LOCAL FALLBACK: simple facts about last workout
-      else if (planner.intent === "simple_fact" && workouts.length > 0) {
-        answer = buildLocalWorkoutAnalysis(workouts[0]);
-      }
-
-      else {
+        const local = buildLocalWorkoutAnalysis(workouts[0]);
+        if (local) {
+          answer = local;
+        } else {
+          answer = buildFallbackCoachText(didSave);
+        }
+      } else {
         answer = buildFallbackCoachText(didSave);
       }
     }
@@ -477,8 +552,8 @@ export async function POST(req: NextRequest) {
       stage: "answer",
       planner,
       workouts_window_days: planner.needs.workouts_window_days,
-      used_workout_ids: context.workouts.map((w: any) => w.id),
-      has_coach_home: !!context.coachHome,
+      used_workout_ids: context2.workouts.map((w: any) => w.id),
+      has_coach_home: !!context2.coachHome,
       style_version: "v1_intent_planner_fastpath_memory",
       client_nonce,
       didSave,
@@ -491,7 +566,7 @@ export async function POST(req: NextRequest) {
       threadId,
       userId: user.id,
       body: answer,
-      meta: coachMeta as any,
+      meta: { ...(coachMeta as any), reply_to: userMessage.id },
     });
 
     if (coachMsgErr || !coachMsgRow) {
@@ -507,7 +582,7 @@ export async function POST(req: NextRequest) {
             author_id: user.id,
             type: "coach",
             body: answer,
-            meta: coachMeta as any,
+            meta: { ...(coachMeta as any), reply_to: userMessage.id },
             created_at: new Date().toISOString(),
           },
           dbg: IS_DEV

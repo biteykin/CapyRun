@@ -11,6 +11,15 @@ const DEFAULT_NEEDS: PlannerOut["needs"] = {
   include_calendar: false,
 };
 
+function isoAtStartOfDayUTC(d: Date) {
+  const x = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0));
+  return x.toISOString();
+}
+function isoAtEndOfDayUTC(d: Date) {
+  const x = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59));
+  return x.toISOString();
+}
+
 function parseDateRangeWindowDays(text: string): number | null {
   const t = (text ?? "").toLowerCase();
   // ловим "с 1 января 2026" / "с 01.01.2026" / "с 2026-01-01"
@@ -53,6 +62,63 @@ function parseDateRangeWindowDays(text: string): number | null {
   const days = Math.ceil(diffMs / (24 * 3600 * 1000));
 
   return clamp(days, 1, 365);
+}
+
+type DateRange = { from_iso: string; to_iso: string; fetch_window_days: number };
+
+function parseCalendarRange(text: string): DateRange | null {
+  const t = (text ?? "").toLowerCase();
+  const now = new Date();
+
+  // 1) "с YYYY-MM-DD по YYYY-MM-DD"
+  let m = t.match(/с\s+(\d{4})-(\d{2})-(\d{2})\s+по\s+(\d{4})-(\d{2})-(\d{2})/);
+  if (m) {
+    const from = new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`);
+    const to = new Date(`${m[4]}-${m[5]}-${m[6]}T00:00:00Z`);
+    if (!isNaN(from.getTime()) && !isNaN(to.getTime())) {
+      const fetchDays = clamp(Math.ceil((now.getTime() - from.getTime()) / (24 * 3600 * 1000)) + 2, 1, 365);
+      return { from_iso: isoAtStartOfDayUTC(from), to_iso: isoAtEndOfDayUTC(to), fetch_window_days: fetchDays };
+    }
+  }
+
+  // 2) "с DD.MM.YYYY по DD.MM.YYYY"
+  m = t.match(/с\s+(\d{1,2})\.(\d{1,2})\.(\d{4})\s+по\s+(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+  if (m) {
+    const d1 = String(m[1]).padStart(2, "0");
+    const mo1 = String(m[2]).padStart(2, "0");
+    const y1 = m[3];
+    const d2 = String(m[4]).padStart(2, "0");
+    const mo2 = String(m[5]).padStart(2, "0");
+    const y2 = m[6];
+    const from = new Date(`${y1}-${mo1}-${d1}T00:00:00Z`);
+    const to = new Date(`${y2}-${mo2}-${d2}T00:00:00Z`);
+    if (!isNaN(from.getTime()) && !isNaN(to.getTime())) {
+      const fetchDays = clamp(Math.ceil((now.getTime() - from.getTime()) / (24 * 3600 * 1000)) + 2, 1, 365);
+      return { from_iso: isoAtStartOfDayUTC(from), to_iso: isoAtEndOfDayUTC(to), fetch_window_days: fetchDays };
+    }
+  }
+
+  // 3) "в январе 2026" / "за январь 2026" / "январь 2026"
+  const monthMatch = t.match(/\b(январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр)\w*\b(?:\s+(\d{4}))?/);
+  const wantsThatMonth = /\bв\s+|за\s+/.test(t) || t.includes("январ") || t.includes("феврал") || t.includes("март") || t.includes("апрел") || t.includes("июн") || t.includes("июл") || t.includes("август") || t.includes("сентябр") || t.includes("октябр") || t.includes("ноябр") || t.includes("декабр");
+
+  if (monthMatch && wantsThatMonth) {
+    const mkey = monthMatch[1];
+    const y = monthMatch[2] ? Number(monthMatch[2]) : now.getUTCFullYear();
+    const map: Record<string, number> = {
+      январ: 1, феврал: 2, март: 3, апрел: 4, ма: 5, июн: 6, июл: 7,
+      август: 8, сентябр: 9, октябр: 10, ноябр: 11, декабр: 12,
+    };
+    const month = map[mkey] ?? 0;
+    if (month) {
+      const from = new Date(Date.UTC(y, month - 1, 1, 0, 0, 0));
+      const to = new Date(Date.UTC(y, month, 0, 0, 0, 0)); // last day of month
+      const fetchDays = clamp(Math.ceil((now.getTime() - from.getTime()) / (24 * 3600 * 1000)) + 2, 1, 365);
+      return { from_iso: isoAtStartOfDayUTC(from), to_iso: isoAtEndOfDayUTC(to), fetch_window_days: fetchDays };
+    }
+  }
+
+  return null;
 }
 
 const PLANNER_OUTPUT_CONTRACT = {
@@ -258,8 +324,91 @@ export async function runPlanner(args: {
 }): Promise<PlannerOut> {
   const { userText, threadMemory, recentHistory, openai } = args;
 
-  // --- LOCAL ROUTER: "предпоследняя" / "с 1 января ..." / "итого км" ---
+  // ---------------------------------------------------------------------------
+  // EARLY RULES (no LLM): calendar range stats like "в январе 2026" / "с 01.01.2026 по 31.01.2026"
+  // Returns BOTH count of workouts and total distance for that range.
+  // ---------------------------------------------------------------------------
   const t = (userText ?? "").trim().toLowerCase();
+
+  const wantsRangeStats =
+    /(сколько\s+трениров|кол-во\s+трениров|количество\s+трениров)/i.test(t) &&
+    /(дистанц|километр|км)/i.test(t);
+
+  const range = parseCalendarRange(t);
+  if (range && (wantsRangeStats || /\bтренировк/i.test(t))) {
+    return {
+      intent: "simple_fact",
+      response_mode: "answer",
+      clarify_question: null,
+      needs: { ...DEFAULT_NEEDS, workouts_window_days: range.fetch_window_days, workouts_limit: 120 },
+      fast_path: {
+        enabled: true,
+        kind: "range_workout_stats",
+        window_days: range.fetch_window_days,
+        from_iso: range.from_iso,
+        to_iso: range.to_iso,
+      },
+      memory_patch: {},
+      debug: { rationale_short: "early_calendar_range_workout_stats" },
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // EARLY RULES (no LLM): nth workout queries like "предпоследняя", "третья с конца"
+  // Why: LLM often forgets to set fast_path.nth, causing #1 from end by default.
+  // ---------------------------------------------------------------------------
+  const wantsNthWorkout =
+    /(предпоследн|позапрошл|треть(я|ю)\s+с\s+конца|(\d+)\s*(?:-?я|-?ю)?\s*с\s+конца|\b\d+\s+с\s+конца)/i.test(t) ||
+    /покажи\s+предпоследн/i.test(t) ||
+    /покажи\s+треть/i.test(t) ||
+    /покажи\s+позапрошл/i.test(t);
+
+  if (wantsNthWorkout) {
+    let nth: number | null = null;
+
+    // "предпоследняя"
+    if (/предпоследн/i.test(t)) nth = 2;
+
+    // "позапрошлая" (третья с конца)
+    if (nth == null && /позапрошл/i.test(t)) nth = 3;
+
+    // "третья с конца"
+    if (nth == null && /треть(я|ю)\s+с\s+конца/i.test(t)) nth = 3;
+
+    // "N с конца" / "N-я с конца" / "N-ю с конца"
+    if (nth == null) {
+      const m = t.match(/(\d+)\s*(?:-?я|-?ю)?\s*с\s+конца/i);
+      if (m?.[1]) nth = Number(m[1]);
+    }
+
+    nth = Number.isFinite(Number(nth)) ? clamp(Number(nth), 1, 50) : 2;
+
+    const out: PlannerOut = {
+      intent: "simple_fact",
+      response_mode: "answer",
+      clarify_question: null,
+      needs: {
+        // nth workout users almost always mean "recent history", use 30d as default
+        workouts_window_days: 30,
+        workouts_limit: 50,
+        include_coach_home: false,
+        include_thread_memory: true,
+        include_geo: false,
+        include_calendar: false,
+      },
+      fast_path: { enabled: true, kind: "nth_workout", window_days: 30, nth },
+      memory_patch: {},
+      debug: { rationale_short: `early_nth_workout:nth=${nth}` },
+    };
+    return out;
+  }
+
+  // --- NEW: detect reply-to-coach-question ---
+  const lastAssistant = [...recentHistory]
+    .reverse()
+    .find((m) => m.type === "coach");
+
+  // --- LOCAL ROUTER: "с 1 января ..." / "итого км" ---
   const rangeDays = parseDateRangeWindowDays(t);
 
   // "километраж с ... по сегодня" -> суммарная дистанция по run
@@ -272,19 +421,6 @@ export async function runPlanner(args: {
       fast_path: { enabled: true, kind: "sum_distance_run", window_days: rangeDays },
       memory_patch: {},
       debug: { rationale_short: "local_date_range_sum_distance_run" },
-    };
-  }
-
-  // "предпоследняя / позапрошлая" -> nth_workout(2)
-  if (/(предпоследн|позапрошл)/.test(t)) {
-    return {
-      intent: "simple_fact",
-      response_mode: "answer",
-      clarify_question: null,
-      needs: { ...DEFAULT_NEEDS, workouts_window_days: 30, workouts_limit: 50 },
-      fast_path: { enabled: true, kind: "nth_workout", window_days: 30, nth: 2 },
-      memory_patch: {},
-      debug: { rationale_short: "local_nth_workout_2" },
     };
   }
 

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export type WorkoutFact = {
+  // NOTE: workouts are expected to be sorted by start_time desc in context
   id: string;
   sport: string | null;
   start_time: string | null;
@@ -47,12 +48,16 @@ export const PlannerSchema = z.object({
           "last_workout",
           "longest_workout",
           "sum_distance_run",
+          "range_workout_stats",
           "nth_workout",
         ])
         .optional(),
       window_days: z.number().int().min(1).max(365).optional(),
       // nth_workout: 1 = last, 2 = previous, 3 = third from end...
       nth: z.number().int().min(1).max(50).optional(),
+      // calendar range filtering (inclusive)
+      from_iso: z.string().optional(),
+      to_iso: z.string().optional(),
     })
     .optional(),
 

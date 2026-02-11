@@ -1,6 +1,6 @@
-// frontend/lib/coach/context.ts
 import { clamp } from "./utils";
 import { PlannerOut, WorkoutFact } from "./types";
+import { loadCoachMemoryV1 } from "@/lib/coach/memoryStore";
 
 export type CoachContext = {
   userId: string;
@@ -31,18 +31,8 @@ export async function buildCoachContext(args: {
 
   const now = new Date().toISOString();
 
-  // ---- thread meta / memory
-  const { data: threadRow, error: threadErr } = await supabase
-    .from("coach_threads")
-    .select("meta")
-    .eq("id", threadId)
-    .maybeSingle();
-
-  if (threadErr) {
-    console.error("coach_context: thread_meta_error", threadErr);
-  }
-
-  const memory = (threadRow?.meta?.memory ?? null) as Record<string, any> | null;
+  // ---- memory (now loaded from memoryStore)
+  const memory = await loadCoachMemoryV1({ supabase, limit: 50 });
 
   // ---- recent messages
   const { data: msgs, error: msgErr } = await supabase

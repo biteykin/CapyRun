@@ -1,19 +1,25 @@
 import OpenAI from "openai";
 import { PlannerOut } from "./types";
 import { pickRecentHistory } from "./utils";
-import { CoachContext } from "./context";
 
 export async function runResponder(args: {
   openai: OpenAI;
   userText: string;
   planner: PlannerOut;
+  threadMemory: any | null;
+  workouts: any[];
+  coachHome: any | null;
   recentHistory: { type: string; body: string; created_at: string }[];
-  context: CoachContext;
 }) {
-  const { openai, userText, planner, recentHistory, context } = args;
-  const threadMemory = context.memory ?? {};
-  const workouts = context.workouts ?? [];
-  const coachHome = context.coachHome ?? null;
+  const {
+    openai,
+    userText,
+    planner,
+    threadMemory,
+    workouts,
+    coachHome,
+    recentHistory,
+  } = args;
 
   const responderSystem = [
     "Ты — дружелюбный и мотивирующий персональный тренер для любителя.",
