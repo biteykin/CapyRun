@@ -32,8 +32,10 @@ export async function buildCoachContext(args: {
 
   const now = new Date().toISOString();
 
-  // ---- memory (now loaded from memoryStore)
-  const memory = await loadCoachMemoryV1({ supabase, userId, limit: 50 });
+  // ---- memory (optional)
+  const memory = plannerNeeds?.include_thread_memory
+    ? await loadCoachMemoryV1({ supabase, userId, limit: 50 })
+    : null;
 
   // ---- recent messages
   const { data: msgs, error: msgErr } = await supabase

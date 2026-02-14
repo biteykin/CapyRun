@@ -105,7 +105,9 @@ function isOfpWhenRequest(text: string): boolean {
 function isForceOfpOnDay(text: string): { ok: boolean; dayRu?: string } {
   const t = (text ?? "").toLowerCase();
   // "поставь офп на вторник"
-  const m = t.match(/офп\s+на\s+(понедельник|вторник|среду|среда|четверг|пятниц(у|а)|суббот(у|а)|воскресень(е|е))/i);
+  const m = t.match(
+    /офп\s+на\s+(понедельник|вторник|среду|среда|четверг|пятниц(у|а)|суббот(у|а)|воскресенье)/i
+  );
   if (!m) return { ok: false };
   const raw = String(m[1] ?? "").toLowerCase();
   const ru = raw

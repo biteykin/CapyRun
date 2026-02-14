@@ -1,3 +1,5 @@
+// frontend/components/coach/CoachChat.client.tsx
+
 "use client";
 
 import * as React from "react";
@@ -241,28 +243,17 @@ export default function CoachChat(props: {
         console.warn("[coach] /api/coach/send dbg", data.dbg);
       }
 
-      // ВАЖНО:
-      // 1) гарантируем, что у server userMessage в meta сохранён client_nonce (у вас он вставляется в route.ts)
-      // 2) если по какой-то причине meta пустая — подставим nonce, чтобы заменить optimistic
+      // гарантируем client_nonce, чтобы заменить optimistic user-сообщение
       const patchedUser = {
         ...userMsg,
         meta: { ...(userMsg.meta ?? {}), client_nonce },
       } as RawMessage;
 
-      let newMsgs: RawMessage[] = [patchedUser];
-      if (coachMsg) {
-        // coachMessage тоже пометим client_nonce, чтобы temp-coach не исчезал при refetch/мердже
-        const patchedCoach = {
-          ...coachMsg,
-          meta: { ...(coachMsg.meta ?? {}), client_nonce },
-        } as RawMessage;
-        newMsgs.push(patchedCoach);
-      }
-
-      setMessages((prev) => mergeDedup(prev, newMsgs));
+      // ВАЖНО: coachMessage НЕ добавляем вручную.
+      // Он придёт через realtime subscription (postgres_changes).
+      setMessages((prev) => mergeDedup(prev, [patchedUser]));
 
       // we are in the chat, so we consider it read
-      // best-effort: read receipt не должен ломать чат
       try {
         await markRead();
       } catch (e) {
