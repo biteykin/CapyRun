@@ -1,15 +1,16 @@
-// frontend/app/layout.tsx
+import * as React from "react";
+import "server-only";
+
 import "./globals.css";
 import PHProvider from "./providers";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import AuthCookieSync from "@/components/auth/AuthCookieSync";
 import { cookies } from "next/headers";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+// В RootLayout не делаем сетевых запросов: любые сетевые сбои не должны ломать портал.
 
-// аккуратно вытаскиваем access_token из набора куки Next.js
-async function getServerUserFromCookie() {
+// Получение токена из cookies — обёрнуто в функцию, чтобы не потерять текущую логику
+async function getTokenSomehow() {
   const jar = await cookies();
 
   // 1) прямой sb-access-token (JWT)
@@ -47,37 +48,58 @@ async function getServerUserFromCookie() {
     }
   }
 
+  return token;
+}
+
+function base64UrlDecodeToString(input: string) {
+  // JWT использует base64url
+  const b64 = input.replace(/-/g, "+").replace(/_/g, "/");
+  const pad = b64.length % 4 ? "=".repeat(4 - (b64.length % 4)) : "";
+  return Buffer.from(b64 + pad, "base64").toString("utf8");
+}
+
+function decodeJwtPayload(token: string): any | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length < 2) return null;
+    const payloadJson = base64UrlDecodeToString(parts[1]);
+    return JSON.parse(payloadJson);
+  } catch {
+    return null;
+  }
+}
+
+async function getServerUserFromCookie() {
+  const token = await getTokenSomehow();
   if (!token) return null;
 
-  // Вытаскиваем пользователя у Supabase
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      apikey: SUPABASE_ANON_KEY,
-    },
-    cache: "no-store",
-  });
+  // Вместо сетевого запроса читаем payload из JWT (устойчиво, без fetch).
+  const payload = decodeJwtPayload(token);
+  if (!payload) return null;
 
-  if (!res.ok) return null;
+  // Supabase обычно кладёт sub и email в payload
+  const id = payload?.sub ?? payload?.user_id ?? payload?.id ?? null;
+  const email = payload?.email ?? null;
+  const user_metadata = payload?.user_metadata ?? payload?.app_metadata ?? null;
 
-  const user = await res.json();
+  if (!id) return null;
+
   return {
-    id: user?.id ?? user?.sub,
-    email: user?.email ?? null,
-    user_metadata: user?.user_metadata ?? null,
-    raw: user,
+    id,
+    email,
+    user_metadata,
+    raw: payload,
   };
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const serverUser = await getServerUserFromCookie();
+  const user = await getServerUserFromCookie();
 
   return (
-    <html lang="en">
+    <html lang="ru">
       <body>
         <TooltipProvider delayDuration={250} skipDelayDuration={150}>
-          <PHProvider initialUser={serverUser}>
+          <PHProvider initialUser={user}>
             {/* важнo: держим синхронизацию httpOnly-куки после логина/логаута */}
             <AuthCookieSync />
             {children}

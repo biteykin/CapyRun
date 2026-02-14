@@ -1,65 +1,120 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabaseServerApp";
 import OpenAI from "openai";
-// import type { Json } from "@/lib/database.types"; // не используется — держим закомментированным
+import util from "node:util";
+import "server-only";
 
 import { runPlanner } from "@/lib/coach/planner";
 import { runResponder } from "@/lib/coach/responder";
 import { buildFastPathAnswer } from "@/lib/coach/fastPath";
 import { buildCoachContext } from "@/lib/coach/context";
-import {
-  PlannerOut,
-  WorkoutFact,
-} from "@/lib/coach/types";
+import { PlannerOut } from "@/lib/coach/types";
 import {
   buildFallbackCoachText,
-  clamp,
   didSaveToWorkoutDescription,
-  normalizeErr,
   pickRecentHistory,
   buildLocalWorkoutAnalysis,
   buildLocalRpeFollowupAnswer,
 } from "@/lib/coach/utils";
 
-import { getDialogState, setDialogState, resetDialogState } from "@/lib/coach/dialogState";
+import { getDialogState, setDialogState } from "@/lib/coach/dialogState";
 import { routeIntent } from "@/lib/coach/intentRouter";
-import { loadCoachMemoryV1, applyPlannerMemoryPatch } from "@/lib/coach/memoryStore";
+
+import {
+  loadMemoryTopDirect,
+  normalizeMemoryForLLM,
+  mergeLegacyMemory,
+  applyMemoryPatch,
+} from "@/lib/coach/memoryStore";
+
+import { normalizeAIError, userFacingAIErrorText } from "@/lib/coach/openaiError";
+
+// ⚠️ адаптируйте импорт под ваш серверный supabase-клиент
+import { createClient, createClientWithCookies } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
 const IS_DEV = process.env.NODE_ENV !== "production";
+const HAS_OPENAI_KEY = !!process.env.OPENAI_API_KEY;
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-type CoachInsertResult = { row: any | null; error: any | null };
+// Используем существующий admin client (SERVICE_ROLE_KEY)
+const supabaseAdmin = createClient();
 
-async function insertCoachMessage(args: {
-  supabase: any;
-  threadId: string;
-  userId: string;
-  body: string;
-  meta: any;
-}): Promise<CoachInsertResult> {
-  const { supabase, threadId, userId, body, meta } = args;
-  const { data, error } = await supabase
+type SupabaseAdminClient = ReturnType<typeof createClient>;
+
+function getBearerToken(req: NextRequest) {
+  const h = req.headers.get("authorization") || "";
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  return m?.[1]?.trim() || null;
+}
+
+async function insertCoachMessage(
+  supabaseAdmin: SupabaseAdminClient,
+  params: {
+    thread_id: string;
+    author_id: string;
+    body: string;
+    stage: string;
+    meta?: Record<string, any>;
+  }
+) {
+  const { thread_id, author_id, body, stage, meta } = params;
+  return supabaseAdmin
     .from("coach_messages")
     .insert({
-      thread_id: threadId,
-      author_id: userId,
+      thread_id,
+      // IMPORTANT: coach_messages.author_id is NOT NULL (and used in RLS / FK),
+      // so we must always set it.
+      author_id,
       type: "coach",
       body,
-      meta,
+      meta: { ...(meta ?? {}), stage },
     })
+    // IMPORTANT: return full row so UI can render immediately (no realtime dependency)
     .select("*")
     .single();
-  return { row: data ?? null, error };
+}
+
+async function findRecentSameFallback(
+  supabaseAdmin: SupabaseAdminClient,
+  params: {
+    thread_id: string;
+    error_code?: string;
+    windowSeconds: number;
+  }
+) {
+  const { thread_id, error_code, windowSeconds } = params;
+  const since = new Date(Date.now() - windowSeconds * 1000).toISOString();
+
+  // Ищем последнюю заглушку за окно времени
+  // и сравниваем error.code (если есть)
+  const { data } = await supabaseAdmin
+    .from("coach_messages")
+    // include body so we can return a usable message when deduping
+    .select("id, thread_id, author_id, type, body, created_at, meta")
+    .eq("thread_id", thread_id)
+    .eq("type", "coach")
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(10);
+
+  if (!data?.length) return null;
+  const hit = data.find((m: any) => {
+    const st = m?.meta?.stage;
+    const code = m?.meta?.error?.code;
+    return st === "internal_error_after_user_insert" && (error_code ? code === error_code : true);
+  });
+  return hit ?? null;
 }
 
 export async function POST(req: NextRequest) {
   let insertedThreadId: string | null = null;
   let insertedUserId: string | null = null;
   let insertedUserMsg: any | null = null;
+  let stage = "start";
 
   try {
+    stage = "parse_body";
     // 1) Parse body softly
     let body: any = {};
     try {
@@ -78,20 +133,63 @@ export async function POST(req: NextRequest) {
 
     const reqThreadId = (body?.threadId ?? null) as string | null;
 
+    if (!HAS_OPENAI_KEY) {
+      console.error("coach_send: OPENAI_API_KEY missing on server");
+      // не роняем, но сразу видно, почему будет заглушка
+    }
+
     // 2) Auth
-    const supabase = await createSupabaseServerClient();
-    const {
-      data: { user },
-      error: userErr,
-    } = await supabase.auth.getUser();
+    stage = "auth";
+    const supabase = supabaseAdmin;
+    let user: { id: string } | null = null;
+    let userErr: any = null;
+
+    try {
+      // 2.1) Prefer auth cookie (если запрос идёт из браузера с сессией Supabase)
+      const supabaseAuth = await createClientWithCookies();
+      const { data, error } = await supabaseAuth.auth.getUser();
+      if (!error && data?.user?.id) {
+        user = { id: data.user.id };
+      }
+    } catch (e) {
+      // cookie auth может быть недоступен — это не критично
+    }
+
+    // 2.2) Fallback: Bearer token (клиентский Supabase access_token)
+    // Это нужно, потому что supabaseBrowser часто хранит сессию в localStorage, а не в cookies.
+    if (!user?.id) {
+      const token = getBearerToken(req);
+      if (token) {
+        const { data, error } = await supabaseAdmin.auth.getUser(token);
+        if (!error && data?.user?.id) {
+          user = { id: data.user.id };
+        } else {
+          userErr = `Bearer auth failed: ${error?.message ?? "unknown"}`;
+        }
+      }
+    }
+
+    // 2.3) Legacy fallback (оставим на всякий случай для внутренних батчей)
+    // Но лучше не использовать на фронте.
+    if (!user?.id && body?.userId) {
+      user = { id: String(body.userId) };
+    }
+
+    if (!user?.id) {
+      userErr = "No auth user (cookie) and no userId in body";
+    }
 
     if (userErr || !user) {
       console.error("coach_send: auth error", userErr);
-      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        { error: "unauthorized" },
+        { status: 401 }
+      );
     }
     insertedUserId = user.id;
 
     // 3) Resolve thread
+    stage = "thread_resolve";
     let threadId: string | null = reqThreadId;
 
     if (threadId) {
@@ -148,6 +246,7 @@ export async function POST(req: NextRequest) {
     insertedThreadId = threadId;
 
     // 3.1) Read thread meta (memory)
+    stage = "thread_meta_read";
     const { data: threadMetaRow, error: tMetaErr } = await supabase
       .from("coach_threads")
       .select("id, meta")
@@ -159,24 +258,23 @@ export async function POST(req: NextRequest) {
     const threadMeta = (threadMetaRow as any)?.meta ?? {};
     const legacyThreadMemory = (threadMeta?.memory ?? null) as any | null;
 
-    // ✅ Memory Engine v1: source-of-truth = coach_memory_items
-    // Возвращаем компактный объект (goal/constraints/injury/preferences...), и отдаём его в planner/responder.
-    const memV1 = await loadCoachMemoryV1({
+    // ✅ Memory Engine v1: читаем структурированную память из coach_memory_items
+    const memTop = await loadMemoryTopDirect({
       supabase,
+      userId: user.id,
       category: null,
       goalId: null,
       sport: null,
-      limit: 50,
+      limit: 30,
       minImportance: 1,
-      minConfidence: 0,
-      status: "active",
-      query: null,
     });
-    const threadMemory = Object.keys(memV1 ?? {}).length ? memV1 : legacyThreadMemory;
+    const memoryTopForLLM = normalizeMemoryForLLM(memTop?.items ?? []);
+    const threadMemory = mergeLegacyMemory(memoryTopForLLM ?? {}, legacyThreadMemory);
 
     const dialogState = getDialogState(threadMeta);
 
     // 4) Insert user message
+    stage = "insert_user_message";
     const { data: userMsgRow, error: userMsgErr } = await supabase
       .from("coach_messages")
       .insert({
@@ -208,6 +306,7 @@ export async function POST(req: NextRequest) {
     insertedUserMsg = userMsgRow;
 
     // 4.1) Re-read row to see trigger-updated meta
+    stage = "re_read_user_message";
     const { data: userMsgFresh, error: userFreshErr } = await supabase
       .from("coach_messages")
       .select("*")
@@ -237,6 +336,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 5) Load recent history
+    stage = "load_history";
     const { data: historyAll, error: histErr } = await supabase
       .from("coach_messages")
       .select("type, body, created_at")
@@ -249,6 +349,7 @@ export async function POST(req: NextRequest) {
 
     // 5.05) Build unified context EARLY
     // IMPORTANT: context is used by scenario router and local handlers; must exist before routeIntent/scenario steps.
+    stage = "build_context_early";
     const context = await buildCoachContext({
       supabase,
       userId: user.id,
@@ -264,7 +365,6 @@ export async function POST(req: NextRequest) {
     });
 
     // 5.1) EARLY LOCAL: user answered coach RPE question (легко/норм/тяжело) => do NOT call planner/responder
-    // Причина: иначе LLM часто "попугаит" прошлый ответ и повторяет вопрос.
     const userShort = finalText.trim().toLowerCase();
     const isRpeWord = /^(легко|норм|нормально|тяжело)$/i.test(userShort);
     const lastCoachMsg = [...recentHistory].reverse().find((m) => m.type === "coach");
@@ -320,53 +420,136 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // ---------------------------------------------------------------------------
+    // HARD LOCAL: weekly_schedule rules (do not call planner/LLM)
+    // ---------------------------------------------------------------------------
+    const t = finalText.toLowerCase();
+    const isWeeklyPlan = /план\s+на\s+недел/.test(t);
+    const isOfpWhen = /когда.*офп/.test(t) || /на\s+какой\s+день.*офп/.test(t);
+
+    const ws =
+      (threadMemory?.preferences?.weekly_schedule ??
+        threadMemory?.preferences?.weeklySchedule ??
+        threadMemory?.weekly_schedule) ??
+      null;
+
+    const wsObj = ws && typeof ws === "object" ? ws : null;
+    const runDays = Array.isArray(wsObj?.run_days) ? wsObj.run_days : [];
+    const ofpDays = Array.isArray(wsObj?.ofp_days) ? wsObj.ofp_days : [];
+    const hasWs = runDays.length || ofpDays.length;
+
+    const dayRu = (d: string) =>
+      ({
+        mon: "Понедельник",
+        tue: "Вторник",
+        wed: "Среда",
+        thu: "Четверг",
+        fri: "Пятница",
+        sat: "Суббота",
+        sun: "Воскресенье",
+      } as any)[String(d || "").toLowerCase()] ?? String(d || "");
+
+    if (hasWs && (isWeeklyPlan || isOfpWhen)) {
+      stage = "local_weekly_schedule";
+      let localText = "";
+      if (isOfpWhen) {
+        const ofp = ofpDays.map(dayRu);
+        localText = ofp.length ? `ОФП по weekly_schedule: ${ofp.join(", ")}.` : `По weekly_schedule у нас не задан день ОФП.`;
+      } else {
+        const mins = Number(threadMemory?.preferences?.preferred_session_minutes?.value ?? 40) || 40;
+        const m = Math.max(20, Math.min(45, mins));
+        const runText = `лёгкая ходьба или очень спокойный бег ${m} мин (комфортно, без усталости)`;
+        const ofpText = `ОФП без ударной нагрузки ${m} мин: мобильность, баланс, растяжка`;
+
+        const lines: string[] = [];
+        runDays.map(dayRu).forEach((d: string) => lines.push(`- ${d}: ${runText}`));
+        ofpDays.map(dayRu).forEach((d: string) => lines.push(`- ${d}: ${ofpText}`));
+        lines.push(`- Остальные дни: отдых / прогулка 20–40 мин + лёгкая растяжка 5–10 мин`);
+        localText = ["План на неделю без нагрузки по твоему weekly_schedule:", ...lines].join("\n");
+      }
+
+      const coachMeta = { model: "local_weekly_schedule", source: "api/coach/send", stage: "local_weekly_schedule", client_nonce };
+      const { data: coachMsgRow, error: coachMsgErr } = await supabase
+        .from("coach_messages")
+        .insert({ thread_id: threadId, author_id: user.id, type: "coach", body: localText, meta: { ...(coachMeta as any), reply_to: userMessage.id } })
+        .select("*")
+        .single();
+
+      return NextResponse.json(
+        { threadId, userMessage, coachMessage: coachMsgErr || !coachMsgRow ? {
+            id: "temp-coach",
+            thread_id: threadId,
+            author_id: user.id,
+            type: "coach",
+            body: localText,
+            meta: { ...(coachMeta as any), reply_to: userMessage.id, temp: true },
+            created_at: new Date().toISOString(),
+          } : coachMsgRow },
+        { status: 200 }
+      );
+    }
+
     // 6) Planner
+    stage = "planner";
     let planner: PlannerOut;
     try {
       planner = await runPlanner({ openai, userText: finalText, threadMemory, recentHistory });
     } catch (e) {
-      const ne = normalizeErr((e as any)?._planner ?? e);
-      console.error("coach_send: planner_failed", ne);
+      // --- Новый блок обработки ошибок OpenAI/planner ---
+      const normalized = normalizeAIError(e);
+      console.error("coach_send: planner_failed", normalized || e);
+      let errText = "";
+      if (normalized) {
+        errText = userFacingAIErrorText(normalized) || buildFallbackCoachText(didSave);
+      } else {
+        errText = buildFallbackCoachText(didSave);
+      }
+      const fallbackMeta = {
+        stage: "planner_failed",
+        client_nonce,
+        didSave,
+        temp: false,
+        error: normalized || (e as any),
+      };
 
-      const fallbackText = buildFallbackCoachText(didSave);
-      const fallbackMeta = { stage: "planner_failed", client_nonce, didSave, temp: false, error: ne };
-
-      const ins = await insertCoachMessage({ supabase, threadId, userId: user.id, body: fallbackText, meta: fallbackMeta });
+      const ins = await insertCoachMessage(supabaseAdmin, {
+        thread_id: threadId,
+        author_id: user.id,
+        body: errText,
+        stage: "planner_failed",
+        meta: fallbackMeta,
+      });
 
       return NextResponse.json(
         {
           threadId,
           userMessage,
           coachMessage:
-            ins.row ??
+            ins.data ??
             ({
               id: "temp-coach",
               thread_id: threadId,
               author_id: user.id,
               type: "coach",
-              body: fallbackText,
+              body: errText,
               meta: { ...fallbackMeta, temp: true },
               created_at: new Date().toISOString(),
             } as any),
-          dbg: IS_DEV ? { stage: "planner_failed", error: ne } : undefined,
+          dbg: IS_DEV ? { stage: "planner_failed", error: normalized || e, has_openai_key: HAS_OPENAI_KEY } : undefined,
         },
         { status: 200 }
       );
     }
 
     // 6.1) Apply memory patch
+    stage = "apply_memory_patch";
     if (planner?.memory_patch && Object.keys(planner.memory_patch).length) {
-      // ✅ Пишем в coach_memory_items через RPC (source of truth)
-      await applyPlannerMemoryPatch({
+      await applyMemoryPatch({
         supabase,
         patch: planner.memory_patch,
         sourceRef: `thread:${threadId}`,
-        source: "user",
-        goalId: null,
-        sport: null,
       });
 
-      // (опционально) оставляем легаси-кэш в coach_threads.meta.memory, чтобы ничего не ломать в старых местах UI
       const nextLegacy = {
         ...(legacyThreadMemory ?? {}),
         ...planner.memory_patch,
@@ -381,6 +564,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 6.2) Intent routing
+    stage = "intent_routing";
     const routed = routeIntent({
       planner,
       dialogState,
@@ -401,7 +585,7 @@ export async function POST(req: NextRequest) {
           source: "api/coach/send",
           stage: "clarify_only",
           planner,
-          client_nonce, // ✅ важно для дедупликации optimistic/temp на фронте
+          client_nonce,
         };
 
         const { data: coachMsgRow, error: coachMsgErr } = await supabase
@@ -446,7 +630,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 8) Enrich context with plannerNeeds window (optional re-fetch)
-    // If planner asked different window/limit, rebuild context for responder/fast-path accuracy.
+    stage = "build_context_planner_needs";
     const context2 = await buildCoachContext({
       supabase,
       userId: user.id,
@@ -454,21 +638,20 @@ export async function POST(req: NextRequest) {
       plannerNeeds: planner.needs,
     });
 
-    // ✅ Обновим память для responder из актуального источника (coach_memory_items),
-    // чтобы сразу учитывалась свежезаписанная memory_patch.
-    const memV1b = await loadCoachMemoryV1({
+    stage = "load_memory_top_2";
+    const memTop2 = await loadMemoryTopDirect({
       supabase,
+      userId: user.id,
       category: null,
       goalId: null,
       sport: null,
-      limit: 50,
+      limit: 30,
       minImportance: 1,
-      minConfidence: 0,
-      status: "active",
-      query: null,
     });
+    const memoryTopForLLM2 = normalizeMemoryForLLM(memTop2?.items ?? []);
 
     // 9) Fast-path
+    stage = "fast_path_check";
     const fp = planner.fast_path;
     if (fp?.enabled && fp.kind) {
       const fastAnswer = buildFastPathAnswer(
@@ -481,7 +664,7 @@ export async function POST(req: NextRequest) {
       const coachMeta = {
         model: "fast_path_no_llm",
         source: "api/coach/send",
-        client_nonce, // ✅ важно для дедупликации optimistic/temp на фронте
+        client_nonce,
         fast_path: fp,
         used_workout_ids: context2.workouts.map((w: any) => w.id).filter(Boolean),
         workouts_window_days: fp.window_days ?? planner.needs.workouts_window_days ?? 14,
@@ -515,6 +698,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 10) Responder
+    stage = "responder";
     let answer = "";
     let responderError: string | null = null;
 
@@ -523,27 +707,27 @@ export async function POST(req: NextRequest) {
         openai,
         userText: finalText,
         planner,
-        threadMemory: Object.keys(memV1b ?? {}).length ? memV1b : (context2.memory ?? null),
+        threadMemory: mergeLegacyMemory(memoryTopForLLM2, context2.memory ?? null),
         workouts: context2.workouts ?? [],
         coachHome: context2.coachHome ?? null,
         recentHistory,
       });
     } catch (e) {
-      console.error("coach_send: responder_failed", e);
-      responderError = String(e);
+      // --- Новый блок обработки ошибок OpenAI/responder ---
+      const normalized = normalizeAIError(e);
+      console.error("coach_send: responder_failed", normalized || e);
+      responderError = normalized ? String(normalized.message || normalized.type || normalized.error) : String(e);
 
+      let fallbackAnswer = "";
       // 🔥 LOCAL FALLBACK FOR ANALYSIS QUESTIONS
       const workouts = context2 && context2.workouts ? context2.workouts : [];
       if (planner.intent === "analysis" && workouts.length > 0) {
         const local = buildLocalWorkoutAnalysis(workouts[0]);
-        if (local) {
-          answer = local;
-        } else {
-          answer = buildFallbackCoachText(didSave);
-        }
+        fallbackAnswer = local || buildFallbackCoachText(didSave);
       } else {
-        answer = buildFallbackCoachText(didSave);
+        fallbackAnswer = userFacingAIErrorText(normalized) || buildFallbackCoachText(didSave);
       }
+      answer = fallbackAnswer;
     }
 
     const coachMeta = {
@@ -561,16 +745,18 @@ export async function POST(req: NextRequest) {
       responder_error: IS_DEV ? responderError : null,
     };
 
-    const { row: coachMsgRow, error: coachMsgErr } = await insertCoachMessage({
-      supabase,
-      threadId,
-      userId: user.id,
+    // Note: insertCoachMessage altered API: thread_id, body, stage, meta
+    stage = "insert_coach_message";
+    const ins = await insertCoachMessage(supabaseAdmin, {
+      thread_id: threadId,
+      author_id: user.id,
       body: answer,
+      stage: "answer",
       meta: { ...(coachMeta as any), reply_to: userMessage.id },
     });
 
-    if (coachMsgErr || !coachMsgRow) {
-      console.error("coach_send: coach_message_insert_error", coachMsgErr);
+    if (ins.error || !ins.data) {
+      console.error("coach_send: coach_message_insert_error", ins.error);
       return NextResponse.json(
         {
           error: "coach_message_insert_failed",
@@ -587,9 +773,9 @@ export async function POST(req: NextRequest) {
           },
           dbg: IS_DEV
             ? {
-                code: (coachMsgErr as any)?.code ?? null,
-                message: (coachMsgErr as any)?.message ?? null,
-                details: (coachMsgErr as any)?.details ?? null,
+                code: (ins.error as any)?.code ?? null,
+                message: (ins.error as any)?.message ?? null,
+                details: (ins.error as any)?.details ?? null,
               }
             : undefined,
         },
@@ -597,21 +783,46 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return NextResponse.json({ threadId, userMessage, coachMessage: coachMsgRow }, { status: 200 });
+    return NextResponse.json({ threadId, userMessage, coachMessage: ins.data }, { status: 200 });
   } catch (err) {
-    console.error("coach_send: unexpected_error", err);
+    // ВАЖНО: тут мы и падали — теперь покажем СТАДИЮ и ошибку
+    console.error("coach_send: unexpected_error", { stage, err: util.inspect(err, { depth: 6 }) });
 
     if (insertedUserMsg && insertedThreadId && insertedUserId) {
       const didSave = didSaveToWorkoutDescription(insertedUserMsg.meta);
       try {
-        const supabase = await createSupabaseServerClient();
         const fallbackText = buildFallbackCoachText(didSave);
-        const fallbackMeta = { stage: "internal_error_after_user_insert", didSave, temp: false };
-        const ins = await insertCoachMessage({
-          supabase,
-          threadId: insertedThreadId,
-          userId: insertedUserId,
+        const fallbackMeta = {
+          stage: "internal_error_after_user_insert",
+          failed_stage: stage,
+          didSave,
+          temp: false,
+          // в dev кладём ошибку в meta, чтобы видеть в Supabase (аккуратно)
+          error: IS_DEV ? (err as any)?.message ?? String(err) : undefined,
+        };
+        // dedup: has there already been a recent identical fallback for this error in this thread?
+        const existing = await findRecentSameFallback(supabaseAdmin, {
+          thread_id: insertedThreadId,
+          windowSeconds: 180, // 3 минуты, чтобы не засорять
+        });
+        if (existing) {
+          return NextResponse.json(
+            {
+              threadId: insertedThreadId,
+              userMessage: insertedUserMsg,
+              coachMessage: existing,
+              deduped: true,
+              dbg: IS_DEV ? { stage, error: (err as any)?.message ?? String(err) } : undefined,
+            },
+            { status: 200 }
+          );
+        }
+
+        const ins = await insertCoachMessage(supabaseAdmin, {
+          thread_id: insertedThreadId,
+          author_id: insertedUserId,
           body: fallbackText,
+          stage: "internal_error_after_user_insert",
           meta: fallbackMeta,
         });
 
@@ -620,7 +831,7 @@ export async function POST(req: NextRequest) {
             threadId: insertedThreadId,
             userMessage: insertedUserMsg,
             coachMessage:
-              ins.row ??
+              ins.data ??
               ({
                 id: "temp-coach",
                 thread_id: insertedThreadId,
@@ -630,10 +841,11 @@ export async function POST(req: NextRequest) {
                 meta: { ...fallbackMeta, temp: true },
                 created_at: new Date().toISOString(),
               } as any),
+            dbg: IS_DEV ? { stage, error: (err as any)?.message ?? String(err) } : undefined,
           },
           { status: 200 }
         );
-      } catch {
+      } catch (e) {
         return NextResponse.json(
           {
             threadId: insertedThreadId,
@@ -647,6 +859,7 @@ export async function POST(req: NextRequest) {
               meta: { temp: true, error: "internal_error_after_user_insert", didSave },
               created_at: new Date().toISOString(),
             },
+            dbg: IS_DEV ? { stage, error: (err as any)?.message ?? String(err) } : undefined,
           },
           { status: 200 }
         );

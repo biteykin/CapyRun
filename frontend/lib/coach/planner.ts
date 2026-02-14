@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { PlannerOut, PlannerSchema } from "./types";
 import { clamp, normalizeErr, safeJsonParse, safeStringify } from "./utils";
+// weekly_schedule parser is local (no-LLM)
 
 const DEFAULT_NEEDS: PlannerOut["needs"] = {
   workouts_window_days: 14,
@@ -38,7 +39,7 @@ function parseDateRangeWindowDays(text: string): number | null {
     from = new Date(`${dot[3]}-${mm}-${dd}T00:00:00Z`);
   }
 
-  const ru = t.match(/с\s+(\d{1,2})\s+(январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр)\w*\s+(\d{4})/);
+  const ru = t.match(/с\s+(\д{1,2})\s+(январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр)\w*\s+(\d{4})/);
   if (!from && ru) {
     const day = Number(ru[1]);
     const year = Number(ru[3]);
@@ -231,6 +232,82 @@ function parseWindowDaysFromText(text: string): number | null {
   return null;
 }
 
+// -----------------------------
+// Weekly schedule parser (RU days -> ['mon'..'sun'])
+// Examples:
+//  - "я бегаю вт/чт/сб, офп вс"
+//  - "бег: вторник, четверг, суббота; офп: воскресенье"
+//  - "run вт чт сб, офп вc"
+// -----------------------------
+function parseWeeklyScheduleFromText(
+  text: string
+): { run_days?: string[]; ofp_days?: string[] } | null {
+  const t = (text ?? "").toLowerCase();
+  if (!t) return null;
+
+  const dayMap: Array<[RegExp, string]> = [
+    [/\bпн\b|\bпонед/i, "mon"],
+    [/\bвт\b|\bвтор/i, "tue"],
+    [/\bср\b|\bсред/i, "wed"],
+    [/\bчт\b|\bчетв/i, "thu"],
+    [/\bпт\b|\bпят/i, "fri"],
+    [/\bсб\b|\bсубб/i, "sat"],
+    [/\bвс\b|\bвоскр/i, "sun"],
+  ];
+
+  const extractDays = (chunk: string): string[] => {
+    const out: string[] = [];
+    for (const [re, code] of dayMap) {
+      if (re.test(chunk)) out.push(code);
+    }
+    // unique keep order
+    return [...new Set(out)];
+  };
+
+  // split by separators to detect "run part" and "ofp part"
+  // heuristics: find part after keywords
+  const runKw = /(бегаю|бег|run)\b/;
+  const ofpKw = /(офп|о\.?ф\.?п\.?|силов|strength)\b/;
+
+  let runPart = "";
+  let ofpPart = "";
+
+  // try explicit segments
+  // e.g. "run вт/чт/сб, офп вс"
+  const parts = t.split(/[;|]/g).map((s) => s.trim()).filter(Boolean);
+  for (const p of parts) {
+    if (!runPart && runKw.test(p)) runPart = p;
+    if (!ofpPart && ofpKw.test(p)) ofpPart = p;
+  }
+
+  // if not found, try comma-separated
+  if (!runPart || !ofpPart) {
+    const parts2 = t.split(/[,]+/g).map((s) => s.trim()).filter(Boolean);
+    for (const p of parts2) {
+      if (!runPart && runKw.test(p)) runPart = p;
+      if (!ofpPart && ofpKw.test(p)) ofpPart = p;
+    }
+  }
+
+  // fallback: if text includes both keywords but segments not isolated, take whole text
+  if (!runPart && runKw.test(t)) runPart = t;
+  if (!ofpPart && ofpKw.test(t)) ofpPart = t;
+
+  const runDays = runPart ? extractDays(runPart) : [];
+  const ofpDays = ofpPart ? extractDays(ofpPart) : [];
+
+  // only accept if at least one side has days AND mentions the corresponding keyword
+  const hasRun = runDays.length > 0 && runKw.test(t);
+  const hasOfp = ofpDays.length > 0 && ofpKw.test(t);
+
+  if (!hasRun && !hasOfp) return null;
+
+  const res: any = {};
+  if (hasRun) res.run_days = runDays;
+  if (hasOfp) res.ofp_days = ofpDays;
+  return res;
+}
+
 function localFastPathFromText(userText: string): PlannerOut | null {
   const t = (userText ?? "").trim().toLowerCase();
   if (!t) return null;
@@ -324,6 +401,8 @@ export async function runPlanner(args: {
 }): Promise<PlannerOut> {
   const { userText, threadMemory, recentHistory, openai } = args;
 
+  const weekly = parseWeeklyScheduleFromText(userText);
+
   // ---------------------------------------------------------------------------
   // EARLY RULES (no LLM): calendar range stats like "в январе 2026" / "с 01.01.2026 по 31.01.2026"
   // Returns BOTH count of workouts and total distance for that range.
@@ -411,6 +490,13 @@ export async function runPlanner(args: {
   // --- LOCAL ROUTER: "с 1 января ..." / "итого км" ---
   const rangeDays = parseDateRangeWindowDays(t);
 
+  // If user stated weekly schedule, persist it via memory_patch.
+  // We don't force an answer here; we just enrich memory for next planning.
+  if (weekly) {
+    // We'll continue normal routing, but add memory_patch for LLM planner or local planners.
+    // If we exit early via local planners below, they will include this memory_patch too.
+  }
+
   // "километраж с ... по сегодня" -> суммарная дистанция по run
   if (rangeDays && (t.includes("километраж") || t.includes("суммар") || t.includes("сколько пробеж"))) {
     return {
@@ -419,18 +505,31 @@ export async function runPlanner(args: {
       clarify_question: null,
       needs: { ...DEFAULT_NEEDS, workouts_window_days: rangeDays, workouts_limit: 100 },
       fast_path: { enabled: true, kind: "sum_distance_run", window_days: rangeDays },
-      memory_patch: {},
+      memory_patch: weekly ? ({ weekly_schedule: weekly } as any) : {},
       debug: { rationale_short: "local_date_range_sum_distance_run" },
     };
   }
 
   // 0) быстрые локальные роуты (улучшают UX и экономят токены)
   const localFp = localFastPathFromText(userText);
-  if (localFp) return localFp;
+  if (localFp) {
+    if (weekly) {
+      localFp.memory_patch = { ...(localFp.memory_patch ?? {}), weekly_schedule: weekly } as any;
+    }
+    return localFp;
+  }
 
   // 1) локальная обработка продолжения диалога ("легко/норм/тяжело" после вопроса тренера)
   const cont = localContinuationPlanner(userText, recentHistory);
-  if (cont) return cont;
+  if (cont) {
+    if (weekly) {
+      cont.memory_patch = { ...(cont.memory_patch ?? {}), weekly_schedule: weekly } as any;
+    }
+    return cont;
+  }
+
+  // If weekly schedule exists but no other local routing matched,
+  // we still want LLM planner to see it and possibly reply with plan using it.
 
   // 2) LLM planner — только когда локально не смогли уверенно решить
   const plannerSystem = [
@@ -503,7 +602,7 @@ export async function runPlanner(args: {
       clarify_question: null,
       needs: { ...DEFAULT_NEEDS },
       fast_path: { enabled: false },
-      memory_patch: {},
+      memory_patch: weekly ? ({ weekly_schedule: weekly } as any) : {},
       debug: { rationale_short: "planner_parse_failed_fallback" },
     };
   }
@@ -534,6 +633,10 @@ export async function runPlanner(args: {
     if (out.intent !== "simple_fact") {
       out.fast_path = { enabled: false };
     }
+  }
+
+  if (weekly) {
+    out.memory_patch = { ...(out.memory_patch ?? {}), weekly_schedule: weekly } as any;
   }
 
   return out;

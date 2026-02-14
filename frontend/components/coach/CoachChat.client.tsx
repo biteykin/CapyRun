@@ -174,7 +174,11 @@ export default function CoachChat(props: {
 
   // markRead isn't strictly needed anymore for read-on-open, but we keep for manual "mark read" button
   const markRead = React.useCallback(async () => {
-    await supabase.rpc("coach_mark_thread_read", { p_thread_id: threadId });
+    const { error } = await supabase.rpc("coach_mark_thread_read", { p_thread_id: threadId });
+    if (error) {
+      // best-effort: read receipt не должен ломать отправку/UX
+      console.warn("[coach] mark read failed", error);
+    }
   }, [threadId]);
 
   // Загрузка истории — пример реализации для дальнейшей интеграции при необходимости
@@ -214,6 +218,8 @@ export default function CoachChat(props: {
     try {
       const res = await fetch("/api/coach/send", {
         method: "POST",
+        // важно: Supabase auth живёт в cookie, на некоторых сетапах без include куки не улетают
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ threadId, text: trimmed, client_nonce }),
       });
@@ -224,10 +230,16 @@ export default function CoachChat(props: {
         threadId: string;
         userMessage: RawMessage;
         coachMessage?: RawMessage;
+        dbg?: any;
       };
 
       const userMsg = data.userMessage as RawMessage;
       const coachMsg = data.coachMessage as RawMessage | undefined;
+
+      // Если бэк прислал dbg — покажем в консоль (помогает понять, почему "заглушка")
+      if (data?.dbg) {
+        console.warn("[coach] /api/coach/send dbg", data.dbg);
+      }
 
       // ВАЖНО:
       // 1) гарантируем, что у server userMessage в meta сохранён client_nonce (у вас он вставляется в route.ts)
@@ -250,7 +262,12 @@ export default function CoachChat(props: {
       setMessages((prev) => mergeDedup(prev, newMsgs));
 
       // we are in the chat, so we consider it read
-      await markRead();
+      // best-effort: read receipt не должен ломать чат
+      try {
+        await markRead();
+      } catch (e) {
+        console.warn("[coach] markRead threw", e);
+      }
       // optional: мягкий refetch истории, если нужно
       // await loadHistory();
     } catch (e) {

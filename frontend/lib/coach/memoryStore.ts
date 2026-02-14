@@ -1,259 +1,169 @@
 // frontend/lib/coach/memoryStore.ts
-// Memory Engine v1: read/write structured coach memory via coach_memory_items + RPC.
-//
-// Source of truth: public.coach_memory_items
-// Read: RPC get_coach_memory_top(...)
-// Write: RPC upsert_coach_memory_item(...)
 
-export type CoachMemoryV1 = {
-    goal?: string;
-    constraints?: string;
-    injury?: string;
-  
-    preferred_days_per_week?: number;
-    preferred_session_minutes?: number;
-  
-    sports_focus?: string[];
-  };
-  
-  type RpcMemoryRow = {
-    category: string;
-    key: string;
-    value_text: string | null;
-    value_json: any | null;
-    importance: number;
-    confidence: string | number;
-    status: string;
-    source?: string | null;
-    source_ref?: string | null;
-    updated_at?: string | null;
-    created_at?: string | null;
-  };
-  
-  function asFiniteNumber(v: any): number | null {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
+type MemoryTopItem = {
+  id: string;
+  category: string;
+  key: string;
+  value_text: string | null;
+  value_json: any | null;
+  importance: number;
+  confidence: number;
+  status: string;
+  source: string;
+  source_ref: string | null;
+  updated_at: string;
+};
+
+export function normalizeMemoryForLLM(items: MemoryTopItem[]) {
+  const out: Record<string, any> = {};
+  for (const it of items ?? []) {
+    const cat = (it.category ?? "other").toLowerCase();
+    const key = (it.key ?? "").toString();
+    if (!key) continue;
+    out[cat] = out[cat] ?? {};
+    out[cat][key] = it.value_json ?? it.value_text ?? null;
   }
-  
-  function normKey(s: any): string {
-    return String(s ?? "").toLowerCase().trim();
-  }
-  
-  /**
-   * Loads "top" memory items for current user (auth.uid()) and converts to a compact memory object.
-   * We rely on SECURITY DEFINER RPC that checks auth.uid() inside.
-   */
-  export async function loadCoachMemoryV1(args: {
-    supabase: any;
-    category?: string | null;
-    goalId?: string | null;
-    sport?: string | null;
-    limit?: number;
-    minImportance?: number;
-    minConfidence?: number;
-    status?: string | null;
-    query?: string | null;
-  }): Promise<CoachMemoryV1> {
+  return out;
+}
+
+// Backward-compat: used by lib/coach/context.ts
+// Returns normalized memory object suitable for LLM context
+export async function loadCoachMemoryV1(args: {
+  supabase: any;
+  userId: string;
+  limit?: number;
+  category?: string | null;
+  goalId?: string | null;
+  sport?: string | null;
+  minImportance?: number;
+}) {
+  const { supabase, userId, limit = 50, category = null, goalId = null, sport = null, minImportance = 1 } = args;
+
+  const { items, error } = await loadMemoryTopDirect({
+    supabase,
+    userId,
+    category,
+    goalId,
+    sport,
+    limit,
+    minImportance,
+  });
+
+  if (error) return null;
+  return normalizeMemoryForLLM(items);
+}
+
+export async function loadMemoryTopDirect(args: {
+  supabase: any;
+  userId: string;
+  category?: string | null;
+  goalId?: string | null;
+  sport?: string | null;
+  limit?: number;
+  minImportance?: number;
+}) {
+  try {
     const {
       supabase,
+      userId,
       category = null,
       goalId = null,
       sport = null,
-      limit = 50,
+      limit = 30,
       minImportance = 1,
-      minConfidence = 0,
-      status = "active",
-      query = null,
     } = args;
-  
-    const { data, error } = await supabase.rpc("get_coach_memory_top", {
-      p_category: category,
-      p_goal_id: goalId,
-      p_sport: sport,
-      p_limit: limit,
-      p_min_importance: minImportance,
-      p_min_confidence: minConfidence,
-      p_status: status,
-      p_query: query,
-    });
-  
+
+    let q = supabase
+      .from("coach_memory_items")
+      .select("id, category, key, value_text, value_json, importance, confidence, status, source, source_ref, updated_at")
+      .eq("user_id", userId)
+      .eq("status", "active")
+      .gte("importance", Math.max(1, Math.min(5, Number(minImportance) || 1)))
+      .order("importance", { ascending: false })
+      .order("confidence", { ascending: false })
+      .order("updated_at", { ascending: false })
+      .limit(Math.max(1, Math.min(100, Number(limit) || 30)));
+
+    if (category && String(category).trim()) q = q.eq("category", String(category).trim().toLowerCase());
+    if (goalId) q = q.eq("goal_id", goalId);
+    if (sport && String(sport).trim()) q = q.eq("sport", String(sport).trim());
+
+    const { data, error } = await q;
+
     if (error) {
-      console.error("loadCoachMemoryV1: rpc_failed", error);
-      return {};
+      console.error("memoryStore: loadMemoryTopDirect_failed", error);
+      return { items: [], error };
     }
-  
-    const rows: RpcMemoryRow[] = Array.isArray(data) ? data : [];
-    const mem: CoachMemoryV1 = {};
-  
-    for (const r of rows) {
-      const k = normKey(r.key);
-      if (!k) continue;
-  
-      // text fields
-      if (k === "goal" && r.value_text) mem.goal = r.value_text;
-      if (k === "constraints" && r.value_text) mem.constraints = r.value_text;
-      if (k === "injury" && r.value_text) mem.injury = r.value_text;
-  
-      // numeric fields (stored as value_json:{value:int} OR value_text)
-      if (k === "preferred_days_per_week") {
-        const v = r.value_json?.value ?? r.value_text;
-        const n = asFiniteNumber(v);
-        if (n != null) mem.preferred_days_per_week = Math.trunc(n);
-      }
-  
-      if (k === "preferred_session_minutes") {
-        const v = r.value_json?.value ?? r.value_text;
-        const n = asFiniteNumber(v);
-        if (n != null) mem.preferred_session_minutes = Math.trunc(n);
-      }
-  
-      // arrays
-      if (k === "sports_focus") {
-        const arr = Array.isArray(r.value_json) ? r.value_json : null;
-        if (arr) mem.sports_focus = arr.map((x) => String(x)).filter(Boolean);
-      }
-    }
-  
-    return mem;
+
+    return { items: data ?? [], error: null };
+  } catch (e) {
+    console.error("memoryStore: loadMemoryTopDirect_crash", e);
+    return { items: [], error: e };
   }
-  
-  function mapPatchKeyToStore(key: keyof CoachMemoryV1): {
-    category: string;
-    storeKey: string;
-    importance: number;
-    confidence: number;
-    asJson: boolean;
-  } {
-    switch (key) {
-      case "goal":
-        return { category: "profile", storeKey: "goal", importance: 4, confidence: 0.85, asJson: false };
-      case "constraints":
-        return { category: "profile", storeKey: "constraints", importance: 4, confidence: 0.85, asJson: false };
-      case "injury":
-        return { category: "health", storeKey: "injury", importance: 5, confidence: 0.85, asJson: false };
-  
-      case "preferred_days_per_week":
-        return {
-          category: "preferences",
-          storeKey: "preferred_days_per_week",
-          importance: 4,
-          confidence: 0.9,
-          asJson: true,
-        };
-      case "preferred_session_minutes":
-        return {
-          category: "preferences",
-          storeKey: "preferred_session_minutes",
-          importance: 4,
-          confidence: 0.9,
-          asJson: true,
-        };
-      case "sports_focus":
-        return { category: "preferences", storeKey: "sports_focus", importance: 3, confidence: 0.8, asJson: true };
-  
-      default:
-        return { category: "profile", storeKey: String(key), importance: 3, confidence: 0.75, asJson: false };
-    }
-  }
-  
-  /**
-   * Applies planner.memory_patch into coach_memory_items using RPC upsert_coach_memory_item.
-   * This is an UPSERT by (user_id, category, key) enforced by DB unique index.
-   */
-  export async function applyPlannerMemoryPatch(args: {
-    supabase: any;
-    patch: any;
-    sourceRef?: string | null;
-    source?: string | null;
-    // Optional: if you later want goal-specific memory
-    goalId?: string | null;
-    sport?: string | null;
-  }) {
-    const {
-      supabase,
-      patch,
-      sourceRef = "planner_memory_patch",
-      source = "user",
-      goalId = null,
-      sport = null,
-    } = args;
-  
-    if (!patch || typeof patch !== "object") return;
-  
-    const keys = Object.keys(patch) as (keyof CoachMemoryV1)[];
-    for (const k of keys) {
-      const v = (patch as any)[k];
-      if (v == null) continue;
-  
-      const m = mapPatchKeyToStore(k);
-  
-      // Build value_text/value_json according to mapping
-      const value_text =
-        m.asJson
-          ? null
-          : typeof v === "string"
-            ? v.slice(0, 500)
-            : String(v).slice(0, 500);
-  
-      let value_json: any = null;
-      if (m.asJson) {
-        if (k === "preferred_days_per_week" || k === "preferred_session_minutes") {
-          const n = asFiniteNumber(v);
-          if (n == null) continue;
-          value_json = { value: Math.trunc(n) };
-        } else if (k === "sports_focus") {
-          value_json = Array.isArray(v) ? v : [String(v)];
-        } else {
-          value_json = v;
-        }
-      }
-  
-      const { error } = await supabase.rpc("upsert_coach_memory_item", {
-        p_category: m.category,
-        p_key: m.storeKey,
-        p_value_text: value_text,
-        p_value_json: value_json,
-        p_importance: m.importance,
-        p_confidence: m.confidence,
+}
+
+export function mergeLegacyMemory(typed: any, legacy: any | null) {
+  // typed имеет приоритет, legacy — как fallback/добавка
+  const a = typed && typeof typed === "object" ? typed : {};
+  const b = legacy && typeof legacy === "object" ? legacy : {};
+  return { ...b, ...a };
+}
+
+export async function applyMemoryPatch(args: {
+  supabase: any;
+  patch: any;
+  sourceRef?: string | null;
+}) {
+  const { supabase, patch, sourceRef = null } = args;
+  const p = patch ?? {};
+  const calls: Array<Promise<any>> = [];
+
+  const upsert = (category: string, key: string, valueText?: string | null, valueJson?: any, importance = 4) => {
+    calls.push(
+      supabase.rpc("upsert_coach_memory_item", {
+        p_category: category,
+        p_key: key,
+        p_value_text: valueText ?? null,
+        p_value_json: valueJson ?? null,
+        p_importance: importance,
+        p_confidence: 0.85,
         p_status: "active",
-        p_goal_id: goalId,
-        p_sport: sport,
-        p_valid_from: null,
+        p_goal_id: null,
+        p_sport: null,
+        p_valid_from: new Date().toISOString(),
         p_valid_to: null,
         p_last_confirmed_at: new Date().toISOString(),
-        p_source: source,
+        p_source: "user",
         p_source_ref: sourceRef,
-      });
-  
-      if (error) {
-        console.error("applyPlannerMemoryPatch: upsert_failed", { key: k, mapped: m, error });
-      }
-    }
+      })
+    );
+  };
+
+  if (typeof p.goal === "string" && p.goal.trim()) upsert("profile", "goal", p.goal.trim(), null, 5);
+  if (typeof p.constraints === "string" && p.constraints.trim()) upsert("profile", "constraints", p.constraints.trim(), null, 4);
+  if (typeof p.injury === "string" && p.injury.trim()) upsert("health", "injury", p.injury.trim(), null, 5);
+
+  if (Number.isFinite(Number(p.preferred_days_per_week))) {
+    upsert("preferences", "preferred_days_per_week", null, { value: Number(p.preferred_days_per_week) }, 4);
   }
-  
-  /**
-   * Optional helper for quick debug: returns the raw rows (top memory items).
-   */
-  export async function debugGetCoachMemoryRows(args: {
-    supabase: any;
-    category?: string | null;
-    limit?: number;
-  }): Promise<RpcMemoryRow[]> {
-    const { supabase, category = null, limit = 50 } = args;
-    const { data, error } = await supabase.rpc("get_coach_memory_top", {
-      p_category: category,
-      p_goal_id: null,
-      p_sport: null,
-      p_limit: limit,
-      p_min_importance: 1,
-      p_min_confidence: 0,
-      p_status: "active",
-      p_query: null,
-    });
-  
-    if (error) {
-      console.error("debugGetCoachMemoryRows: rpc_failed", error);
-      return [];
-    }
-    return Array.isArray(data) ? (data as RpcMemoryRow[]) : [];
+  if (Number.isFinite(Number(p.preferred_session_minutes))) {
+    upsert("preferences", "preferred_session_minutes", null, { value: Number(p.preferred_session_minutes) }, 4);
   }
+  if (Array.isArray(p.sports_focus) && p.sports_focus.length) {
+    upsert("preferences", "sports_focus", null, p.sports_focus.slice(0, 10), 3);
+  }
+
+  // weekly_schedule (если когда-то научим planner вытаскивать)
+  if (p.weekly_schedule && typeof p.weekly_schedule === "object") {
+    upsert("preferences", "weekly_schedule", null, p.weekly_schedule, 5);
+  }
+
+  if (!calls.length) return { ok: true };
+  const results = await Promise.allSettled(calls);
+  const failed = results.find((r) => r.status === "rejected");
+  if (failed) {
+    console.error("memoryStore: applyMemoryPatch_failed", failed);
+    return { ok: false };
+  }
+  return { ok: true };
+}
