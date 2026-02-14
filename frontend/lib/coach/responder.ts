@@ -1,6 +1,8 @@
+// lib/coach/responder.ts
 import OpenAI from "openai";
 import { PlannerOut, WorkoutFact } from "./types";
 import { safeStringify } from "./utils";
+import { COACH_MODELS } from "./modelConfig";
 
 type WeeklySchedule = {
   run_days?: string[];
@@ -186,7 +188,7 @@ export async function runResponder(args: {
   );
 
   const completion = await openai.chat.completions.create({
-    model: "gpt-4.1-mini",
+    model: COACH_MODELS.responder,
     temperature: 0.2,
     max_tokens: 650,
     messages: [

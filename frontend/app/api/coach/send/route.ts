@@ -4,6 +4,7 @@ import util from "node:util";
 import "server-only";
 
 import { runPlanner } from "@/lib/coach/planner";
+import { COACH_MODELS } from "@/lib/coach/modelConfig";
 import { runResponder } from "@/lib/coach/responder";
 import { buildFastPathAnswer } from "@/lib/coach/fastPath";
 import { buildCoachContext } from "@/lib/coach/context";
@@ -581,7 +582,7 @@ export async function POST(req: NextRequest) {
           "Подскажи, пожалуйста, чуть больше деталей — что именно ты хочешь получить от тренера?";
 
         const coachMeta = {
-          model: "gpt-4.1-mini",
+          model: COACH_MODELS.responder,
           source: "api/coach/send",
           stage: "clarify_only",
           planner,
@@ -731,7 +732,7 @@ export async function POST(req: NextRequest) {
     }
 
     const coachMeta = {
-      model: "gpt-4.1-mini",
+      model: COACH_MODELS.responder,
       source: "api/coach/send",
       stage: "answer",
       planner,

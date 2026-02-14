@@ -1,3 +1,4 @@
+// frontend/lib/coach/context.ts
 import { clamp } from "./utils";
 import { PlannerOut, WorkoutFact } from "./types";
 import { loadCoachMemoryV1 } from "@/lib/coach/memoryStore";

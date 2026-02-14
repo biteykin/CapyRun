@@ -1,3 +1,5 @@
+// frontend/lib/coach/utils.ts
+
 import type { WorkoutFact } from "@/lib/coach/types";
 
 // -----------------------------

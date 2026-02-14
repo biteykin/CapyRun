@@ -1,6 +1,8 @@
+// lib/coach/planner.ts
 import OpenAI from "openai";
 import { PlannerOut, PlannerSchema } from "./types";
 import { clamp, normalizeErr, safeJsonParse, safeStringify } from "./utils";
+import { COACH_MODELS } from "./modelConfig";
 // weekly_schedule parser is local (no-LLM)
 
 const DEFAULT_NEEDS: PlannerOut["needs"] = {
@@ -39,7 +41,7 @@ function parseDateRangeWindowDays(text: string): number | null {
     from = new Date(`${dot[3]}-${mm}-${dd}T00:00:00Z`);
   }
 
-  const ru = t.match(/с\s+(\д{1,2})\s+(январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр)\w*\s+(\d{4})/);
+  const ru = t.match(/с\s+(\д{1,2})\s+(январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр)\w*\s+(\д{4})/);
   if (!from && ru) {
     const day = Number(ru[1]);
     const year = Number(ru[3]);
@@ -577,7 +579,7 @@ export async function runPlanner(args: {
   let completion: any;
   try {
     completion = await openai.chat.completions.create({
-      model: "gpt-4.1-mini",
+      model: COACH_MODELS.planner,
       temperature: 0.1,
       max_tokens: 450,
       messages: [
