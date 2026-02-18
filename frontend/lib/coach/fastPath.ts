@@ -1,6 +1,14 @@
-// frontend/lib/coach/fastPath.ts
 import { PlannerOut, WorkoutFact } from "./types";
 import { fmtDateIsoToYMD, fmtKm, fmtSecToMinSec } from "./utils";
+
+type WorkoutInsight = {
+  content_md?: string | null;
+  summary?: string | null;
+  title?: string | null;
+  created_at?: string | null;
+};
+
+type FastPathInsightsMap = Record<string, WorkoutInsight | undefined>;
 
 function sumKm(workouts: WorkoutFact[]) {
   const m = workouts
@@ -39,7 +47,8 @@ export function buildFastPathAnswer(
   windowDays: number,
   nth?: number,
   from_iso?: string,
-  to_iso?: string
+  to_iso?: string,
+  insightsByWorkoutId?: FastPathInsightsMap
 ) {
   if (kind === "count_workouts") {
     return `За последние ${windowDays} дней у тебя ${workouts.length} тренировок.`;
@@ -49,9 +58,7 @@ export function buildFastPathAnswer(
     const runs = workouts.filter((w) => isRun(w) && (safeNum(w.distance_m) ?? 0) > 0);
     if (!runs.length) return `Не вижу пробежек за последние ${windowDays} дней (нет данных).`;
     const km = sumKm(runs);
-    return `Суммарно пробежал(а) за последние ${windowDays} дней: ${km.toFixed(
-      1
-    )} км (по данным, которые вижу в приложении).`;
+    return `Суммарно пробежал(а) за последние ${windowDays} дней: ${km.toFixed(1)} км (по данным приложения).`;
   }
 
   if (kind === "range_workout_stats") {
@@ -64,11 +71,9 @@ export function buildFastPathAnswer(
     const inRange = workouts.filter((w) => inIsoRange(w.start_time, fromIso, toIso));
     const count = inRange.length;
 
-    // total distance for ANY workouts that have distance_m > 0
     const withDist = inRange.filter((w) => Number.isFinite(Number(w.distance_m)) && Number(w.distance_m) > 0);
     const totalKm = sumKm(withDist);
 
-    // run-only distance
     const runs = inRange.filter((w) => isRun(w) && Number.isFinite(Number(w.distance_m)) && Number(w.distance_m) > 0);
     const runKm = sumKm(runs);
 
@@ -78,13 +83,12 @@ export function buildFastPathAnswer(
     return [
       `С ${fromYmd} по ${toYmd}:`,
       `• Тренировок: ${count}`,
-      `• Суммарная дистанция (везде, где есть дистанция): ${totalKm.toFixed(1)} км`,
+      `• Суммарная дистанция (где есть дистанция): ${totalKm.toFixed(1)} км`,
       `• Из них бег: ${runKm.toFixed(1)} км`,
     ].join("\n");
   }
 
   if (kind === "nth_workout") {
-    // Если nth отсутствует или битый (NaN/Infinity/строка) — дефолт = 2 (предпоследняя).
     const parsed = toFiniteIntOrNull(nth);
     const raw = parsed ?? 2;
     const n = Math.max(1, Math.min(50, raw));
@@ -94,17 +98,21 @@ export function buildFastPathAnswer(
       return `Не нашёл(ла) тренировку #${n} с конца в окне ${windowDays} дней (всего в окне: ${workouts.length}).`;
     }
 
+    const workoutId = (w as any)?.id as string | undefined;
+    const insight = workoutId ? insightsByWorkoutId?.[workoutId] : undefined;
+    const md = (insight?.content_md ?? "").trim();
+    const summary = (insight?.summary ?? "").trim();
+
+    if (md) return md;
+    if (summary) return summary;
+
     return [
       `Тренировка #${n} с конца (в окне ${windowDays} дней):`,
       `• Дата: ${fmtDateIsoToYMD(w.start_time)}`,
       `• Спорт: ${w.sport ?? "нет данных"}`,
       `• Дистанция: ${fmtKm(w.distance_m)}`,
-      `• Длительность: ${w.duration_sec != null ? `${w.duration_sec} сек` : "нет данных"} (${fmtSecToMinSec(
-        w.duration_sec
-      )})`,
-      `• Moving time: ${w.moving_time_sec != null ? `${w.moving_time_sec} сек` : "нет данных"} (${fmtSecToMinSec(
-        w.moving_time_sec
-      )})`,
+      `• Длительность: ${w.duration_sec != null ? `${w.duration_sec} сек` : "нет данных"} (${fmtSecToMinSec(w.duration_sec)})`,
+      `• Время активности: ${w.moving_time_sec != null ? `${w.moving_time_sec} сек` : "нет данных"} (${fmtSecToMinSec(w.moving_time_sec)})`,
       `• Пульс: avg ${w.avg_hr ?? "нет данных"} / max ${w.max_hr ?? "нет данных"}`,
     ].join("\n");
   }
@@ -113,32 +121,47 @@ export function buildFastPathAnswer(
     const w = workouts[0];
     if (!w) return `За последние ${windowDays} дней тренировок не найдено.`;
 
-    const date = fmtDateIsoToYMD(w.start_time);
-    const sport = w.sport ?? "нет данных";
-    const dist = fmtKm(w.distance_m);
+    const workoutId = (w as any)?.id as string | undefined;
+    const insight = workoutId ? insightsByWorkoutId?.[workoutId] : undefined;
+    const md = (insight?.content_md ?? "").trim();
+    const summary = (insight?.summary ?? "").trim();
+
+    if (md) {
+      return [
+        md,
+        ``,
+        `Если хотим точнее — добавим ощущение (RPE 1–10) и цель этой тренировки (восстановительная / Z2 / темповая / интервалы).`,
+      ].join("\n");
+    }
+
+    if (summary) {
+      return [
+        summary,
+        ``,
+        `Как по ощущениям прошла тренировка — легко/норм/тяжело?`,
+      ].join("\n");
+    }
 
     const missing: string[] = [];
     if (w.moving_time_sec == null) missing.push("moving time");
     if (w.avg_hr == null && w.max_hr == null) missing.push("пульс");
 
     const coachy =
-      missing.length > 0 ? `Вижу тренировку, но в данных не хватает: ${missing.join(", ")}.` : `Ок, вижу последнюю активность.`;
+      missing.length > 0
+        ? `Вижу тренировку, но в данных не хватает: ${missing.join(", ")}.`
+        : `Ок, вижу последнюю активность.`;
 
     return [
       `Последняя тренировка (за последние ${windowDays} дней):`,
-      `• Дата: ${date}`,
-      `• Спорт: ${sport}`,
-      `• Дистанция: ${dist}`,
-      `• Длительность: ${w.duration_sec != null ? `${w.duration_sec} сек` : "нет данных"} (${fmtSecToMinSec(
-        w.duration_sec
-      )})`,
-      `• Moving time: ${w.moving_time_sec != null ? `${w.moving_time_sec} сек` : "нет данных"} (${fmtSecToMinSec(
-        w.moving_time_sec
-      )})`,
+      `• Дата: ${fmtDateIsoToYMD(w.start_time)}`,
+      `• Спорт: ${w.sport ?? "нет данных"}`,
+      `• Дистанция: ${fmtKm(w.distance_m)}`,
+      `• Длительность: ${w.duration_sec != null ? `${w.duration_sec} сек` : "нет данных"} (${fmtSecToMinSec(w.duration_sec)})`,
+      `• Время активности: ${w.moving_time_sec != null ? `${w.moving_time_sec} сек` : "нет данных"} (${fmtSecToMinSec(w.moving_time_sec)})`,
       `• Пульс: avg ${w.avg_hr ?? "нет данных"} / max ${w.max_hr ?? "нет данных"}`,
       ``,
       coachy,
-      `Как по ощущениям она прошла — легко/норм/тяжело?`,
+      `Опишите ощущения от тренировки (RPE 1–10) — мы будем советовать точнее.`,
     ].join("\n");
   }
 
@@ -150,14 +173,12 @@ export function buildFastPathAnswer(
     const same = withDist.filter((w) => Number(w.distance_m) === Number(max.distance_m));
 
     if (same.length > 1) {
-      return `Самая длинная тренировка за последние ${windowDays} дней — ${fmtKm(max.distance_m)} (их ${
-        same.length
-      }: ${same.map((w) => fmtDateIsoToYMD(w.start_time)).join(", ")}).`;
+      return `Самая длинная тренировка за последние ${windowDays} дней — ${fmtKm(max.distance_m)} (их ${same.length}: ${same
+        .map((w) => fmtDateIsoToYMD(w.start_time))
+        .join(", ")}).`;
     }
 
-    return `Самая длинная тренировка за последние ${windowDays} дней — ${fmtKm(max.distance_m)} (${fmtDateIsoToYMD(
-      max.start_time
-    )}).`;
+    return `Самая длинная тренировка за последние ${windowDays} дней — ${fmtKm(max.distance_m)} (${fmtDateIsoToYMD(max.start_time)}).`;
   }
 
   // list_workouts

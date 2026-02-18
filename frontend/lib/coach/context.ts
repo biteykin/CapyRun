@@ -53,23 +53,54 @@ export async function buildCoachContext(args: {
     (msgs ?? []).filter((m: any) => m.type === "user" || m.type === "coach");
 
   // ---- workouts
+
   const windowDays = clamp(plannerNeeds.workouts_window_days ?? 14, 1, 365);
   const limit = clamp(plannerNeeds.workouts_limit ?? 30, 1, 100);
   const fromIso = new Date(Date.now() - windowDays * 24 * 3600 * 1000).toISOString();
 
-  const { data: workoutsRaw, error: wErr } = await supabase
+  // 1) тренировки со start_time
+  const { data: withStart, error: wErr1 } = await supabase
     .from("workouts")
-    .select("id, sport, start_time, distance_m, duration_sec, moving_time_sec, avg_hr, max_hr")
+    .select("id, sport, start_time, uploaded_at, created_at, distance_m, duration_sec, moving_time_sec, avg_hr, max_hr")
     .eq("user_id", userId)
     .gte("start_time", fromIso)
     .order("start_time", { ascending: false })
     .limit(limit);
 
-  if (wErr) {
-    console.error("coach_context: workouts_error", wErr);
+  if (wErr1) {
+    console.error("coach_context: workouts_error(start_time)", wErr1);
   }
 
-  const workouts: WorkoutFact[] = (workoutsRaw ?? []).map((w: any) => ({
+  // 2) тренировки без start_time (берём по uploaded_at/created_at)
+  const { data: noStart, error: wErr2 } = await supabase
+    .from("workouts")
+    .select("id, sport, start_time, uploaded_at, created_at, distance_m, duration_sec, moving_time_sec, avg_hr, max_hr")
+    .eq("user_id", userId)
+    .is("start_time", null)
+    .gte("created_at", fromIso)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (wErr2) {
+    console.error("coach_context: workouts_error(no start_time)", wErr2);
+  }
+
+  // merge + sort by coalesce(start_time, uploaded_at, created_at) desc
+  const merged = [...(withStart ?? []), ...(noStart ?? [])];
+  const byId = new Map<string, any>();
+  for (const w of merged) byId.set(w.id, w);
+  const uniq = Array.from(byId.values());
+
+  const timeKey = (w: any) => {
+    const t = w.start_time ?? w.uploaded_at ?? w.created_at ?? null;
+    const ms = t ? new Date(t).getTime() : 0;
+    return Number.isFinite(ms) ? ms : 0;
+  };
+
+  uniq.sort((a, b) => timeKey(b) - timeKey(a));
+  const sliced = uniq.slice(0, limit);
+
+  const workouts: WorkoutFact[] = sliced.map((w: any) => ({
     id: w.id,
     sport: w.sport ?? null,
     start_time: w.start_time ?? null,
