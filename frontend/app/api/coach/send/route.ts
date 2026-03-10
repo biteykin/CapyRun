@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import util from "node:util";
+import crypto from "node:crypto";
 import "server-only";
 
 import { runPlanner } from "@/lib/coach/planner";
@@ -59,6 +60,77 @@ type WorkoutInsightMini = {
 
 type FastPathInsightsMap = Record<string, WorkoutInsightMini | undefined>;
 
+type CoachMessageLite = {
+  id: string;
+  type: string;
+  body: string | null;
+  meta: Record<string, any> | null;
+  created_at: string;
+};
+
+type WorkoutInsightBuildOptions = {
+  forceRegenerate?: boolean;
+  followupUserText?: string | null;
+  source?: string | null;
+};
+
+function hashTextShort(value: string) {
+  return crypto.createHash("sha1").update(value).digest("hex").slice(0, 12);
+}
+
+function isWorkoutBoundCoachMeta(meta: Record<string, any> | null | undefined) {
+  if (!meta) return false;
+
+  const hasWorkoutId = Boolean(meta.workout_id);
+  const kind = String(meta.kind ?? "");
+  const stage = String(meta.stage ?? "");
+
+  return (
+    hasWorkoutId &&
+    (kind === "workout_first_message" ||
+      stage === "workout_insight" ||
+      stage === "workout_followup_insight")
+  );
+}
+
+async function logWorkoutInsightCacheHit(params: {
+  db: DbClient;
+  userId: string;
+  workoutId: string;
+  locale: string;
+  insight: WorkoutInsightRow;
+}) {
+  const { db, userId, workoutId, locale, insight } = params;
+
+  const dedupKey = `workout_insight_cache_hit:${workoutId}:${insight.id}:${hashTextShort(locale)}`;
+
+  const { error } = await db.from("ai_requests").insert({
+    user_id: userId,
+    workout_id: workoutId,
+    model: insight.model ?? "cache",
+    locale,
+    purpose: "workout_insight",
+    status: "success",
+    dedup_key: dedupKey,
+    input: {
+      cache_hit: true,
+      source: "ai_insights",
+      insight_id: insight.id,
+      workout_id: workoutId,
+    },
+    output: {
+      cache_hit: true,
+      insight_id: insight.id,
+      prompt_version: insight.prompt_version ?? null,
+      created_at: insight.created_at ?? null,
+    },
+  });
+
+  if (error) {
+    console.error("ai_requests: cache_hit_log_error", error);
+  }
+}
+
 function getBearerToken(req: NextRequest) {
   const h = req.headers.get("authorization") || "";
   const m = h.match(/^Bearer\s+(.+)$/i);
@@ -67,8 +139,6 @@ function getBearerToken(req: NextRequest) {
 
 function isWorkoutAnalysisIntent(text: string) {
   const t = (text ?? "").toLowerCase();
-  // простая эвристика. Мы специально делаем её "широкой":
-  // если попросили "проанализируй/разбор/последняя тренировка" — считаем, что нужен insight.
   return (
     t.includes("проанализ") ||
     t.includes("анализ") ||
@@ -78,6 +148,56 @@ function isWorkoutAnalysisIntent(text: string) {
     t.includes("как прошла") ||
     t.includes("как была") ||
     (t.includes("последн") && t.includes("трениров"))
+  );
+}
+
+function isLikelyWorkoutFollowup(text: string) {
+  const t = (text ?? "").toLowerCase().trim();
+  if (!t) return false;
+
+  return (
+    t.includes("ощущ") ||
+    t.includes("самочув") ||
+    t.includes("нагруз") ||
+    t.includes("устал") ||
+    t.includes("усталост") ||
+    t.includes("тяжело") ||
+    t.includes("тяжел") ||
+    t.includes("легко") ||
+    t.includes("норм") ||
+    t.includes("неплохо") ||
+    t.includes("плохо") ||
+    t.includes("дискомфорт") ||
+    t.includes("бол") ||
+    t.includes("забол") ||
+    t.includes("тянет") ||
+    t.includes("сводит") ||
+    t.includes("икр") ||
+    t.includes("бедр") ||
+    t.includes("голен") ||
+    t.includes("колен") ||
+    t.includes("спин") ||
+    t.includes("стоп") ||
+    t.includes("ступн") ||
+    t.includes("ног") ||
+    t.includes("дых") ||
+    t.includes("пульс") ||
+    t.includes("сердц") ||
+    t.includes("восстанов") ||
+    t.includes("сон") ||
+    t.includes("спал") ||
+    t.includes("спалось") ||
+    t.includes("поел") ||
+    t.includes("ел ") ||
+    t.startsWith("ел") ||
+    t.includes("пил") ||
+    t.includes("вода") ||
+    t.includes("жажд") ||
+    t.includes("rpe") ||
+    /\b[1-9]\/10\b/.test(t) ||
+    /\b10\/10\b/.test(t) ||
+    /\brpe\s*[1-9]\b/.test(t) ||
+    /\brpe\s*10\b/.test(t)
   );
 }
 
@@ -141,6 +261,32 @@ async function getActiveWorkoutInsight(params: {
   return (data ?? null) as WorkoutInsightRow | null;
 }
 
+async function getLastWorkoutBoundCoachMessageBefore(params: {
+  db: DbClient;
+  threadId: string;
+  beforeCreatedAt: string;
+}): Promise<CoachMessageLite | null> {
+  const { db, threadId, beforeCreatedAt } = params;
+
+  const { data, error } = await db
+    .from("coach_messages")
+    .select("id,type,body,meta,created_at")
+    .eq("thread_id", threadId)
+    .eq("type", "coach")
+    .lt("created_at", beforeCreatedAt)
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  if (error) return null;
+
+  const rows = (data ?? []) as CoachMessageLite[];
+  for (const row of rows) {
+    if (isWorkoutBoundCoachMeta(row.meta)) return row;
+  }
+
+  return null;
+}
+
 async function preloadInsightsForWorkouts(params: {
   db: DbClient;
   userId: string;
@@ -177,14 +323,28 @@ async function createWorkoutInsightViaLLM(params: {
   userId: string;
   workoutId: string;
   locale: string;
+  options?: WorkoutInsightBuildOptions;
 }): Promise<WorkoutInsightRow> {
-  const { db, userId, workoutId, locale } = params;
+  const { db, userId, workoutId, locale, options } = params;
 
-  // 0) дедуп: если есть активный инсайт — вернём его
-  const existing = await getActiveWorkoutInsight({ db, workoutId });
-  if (existing) return existing;
+  const forceRegenerate = Boolean(options?.forceRegenerate);
+  const followupUserText = (options?.followupUserText ?? "").trim() || null;
+  const source = options?.source ?? null;
 
-  // 1) факты по тренировке
+  if (!forceRegenerate) {
+    const existing = await getActiveWorkoutInsight({ db, workoutId });
+    if (existing) {
+      await logWorkoutInsightCacheHit({
+        db,
+        userId,
+        workoutId,
+        locale,
+        insight: existing,
+      });
+      return existing;
+    }
+  }
+
   const { data: workout, error: wErr } = await db
     .from("workouts")
     .select(
@@ -219,7 +379,6 @@ async function createWorkoutInsightViaLLM(params: {
     .order("seq", { ascending: true });
 
   if (segErr) {
-    // сегменты не критичны, но пусть будет видно
     console.error("workout_insight: segments_error", segErr);
   }
 
@@ -233,7 +392,6 @@ async function createWorkoutInsightViaLLM(params: {
     console.error("workout_insight: weather_error", wwErr);
   }
 
-  // чек-ин за 48ч до тренировки
   let checkin: any = null;
   if (workout.start_time) {
     const startIso = new Date(workout.start_time).toISOString();
@@ -252,7 +410,6 @@ async function createWorkoutInsightViaLLM(params: {
     checkin = chk?.[0] ?? null;
   }
 
-  // зоны (если есть)
   const { data: zones, error: zErr } = await db
     .from("user_zones")
     .select("*")
@@ -261,7 +418,6 @@ async function createWorkoutInsightViaLLM(params: {
 
   if (zErr) console.error("workout_insight: zones_error", zErr);
 
-  // Человекочитаемое название тренировки (у нас в БД есть workouts.name, а не title)
   const workoutName =
     (workout as any)?.name != null && String((workout as any).name).trim()
       ? String((workout as any).name).trim()
@@ -281,13 +437,20 @@ async function createWorkoutInsightViaLLM(params: {
     checkin,
     zones: zones ?? [],
     locale,
+    followup_user_context: followupUserText,
+    followup_source: source,
+    force_regenerate: forceRegenerate,
   };
 
-  // 2) ai_requests — логируем вызов (ВАЖНО: single(), чтобы не было “тихого null”)
-  const promptVersion = "workout_insight_v1";
+  const promptVersion = "workout_insight_v2";
   const model = process.env.OPENAI_WORKOUT_MODEL ?? COACH_MODELS.responder ?? "gpt-4.1-mini";
   const purpose = "workout_insight";
-  const dedupKey = `workout_insight:${workoutId}:${promptVersion}:${locale}`;
+
+  const dedupSeed = forceRegenerate
+    ? `${workoutId}:${promptVersion}:${locale}:${followupUserText ?? ""}:${Date.now()}`
+    : `${workoutId}:${promptVersion}:${locale}`;
+
+  const dedupKey = `workout_insight:${hashTextShort(dedupSeed)}`;
 
   const { data: reqRow, error: reqErr } = await db
     .from("ai_requests")
@@ -307,21 +470,26 @@ async function createWorkoutInsightViaLLM(params: {
   if (reqErr || !reqRow?.id) throw new Error(`Failed to insert ai_requests: ${reqErr?.message ?? "no id"}`);
   const requestId = String(reqRow.id);
 
-  // 3) LLM — строгий JSON по схеме
   const system =
     locale?.startsWith("ru")
       ? [
-          "Ты — внимательный тренер по выносливости.",
-          "Опирайся ТОЛЬКО на данные из FACTS_JSON; не выдумывай числа/факты.",
-          "Если данных не хватает — явно скажи, чего нет, и задай 1–3 вопроса.",
-          "Если видишь подозрительные значения — пометь как возможную ошибку данных/разметки.",
+          "Ты — внимательный и практичный тренер по выносливости.",
+          "Опирайся ТОЛЬКО на данные из FACTS_JSON и FOLLOWUP_USER_CONTEXT.",
+          "Не выдумывай числа, факты, цели, травмы или историю тренировок.",
+          "Если пользователь дал субъективный фидбек (усталость, боль, RPE, сон, восстановление) — обязательно встрои это в анализ как главный контекст интерпретации.",
+          "Не давай общих абстрактных советов. Привязывай выводы к этой конкретной тренировке.",
+          "Если данные неполные или подозрительные — прямо укажи это в разделе рисков.",
+          "Пиши компактно, по делу, без воды.",
           "Верни СТРОГО JSON по схеме.",
         ].join("\n")
       : [
-          "You are a careful endurance coach.",
-          "Use ONLY values from FACTS_JSON; do not invent numbers/facts.",
-          "If data is missing, say what's missing and ask 1–3 questions.",
-          "If values look suspicious, mark them as possible data/labeling issues.",
+          "You are a careful and practical endurance coach.",
+          "Use ONLY values from FACTS_JSON and FOLLOWUP_USER_CONTEXT.",
+          "Do not invent numbers, facts, goals, injuries, or history.",
+          "If the user provided subjective feedback (fatigue, pain, RPE, sleep, recovery), incorporate it explicitly as the main interpretation context.",
+          "Avoid generic advice; tie conclusions to this exact workout.",
+          "If data is incomplete or suspicious, state that clearly in risks.",
+          "Be concise and specific.",
           "Return STRICT JSON matching the schema.",
         ].join("\n");
 
@@ -349,11 +517,13 @@ async function createWorkoutInsightViaLLM(params: {
   let llmJson: any = null;
 
   try {
+    const followupBlock = followupUserText
+      ? `\n\nFOLLOWUP_USER_CONTEXT:\n${followupUserText}\n`
+      : "\n\nFOLLOWUP_USER_CONTEXT:\nnull\n";
+
     const resp = await openai.chat.completions.create({
       model,
-      temperature: 0.5,
-      // Важно: у некоторых моделей/провайдеров response_format может быть ограничен.
-      // Но если это упадёт — мы поймаем исключение и зафиксируем error в ai_requests.
+      temperature: 0.35,
       response_format: {
         type: "json_schema",
         json_schema: { name: "WorkoutInsight", schema },
@@ -365,9 +535,20 @@ async function createWorkoutInsightViaLLM(params: {
           content:
             "FACTS_JSON:\n" +
             JSON.stringify(facts) +
-            "\n\nСделай максимально полезный разбор тренировки. Формат content_md: " +
-            "## Кратко / ## Что хорошо / ## Риски / ## Что дальше / ## Вопросы. " +
-            "Не выдумывай чисел.",
+            followupBlock +
+            "\nСделай максимально полезный разбор одной конкретной тренировки.\n" +
+            "Формат content_md:\n" +
+            "## Кратко\n" +
+            "## Что хорошо\n" +
+            "## Риски\n" +
+            "## Что дальше\n" +
+            "## Вопросы\n\n" +
+            "Требования:\n" +
+            "1) Если FOLLOWUP_USER_CONTEXT не пустой, обязательно учти его в разделах 'Риски' и 'Что дальше'.\n" +
+            "2) Если есть погода — используй её конкретно, без общих фраз.\n" +
+            "3) Если пользователь жалуется на усталость, боль, тяжесть, плохой сон, плохое восстановление — не предлагай безусловно усиливать нагрузку.\n" +
+            "4) Если данных недостаточно — прямо скажи это.\n" +
+            "5) Не выдумывай чисел.",
         },
       ],
     });
@@ -399,13 +580,8 @@ async function createWorkoutInsightViaLLM(params: {
 
   if (!llmJson?.content_md) throw new Error("LLM returned empty insight");
 
-  // Заголовок для UI: LLM > workout.name > дефолт
-  const displayTitle =
-    (llmJson?.title ?? "").trim() ||
-    workoutName ||
-    "Тренировка";
+  const displayTitle = (llmJson?.title ?? "").trim() || workoutName || "Тренировка";
 
-  // 4) ai_outputs — структурный результат (single не обязателен)
   await db.from("ai_outputs").insert({
     request_id: requestId,
     kind: "workout_insight",
@@ -416,7 +592,6 @@ async function createWorkoutInsightViaLLM(params: {
     locale,
   });
 
-  // 5) ai_insights — UI “обложка”
   const { data: insRow, error: insErr } = await db
     .from("ai_insights")
     .insert({
@@ -456,6 +631,21 @@ async function createWorkoutInsightViaLLM(params: {
     .single();
 
   if (insErr || !insRow) throw new Error(`Failed to insert ai_insights: ${insErr?.message ?? "no row"}`);
+
+  if (forceRegenerate) {
+    const { error: supersedeErr } = await db
+      .from("ai_insights")
+      .update({ status: "superseded" })
+      .eq("scope", "workout")
+      .eq("entity_id", workoutId)
+      .eq("status", "active")
+      .neq("id", insRow.id);
+
+    if (supersedeErr) {
+      console.error("workout_insight: supersede_previous_error", supersedeErr);
+    }
+  }
+
   return insRow as WorkoutInsightRow;
 }
 
@@ -475,7 +665,6 @@ export async function POST(req: NextRequest) {
   let insertedUserId: string | null = null;
 
   try {
-    // 1) Parse body
     stage = "parse_body";
     let body: any = {};
     try {
@@ -490,7 +679,6 @@ export async function POST(req: NextRequest) {
     const client_nonce = body?.client_nonce ?? null;
     const reqThreadId = body?.threadId ?? null;
 
-    // 2) Auth
     stage = "auth";
     let user: { id: string } | null = null;
 
@@ -511,7 +699,6 @@ export async function POST(req: NextRequest) {
     if (!user?.id) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     insertedUserId = user.id;
 
-    // 3) Resolve thread
     stage = "thread_resolve";
     let threadId: string | null = reqThreadId;
 
@@ -556,7 +743,6 @@ export async function POST(req: NextRequest) {
     if (!threadId) return NextResponse.json({ error: "thread_resolve_failed" }, { status: 500 });
     insertedThreadId = threadId;
 
-    // 4) Read thread meta
     stage = "thread_meta_read";
     const { data: threadRow } = await db
       .from("coach_threads")
@@ -571,10 +757,8 @@ export async function POST(req: NextRequest) {
     const memoryTopForLLM = normalizeMemoryForLLM(memTop?.items ?? []);
     const threadMemory = mergeLegacyMemory(memoryTopForLLM, legacyThreadMemory);
 
-    // dialog state пока не используем активно, но оставляем
     getDialogState(threadMeta);
 
-    // 5) Insert user message
     stage = "insert_user_message";
     const { data: userMsgRow } = await db
       .from("coach_messages")
@@ -590,7 +774,6 @@ export async function POST(req: NextRequest) {
 
     insertedUserMsg = userMsgRow;
 
-    // 6) Load history
     stage = "load_history";
     const { data: historyAll } = await db
       .from("coach_messages")
@@ -601,7 +784,66 @@ export async function POST(req: NextRequest) {
 
     const recentHistory = pickRecentHistory(historyAll ?? [], 30);
 
-    // 7) Weekly local shortcut
+    stage = "detect_workout_followup";
+    const lastWorkoutBoundCoachMsg = await getLastWorkoutBoundCoachMessageBefore({
+      db,
+      threadId,
+      beforeCreatedAt: userMsgRow.created_at,
+    });
+
+    const replyWorkoutId = lastWorkoutBoundCoachMsg?.meta?.workout_id
+      ? String(lastWorkoutBoundCoachMsg.meta.workout_id)
+      : null;
+
+    const isWorkoutFollowup = Boolean(replyWorkoutId) && isLikelyWorkoutFollowup(finalText);
+
+    if (isWorkoutFollowup && replyWorkoutId) {
+      stage = "workout_followup_insight";
+
+      try {
+        const insight = await createWorkoutInsightViaLLM({
+          db,
+          userId: user.id,
+          workoutId: replyWorkoutId,
+          locale,
+          options: {
+            forceRegenerate: true,
+            followupUserText: finalText,
+            source: "reply_to_workout_bound_message",
+          },
+        });
+
+        const answerFromInsight =
+          (insight?.content_md ?? "").trim() || (insight?.summary ?? "").trim();
+
+        if (answerFromInsight) {
+          const ins = await insertCoachReply({
+            db,
+            threadId,
+            userId: user.id,
+            replyToId: userMsgRow.id,
+            body: answerFromInsight,
+            stage: "workout_followup_insight",
+            meta: {
+              model: insight?.model ?? "llm",
+              prompt_version: insight?.prompt_version ?? "workout_insight_v2",
+              workout_id: replyWorkoutId,
+              source: "reply_to_workout_bound_message",
+              force_regenerated: true,
+            },
+          });
+
+          return NextResponse.json({
+            threadId,
+            userMessage: userMsgRow,
+            coachMessage: ins.data,
+          });
+        }
+      } catch (e) {
+        console.error("workout_followup_insight_failed", e);
+      }
+    }
+
     const wsLocal = buildWeeklyScheduleLocalResponse(finalText, threadMemory);
     if (wsLocal) {
       const ins = await insertCoachReply({
@@ -617,11 +859,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ threadId, userMessage: userMsgRow, coachMessage: ins.data });
     }
 
-    // 8) Planner
     stage = "planner";
     const planner = await runPlanner({ openai, userText: finalText, threadMemory, recentHistory });
 
-    // Apply memory patch (если пришёл)
     if (planner.memory_patch && Object.keys(planner.memory_patch).length) {
       await applyMemoryPatch({
         supabase: db,
@@ -630,7 +870,6 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 9) Build context after planner
     stage = "build_context";
     const context = await buildCoachContext({
       supabase: db,
@@ -639,7 +878,6 @@ export async function POST(req: NextRequest) {
       plannerNeeds: planner.needs ?? DEFAULT_CONTEXT_NEEDS,
     });
 
-    // заранее подгрузим инсайты для тренировок окна (для красивого fast_path)
     const workoutIds = (context.workouts ?? []).map((w: any) => String((w as any)?.id ?? "")).filter(Boolean);
     const insightsByWorkoutId = await preloadInsightsForWorkouts({
       db,
@@ -647,14 +885,12 @@ export async function POST(req: NextRequest) {
       workoutIds,
     });
 
-    // 10) Fast path
     if (planner.fast_path?.enabled) {
       const wantsAnalysis = isWorkoutAnalysisIntent(finalText);
+      const looksLikeFollowup = isLikelyWorkoutFollowup(finalText);
       const kind = planner.fast_path.kind;
       const isLastOrNth = kind === "last_workout" || kind === "nth_workout";
 
-      // Если явно просят разбор и fast_path про last/nth —
-      // мы должны попытаться отдать/сгенерировать ai_insight.
       if (wantsAnalysis && isLastOrNth) {
         let targetWorkoutId: string | null = null;
 
@@ -676,22 +912,22 @@ export async function POST(req: NextRequest) {
 
         if (targetWorkoutId) {
           try {
-            // 1) если уже есть — используем
-            let insight = await getActiveWorkoutInsight({ db, workoutId: targetWorkoutId });
-
-            // 2) если нет — генерим и пишем в БД
-            if (!insight) {
-              insight = await createWorkoutInsightViaLLM({
-                db,
-                userId: user.id,
-                workoutId: targetWorkoutId,
-                locale,
-              });
-            }
+            const insight = await createWorkoutInsightViaLLM({
+              db,
+              userId: user.id,
+              workoutId: targetWorkoutId,
+              locale,
+              options: looksLikeFollowup
+                ? {
+                    forceRegenerate: true,
+                    followupUserText: finalText,
+                    source: "analysis_request_with_subjective_feedback",
+                  }
+                : undefined,
+            });
 
             const answerFromInsight =
-              (insight?.content_md ?? "").trim() ||
-              (insight?.summary ?? "").trim();
+              (insight?.content_md ?? "").trim() || (insight?.summary ?? "").trim();
 
             if (answerFromInsight) {
               const ins = await insertCoachReply({
@@ -700,11 +936,15 @@ export async function POST(req: NextRequest) {
                 userId: user.id,
                 replyToId: userMsgRow.id,
                 body: answerFromInsight,
-                stage: "workout_insight",
+                stage: looksLikeFollowup ? "workout_followup_insight" : "workout_insight",
                 meta: {
                   model: insight?.model ?? "llm",
-                  prompt_version: insight?.prompt_version ?? "workout_insight_v1",
+                  prompt_version: insight?.prompt_version ?? "workout_insight_v2",
                   workout_id: targetWorkoutId,
+                  source: looksLikeFollowup
+                    ? "analysis_request_with_subjective_feedback"
+                    : "analysis_request",
+                  force_regenerated: looksLikeFollowup || undefined,
                 },
               });
 
@@ -712,13 +952,11 @@ export async function POST(req: NextRequest) {
             }
           } catch (e: any) {
             meta.workout_insight_error = e?.message ?? String(e);
-            // падаем дальше в обычный fast_path
           }
         } else {
           meta.workout_insight_error = "targetWorkoutId is null";
         }
 
-        // если не смогли — вернём fast_path, но с понятной диагностикой в meta
         const answer = buildFastPathAnswer(
           planner.fast_path.kind,
           context.workouts,
@@ -742,7 +980,6 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ threadId, userMessage: userMsgRow, coachMessage: ins.data });
       }
 
-      // обычный fast_path
       const answer = buildFastPathAnswer(
         planner.fast_path.kind,
         context.workouts,
@@ -766,7 +1003,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ threadId, userMessage: userMsgRow, coachMessage: ins.data });
     }
 
-    // 11) Responder (LLM чат)
     stage = "responder";
 
     let answer = "";
