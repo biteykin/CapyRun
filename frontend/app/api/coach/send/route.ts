@@ -29,9 +29,13 @@ import {
 import { normalizeAIError, userFacingAIErrorText } from "@/lib/coach/openaiError";
 import { createAdminClient, createClientWithCookies } from "@/lib/supabase/server";
 import {
+  detectMultiWorkoutQuestionKind,
+  detectRequestedWindow,
   getFollowupUserMessagesSinceAnchor,
   getLastWorkoutBoundCoachMessageBefore,
   isGeneralPlanningIntent,
+  isTrainingDataNudgeIntent,
+  isFactualMultiWorkoutIntent,
   isLikelyWorkoutFollowup,
   isMultiWorkoutAnalysisIntent,
   isWorkoutAnalysisIntent,
@@ -219,16 +223,185 @@ async function preloadInsightsForWorkouts(params: {
   return map;
 }
 
+async function loadAllTimeWorkoutTotals(params: {
+  db: DbClient;
+  userId: string;
+}) {
+  const { db, userId } = params;
+
+  const { data, error } = await db
+    .from("workouts")
+    .select("distance_m,duration_sec", { count: "exact", head: false })
+    .eq("user_id", userId);
+
+  if (error || !data) {
+    return {
+      workouts_count: 0,
+      total_distance_km: 0,
+      total_duration_h: 0,
+    };
+  }
+
+  const rows = data as Array<{ distance_m: number | null; duration_sec: number | null }>;
+  const totalDistanceKm = Number(
+    (rows.reduce((s, r) => s + (r.distance_m ?? 0), 0) / 1000).toFixed(2)
+  );
+  const totalDurationH = Number(
+    (rows.reduce((s, r) => s + (r.duration_sec ?? 0), 0) / 3600).toFixed(2)
+  );
+
+  return {
+    workouts_count: rows.length,
+    total_distance_km: totalDistanceKm,
+    total_duration_h: totalDurationH,
+  };
+}
+
+function resolveWindowDays(windowKey: string | null) {
+  switch (windowKey) {
+    case "7d":
+      return 7;
+    case "14d":
+      return 14;
+    case "4w":
+      return 28;
+    case "8w":
+      return 56;
+    case "16w":
+      return 112;
+    case "3m":
+      return 92;
+    case "6m":
+      return 183;
+    case "12m":
+      return 365;
+    default:
+      return null;
+  }
+}
+
+function buildWindowCutoff(days: number) {
+  return new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
+}
+
+async function loadWindowWorkoutTotals(params: {
+  db: DbClient;
+  userId: string;
+  windowKey: string | null;
+}) {
+  const { db, userId, windowKey } = params;
+
+  if (windowKey === "all") {
+    return loadAllTimeWorkoutTotals({ db, userId });
+  }
+
+  const days = resolveWindowDays(windowKey);
+  if (!days) return null;
+
+  const cutoffIso = buildWindowCutoff(days);
+  const { data, error } = await db
+    .from("workouts")
+    .select("distance_m,duration_sec")
+    .eq("user_id", userId)
+    .gte("start_time", cutoffIso);
+
+  if (error || !data) return null;
+
+  const rows = data as Array<{ distance_m: number | null; duration_sec: number | null }>;
+
+  return {
+    workouts_count: rows.length,
+    total_distance_km: Number((rows.reduce((s, r) => s + (r.distance_m ?? 0), 0) / 1000).toFixed(2)),
+    total_duration_h: Number((rows.reduce((s, r) => s + (r.duration_sec ?? 0), 0) / 3600).toFixed(2)),
+  };
+}
+
+async function loadLongestWorkoutForWindow(params: {
+  db: DbClient;
+  userId: string;
+  windowKey: string | null;
+}) {
+  const { db, userId, windowKey } = params;
+
+  let query = db
+    .from("workouts")
+    .select("distance_m, local_date, start_time")
+    .eq("user_id", userId)
+    .order("distance_m", { ascending: false })
+    .limit(1);
+
+  if (windowKey !== "all") {
+    const days = resolveWindowDays(windowKey);
+    if (days) {
+      query = query.gte("start_time", buildWindowCutoff(days));
+    }
+  }
+
+  const { data, error } = await query.maybeSingle();
+  if (error || !data) return null;
+
+  return {
+    distance_km: data.distance_m != null ? Number((data.distance_m / 1000).toFixed(2)) : null,
+    date: data.local_date ?? (data.start_time ? String(data.start_time).slice(0, 10) : null),
+  };
+}
+
+function renderWindowLabel(windowKey: string | null) {
+  switch (windowKey) {
+    case "7d":
+      return "7 дней";
+    case "14d":
+      return "14 дней";
+    case "4w":
+      return "4 недели";
+    case "8w":
+      return "8 недель";
+    case "16w":
+      return "16 недель";
+    case "3m":
+      return "3 месяца";
+    case "6m":
+      return "6 месяцев";
+    case "12m":
+      return "12 месяцев";
+    case "all":
+      return "всё время";
+    default:
+      return "выбранный период";
+  }
+}
+
+function buildLocalFactualSummary(params: {
+  windowKey: string | null;
+  totals: { workouts_count: number; total_distance_km: number; total_duration_h: number };
+  longest: { distance_km: number | null; date: string | null } | null;
+}) {
+  const { windowKey, totals, longest } = params;
+  const label = renderWindowLabel(windowKey);
+  const lines: string[] = [];
+
+  lines.push(`За ${label} у нас было ${totals.workouts_count} тренировок.`);
+  lines.push(`Общий объём: ${totals.total_distance_km} км и ${totals.total_duration_h} ч.`);
+
+  if (longest?.distance_km != null) {
+    lines.push(`Самая длинная тренировка за этот период — ${longest.distance_km} км.`);
+  }
+
+  return lines.join("\n");
+}
+
 async function createMultiWorkoutAnalysisViaLLM(params: {
   userText: string;
   locale: string;
   payload: Awaited<ReturnType<typeof loadMultiWorkoutPayload>>;
+  questionKind: string;
+  requestedWindow: string | null;
 }) {
-  const { userText, locale, payload } = params;
+  const { userText, locale, payload, questionKind, requestedWindow } = params;
 
   const model = process.env.OPENAI_WORKOUT_MODEL ?? COACH_MODELS.responder ?? "gpt-4o-mini";
 
-  const strictFactsOnly = payload.facts_only_recommended || isStrictFactualSummaryQuestion(userText);
+  const strictFactsOnly = questionKind === "factual_summary" || isStrictFactualSummaryQuestion(userText);
 
   const system =
     locale?.startsWith("ru")
@@ -240,34 +413,16 @@ async function createMultiWorkoutAnalysisViaLLM(params: {
           "Не называй человека 'пользователь'. Пиши естественно: 'у нас', 'по тренировкам', 'по бегу'.",
           "Пиши дружелюбно, без канцелярита и без слащавости.",
           "Если данных мало — прямо скажи это.",
-          strictFactsOnly
-            ? [
-                "Это фактологический вопрос про объём, количество, километраж, время или сводную статистику.",
-                "Отвечай коротко и точно по цифрам.",
-                "Не добавляй блоки 'Что можно улучшить', 'Что предлагаю дальше', рекомендации, риски и советы, если о них не спросили.",
-                "Не уходи в анализ одной тренировки.",
-              ].join("\n")
-            : [
-                "Если вопрос про динамику, прогресс или тренды — делай именно анализ динамики, а не одной тренировки.",
-                "Рекомендации давай только если они реально следуют из данных и уместны для вопроса.",
-                "Не повторяй шаблонные советы без необходимости.",
-                "Если вопрос не просит план — не строй подробный план.",
-              ].join("\n"),
-          strictFactsOnly
-            ? [
-                "Формат ответа:",
-                "1) краткий фактологический вывод,",
-                "2) затем 2–5 коротких пунктов с ключевыми цифрами.",
-              ].join("\n")
-            : [
-                "Формат ответа:",
-                "## Кратко",
-                "## Что видно по динамике",
-                "## Риски / что настораживает",
-                "## Что можно улучшить",
-                "## Что предлагаю дальше",
-                "Если какой-то раздел не нужен по смыслу, сократи его, а не раздувай.",
-              ].join("\n"),
+          "Не составляй подробный недельный план, если об этом не просили.",
+          "Если вопрос фактический, отвечай коротко и по цифрам.",
+          "Не повторяй каждый раз шаблон 'что можно улучшить', если вопрос был только про цифры или срез статистики.",
+          "Формат ответа:",
+          "## Кратко",
+          "## Что видно по динамике",
+          "## Риски / что настораживает",
+          "## Что можно улучшить",
+          "## Что предлагаю дальше",
+          "Если какой-то раздел не нужен по смыслу, сократи его, а не раздувай.",
         ].join("\n")
       : [
           "You are a practical and friendly running coach.",
@@ -277,18 +432,16 @@ async function createMultiWorkoutAnalysisViaLLM(params: {
           "Do not refer to the person as 'the user'.",
           "Be natural, concise, and helpful.",
           "If data is thin, say so clearly.",
-          strictFactsOnly
-            ? [
-                "This is a factual summary question about count, mileage, time, or aggregate stats.",
-                "Answer briefly and precisely with numbers.",
-                "Do not add recommendations, risks, or next steps unless explicitly requested.",
-                "Do not drift into single-workout analysis.",
-              ].join("\n")
-            : [
-                "If the question is about trends or progress, analyze trends rather than one workout.",
-                "Do not add generic advice unless warranted by the question.",
-                "Do not create a detailed plan unless explicitly requested.",
-              ].join("\n"),
+          "Do not produce a detailed weekly plan unless explicitly asked.",
+          "If the question is factual, answer briefly with numbers.",
+          "Do not repeat generic improvement advice unless it is clearly useful.",
+          "Use sections:",
+          "## Brief",
+          "## What the trend shows",
+          "## Risks",
+          "## What to improve",
+          "## Next suggestions",
+          "Shorten any section that is not meaningful for the question.",
         ].join("\n");
 
   const resp = await openai.chat.completions.create({
@@ -301,12 +454,13 @@ async function createMultiWorkoutAnalysisViaLLM(params: {
         content:
           "FACTS_JSON:\n" +
           JSON.stringify(payload) +
+          "\n\nQUESTION_KIND:\n" +
+          questionKind +
+          "\n\nREQUESTED_WINDOW:\n" +
+          String(requestedWindow ?? "auto") +
           "\n\nQUESTION:\n" +
           userText +
-          "\n\n" +
-          (strictFactsOnly
-            ? "Ответь как на сводный вопрос по статистике тренировок."
-            : "Сделай разбор динамики нескольких тренировок. Если данных мало для сильных выводов — обозначь уровень уверенности."),
+          "\n\nСделай разбор динамики нескольких последних тренировок. Если данных мало для сильных выводов — обозначь уровень уверенности.",
       },
     ],
   });
@@ -794,45 +948,123 @@ export async function POST(req: NextRequest) {
 
     stage = "intent_detection";
     const generalPlanningIntent = isGeneralPlanningIntent(finalText);
+    const trainingDataNudgeIntent = isTrainingDataNudgeIntent(finalText);
+    const questionKind = detectMultiWorkoutQuestionKind(finalText);
+    const requestedWindow = detectRequestedWindow(finalText);
+    const factualMultiWorkoutIntent =
+      !generalPlanningIntent &&
+      (isFactualMultiWorkoutIntent(finalText) || requestedWindow === "all");
     const multiWorkoutIntent = !generalPlanningIntent && isMultiWorkoutAnalysisIntent(finalText);
+
+    if (trainingDataNudgeIntent) {
+      const ins = await insertCoachReply({
+        db,
+        threadId,
+        userId: user.id,
+        replyToId: userMsgRow.id,
+        body:
+          "Вижу, данные обновились ✅ Можем сразу разобрать последнюю тренировку или посмотреть динамику за неделю, месяц или 3 месяца.",
+        stage: "training_data_nudge",
+        meta: { model: "local" },
+      });
+
+      return NextResponse.json({
+        threadId,
+        userMessage: userMsgRow,
+        coachMessage: ins.data,
+      });
+    }
+
+    if (factualMultiWorkoutIntent) {
+      stage = "multi_workout_factual_summary";
+
+      const windowKey = requestedWindow ?? "16w";
+      const totals = await loadWindowWorkoutTotals({
+        db,
+        userId: user.id,
+        windowKey,
+      });
+
+      if (totals) {
+        const longest = await loadLongestWorkoutForWindow({
+          db,
+          userId: user.id,
+          windowKey,
+        });
+
+        const answer = buildLocalFactualSummary({
+          windowKey,
+          totals,
+          longest,
+        });
+
+        const allTimeTotals = await loadAllTimeWorkoutTotals({
+          db,
+          userId: user.id,
+        });
+
+        const ins = await insertCoachReply({
+          db,
+          threadId,
+          userId: user.id,
+          replyToId: userMsgRow.id,
+          body: answer,
+          stage: "multi_workout_analysis",
+          meta: {
+            model: "local+sql",
+            question_kind: "factual_summary",
+            requested_window: windowKey,
+            all_time_workouts: allTimeTotals.workouts_count,
+            monthly_buckets_count: null,
+            facts_only_recommended: true,
+            requested_window_workouts: totals.workouts_count,
+            detailed_recent_workouts_count: null,
+          },
+        });
+
+        return NextResponse.json({
+          threadId,
+          userMessage: userMsgRow,
+          coachMessage: ins.data,
+        });
+      }
+    }
 
     if (multiWorkoutIntent) {
       stage = "multi_workout_analysis_load";
 
       const payload = await loadMultiWorkoutPayload({
-        supabase: db,
+        supabase: db as any,
         userId: user.id,
         userText: finalText,
       });
-
       let answer = "";
+      const factsOnlyRecommended = questionKind === "factual_summary";
+      const allTimeTotals = await loadAllTimeWorkoutTotals({
+        db,
+        userId: user.id,
+      });
 
       try {
-        if (payload.summary_windows.every((x) => x.workouts_count === 0)) {
+        if (
+          payload.detailed_recent_workouts.length < 3 &&
+          (payload.summary_windows[0]?.workouts_count < 3)
+        ) {
           answer =
-            "Пока я не вижу тренировок в истории, чтобы посчитать динамику. Как только появятся записи, смогу собрать сводку по объёму, километражу, времени и трендам.";
-        } else if (payload.facts_only_recommended) {
-          answer = buildLocalMultiWorkoutFactAnswer(payload) ?? "";
+            "Пока у нас маловато последних тренировок, чтобы уверенно разбирать динамику. Но уже можно смотреть на регулярность, объём и ощущения.";
         } else {
           answer = await createMultiWorkoutAnalysisViaLLM({
             userText: finalText,
             locale,
             payload,
+            questionKind,
+            requestedWindow,
           });
         }
       } catch (e) {
         console.error("multi_workout_analysis_failed", e);
-        answer = buildLocalMultiWorkoutFactAnswer(payload) ?? "";
+        answer = "Я не смог получить анализ по истории тренировок, но могу собрать базовую статистику при необходимости.";
       }
-
-      if (!answer) {
-        answer =
-          buildLocalMultiWorkoutFactAnswer(payload) ??
-          "Я посмотрел историю тренировок, но сейчас не смог собрать аккуратный ответ. Попробуй уточнить период: 4 недели, 3 месяца, 6 месяцев или всё время.";
-      }
-
-      const requestedWindowStats =
-        payload.summary_windows.find((x) => x.label === payload.requested_window) ?? null;
 
       const ins = await insertCoachReply({
         db,
@@ -842,15 +1074,23 @@ export async function POST(req: NextRequest) {
         body: answer,
         stage: "multi_workout_analysis",
         meta: {
-          model: payload.facts_only_recommended ? "local+sql" : COACH_MODELS.responder,
-          question_kind: payload.question_kind,
-          requested_window: payload.requested_window,
-          facts_only_recommended: payload.facts_only_recommended,
-          detailed_recent_workouts_count: payload.detailed_recent_workouts.length,
+          model: COACH_MODELS.responder,
+          question_kind: questionKind,
+          requested_window: requestedWindow ?? "auto",
+          all_time_workouts: allTimeTotals.workouts_count,
           monthly_buckets_count: payload.monthly_buckets.length,
-          requested_window_workouts: requestedWindowStats?.workouts_count ?? null,
-          all_time_workouts:
-            payload.summary_windows.find((x) => x.label === "all_time")?.workouts_count ?? null,
+          facts_only_recommended: factsOnlyRecommended,
+          requested_window_workouts:
+            payload.summary_windows.find((x) => {
+              const target =
+                requestedWindow === "14d"
+                  ? "4w"
+                  : requestedWindow === "all"
+                  ? "all_time"
+                  : (requestedWindow as any) ?? "16w";
+              return x.label === target;
+            })?.workouts_count ?? null,
+          detailed_recent_workouts_count: payload.detailed_recent_workouts.length,
         },
       });
 
@@ -993,7 +1233,17 @@ export async function POST(req: NextRequest) {
       const kind = planner.fast_path.kind;
       const isLastOrNth = kind === "last_workout" || kind === "nth_workout";
 
-      if (wantsAnalysis && isLastOrNth) {
+      const disableFastPathForBroadPeriodQuestion =
+        !generalPlanningIntent &&
+        (requestedWindow === "12m" ||
+          requestedWindow === "all" ||
+          questionKind === "factual_summary" ||
+          questionKind === "trend_analysis" ||
+          questionKind === "progress_analysis");
+
+      if (disableFastPathForBroadPeriodQuestion) {
+        // специально не даём fast_path перехватывать широкие вопросы по периодам/динамике
+      } else if (wantsAnalysis && isLastOrNth) {
         let targetWorkoutId: string | null = null;
 
         if (kind === "last_workout") {
@@ -1082,27 +1332,29 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ threadId, userMessage: userMsgRow, coachMessage: ins.data });
       }
 
-      const answer = buildFastPathAnswer(
-        planner.fast_path.kind,
-        context.workouts,
-        planner.fast_path.window_days ?? planner.needs?.workouts_window_days ?? 14,
-        planner.fast_path.nth,
-        planner.fast_path.from_iso,
-        planner.fast_path.to_iso,
-        insightsByWorkoutId
-      );
+      if (!disableFastPathForBroadPeriodQuestion) {
+        const answer = buildFastPathAnswer(
+          planner.fast_path.kind,
+          context.workouts,
+          planner.fast_path.window_days ?? planner.needs?.workouts_window_days ?? 14,
+          planner.fast_path.nth,
+          planner.fast_path.from_iso,
+          planner.fast_path.to_iso,
+          insightsByWorkoutId
+        );
 
-      const ins = await insertCoachReply({
-        db,
-        threadId,
-        userId: user.id,
-        replyToId: userMsgRow.id,
-        body: answer,
-        stage: "fast_path",
-        meta: { model: "fast_path" },
-      });
+        const ins = await insertCoachReply({
+          db,
+          threadId,
+          userId: user.id,
+          replyToId: userMsgRow.id,
+          body: answer,
+          stage: "fast_path",
+          meta: { model: "fast_path" },
+        });
 
-      return NextResponse.json({ threadId, userMessage: userMsgRow, coachMessage: ins.data });
+        return NextResponse.json({ threadId, userMessage: userMsgRow, coachMessage: ins.data });
+      }
     }
 
     stage = "responder";
