@@ -28,6 +28,19 @@ import {
 
 import { normalizeAIError, userFacingAIErrorText } from "@/lib/coach/openaiError";
 import { createAdminClient, createClientWithCookies } from "@/lib/supabase/server";
+import {
+  getFollowupUserMessagesSinceAnchor,
+  getLastWorkoutBoundCoachMessageBefore,
+  isGeneralPlanningIntent,
+  isLikelyWorkoutFollowup,
+  isMultiWorkoutAnalysisIntent,
+  isWorkoutAnalysisIntent,
+} from "@/lib/coach/intents";
+import {
+  buildLocalMultiWorkoutFactAnswer,
+  isStrictFactualSummaryQuestion,
+  loadMultiWorkoutPayload,
+} from "@/lib/coach/multiWorkout";
 
 export const runtime = "nodejs";
 
@@ -38,10 +51,10 @@ type DbClient = ReturnType<typeof createAdminClient>;
 type WorkoutInsightRow = {
   id: string;
   user_id: string;
-  scope: string; // 'workout'
-  entity_id: string; // workout_id
+  scope: string;
+  entity_id: string;
   sport: string | null;
-  status: string; // 'active'
+  status: string;
   title: string | null;
   summary: string | null;
   content_md: string | null;
@@ -60,37 +73,15 @@ type WorkoutInsightMini = {
 
 type FastPathInsightsMap = Record<string, WorkoutInsightMini | undefined>;
 
-type CoachMessageLite = {
-  id: string;
-  type: string;
-  body: string | null;
-  meta: Record<string, any> | null;
-  created_at: string;
-};
-
 type WorkoutInsightBuildOptions = {
   forceRegenerate?: boolean;
   followupUserText?: string | null;
   source?: string | null;
+  anchorMessageId?: string | null;
 };
 
 function hashTextShort(value: string) {
   return crypto.createHash("sha1").update(value).digest("hex").slice(0, 12);
-}
-
-function isWorkoutBoundCoachMeta(meta: Record<string, any> | null | undefined) {
-  if (!meta) return false;
-
-  const hasWorkoutId = Boolean(meta.workout_id);
-  const kind = String(meta.kind ?? "");
-  const stage = String(meta.stage ?? "");
-
-  return (
-    hasWorkoutId &&
-    (kind === "workout_first_message" ||
-      stage === "workout_insight" ||
-      stage === "workout_followup_insight")
-  );
 }
 
 async function logWorkoutInsightCacheHit(params: {
@@ -135,70 +126,6 @@ function getBearerToken(req: NextRequest) {
   const h = req.headers.get("authorization") || "";
   const m = h.match(/^Bearer\s+(.+)$/i);
   return m?.[1]?.trim() || null;
-}
-
-function isWorkoutAnalysisIntent(text: string) {
-  const t = (text ?? "").toLowerCase();
-  return (
-    t.includes("проанализ") ||
-    t.includes("анализ") ||
-    t.includes("разбор") ||
-    t.includes("разбери") ||
-    t.includes("оцен") ||
-    t.includes("как прошла") ||
-    t.includes("как была") ||
-    (t.includes("последн") && t.includes("трениров"))
-  );
-}
-
-function isLikelyWorkoutFollowup(text: string) {
-  const t = (text ?? "").toLowerCase().trim();
-  if (!t) return false;
-
-  return (
-    t.includes("ощущ") ||
-    t.includes("самочув") ||
-    t.includes("нагруз") ||
-    t.includes("устал") ||
-    t.includes("усталост") ||
-    t.includes("тяжело") ||
-    t.includes("тяжел") ||
-    t.includes("легко") ||
-    t.includes("норм") ||
-    t.includes("неплохо") ||
-    t.includes("плохо") ||
-    t.includes("дискомфорт") ||
-    t.includes("бол") ||
-    t.includes("забол") ||
-    t.includes("тянет") ||
-    t.includes("сводит") ||
-    t.includes("икр") ||
-    t.includes("бедр") ||
-    t.includes("голен") ||
-    t.includes("колен") ||
-    t.includes("спин") ||
-    t.includes("стоп") ||
-    t.includes("ступн") ||
-    t.includes("ног") ||
-    t.includes("дых") ||
-    t.includes("пульс") ||
-    t.includes("сердц") ||
-    t.includes("восстанов") ||
-    t.includes("сон") ||
-    t.includes("спал") ||
-    t.includes("спалось") ||
-    t.includes("поел") ||
-    t.includes("ел ") ||
-    t.startsWith("ел") ||
-    t.includes("пил") ||
-    t.includes("вода") ||
-    t.includes("жажд") ||
-    t.includes("rpe") ||
-    /\b[1-9]\/10\b/.test(t) ||
-    /\b10\/10\b/.test(t) ||
-    /\brpe\s*[1-9]\b/.test(t) ||
-    /\brpe\s*10\b/.test(t)
-  );
 }
 
 async function insertCoachReply(params: {
@@ -261,32 +188,6 @@ async function getActiveWorkoutInsight(params: {
   return (data ?? null) as WorkoutInsightRow | null;
 }
 
-async function getLastWorkoutBoundCoachMessageBefore(params: {
-  db: DbClient;
-  threadId: string;
-  beforeCreatedAt: string;
-}): Promise<CoachMessageLite | null> {
-  const { db, threadId, beforeCreatedAt } = params;
-
-  const { data, error } = await db
-    .from("coach_messages")
-    .select("id,type,body,meta,created_at")
-    .eq("thread_id", threadId)
-    .eq("type", "coach")
-    .lt("created_at", beforeCreatedAt)
-    .order("created_at", { ascending: false })
-    .limit(20);
-
-  if (error) return null;
-
-  const rows = (data ?? []) as CoachMessageLite[];
-  for (const row of rows) {
-    if (isWorkoutBoundCoachMeta(row.meta)) return row;
-  }
-
-  return null;
-}
-
 async function preloadInsightsForWorkouts(params: {
   db: DbClient;
   userId: string;
@@ -318,6 +219,101 @@ async function preloadInsightsForWorkouts(params: {
   return map;
 }
 
+async function createMultiWorkoutAnalysisViaLLM(params: {
+  userText: string;
+  locale: string;
+  payload: Awaited<ReturnType<typeof loadMultiWorkoutPayload>>;
+}) {
+  const { userText, locale, payload } = params;
+
+  const model = process.env.OPENAI_WORKOUT_MODEL ?? COACH_MODELS.responder ?? "gpt-4o-mini";
+
+  const strictFactsOnly = payload.facts_only_recommended || isStrictFactualSummaryQuestion(userText);
+
+  const system =
+    locale?.startsWith("ru")
+      ? [
+          "Ты — живой, внимательный и практичный беговой тренер.",
+          "Нужно анализировать несколько тренировок и их динамику по окнам времени.",
+          "Опирайся только на данные из FACTS_JSON.",
+          "Не выдумывай дистанции, темпы, пульс, цели, травмы, старты и даты.",
+          "Не называй человека 'пользователь'. Пиши естественно: 'у нас', 'по тренировкам', 'по бегу'.",
+          "Пиши дружелюбно, без канцелярита и без слащавости.",
+          "Если данных мало — прямо скажи это.",
+          strictFactsOnly
+            ? [
+                "Это фактологический вопрос про объём, количество, километраж, время или сводную статистику.",
+                "Отвечай коротко и точно по цифрам.",
+                "Не добавляй блоки 'Что можно улучшить', 'Что предлагаю дальше', рекомендации, риски и советы, если о них не спросили.",
+                "Не уходи в анализ одной тренировки.",
+              ].join("\n")
+            : [
+                "Если вопрос про динамику, прогресс или тренды — делай именно анализ динамики, а не одной тренировки.",
+                "Рекомендации давай только если они реально следуют из данных и уместны для вопроса.",
+                "Не повторяй шаблонные советы без необходимости.",
+                "Если вопрос не просит план — не строй подробный план.",
+              ].join("\n"),
+          strictFactsOnly
+            ? [
+                "Формат ответа:",
+                "1) краткий фактологический вывод,",
+                "2) затем 2–5 коротких пунктов с ключевыми цифрами.",
+              ].join("\n")
+            : [
+                "Формат ответа:",
+                "## Кратко",
+                "## Что видно по динамике",
+                "## Риски / что настораживает",
+                "## Что можно улучшить",
+                "## Что предлагаю дальше",
+                "Если какой-то раздел не нужен по смыслу, сократи его, а не раздувай.",
+              ].join("\n"),
+        ].join("\n")
+      : [
+          "You are a practical and friendly running coach.",
+          "Analyze multiple workouts and time-window trends.",
+          "Use only FACTS_JSON.",
+          "Do not invent metrics, goals, injuries, race dates, or history.",
+          "Do not refer to the person as 'the user'.",
+          "Be natural, concise, and helpful.",
+          "If data is thin, say so clearly.",
+          strictFactsOnly
+            ? [
+                "This is a factual summary question about count, mileage, time, or aggregate stats.",
+                "Answer briefly and precisely with numbers.",
+                "Do not add recommendations, risks, or next steps unless explicitly requested.",
+                "Do not drift into single-workout analysis.",
+              ].join("\n")
+            : [
+                "If the question is about trends or progress, analyze trends rather than one workout.",
+                "Do not add generic advice unless warranted by the question.",
+                "Do not create a detailed plan unless explicitly requested.",
+              ].join("\n"),
+        ].join("\n");
+
+  const resp = await openai.chat.completions.create({
+    model,
+    temperature: strictFactsOnly ? 0.2 : 0.35,
+    messages: [
+      { role: "system", content: system },
+      {
+        role: "user",
+        content:
+          "FACTS_JSON:\n" +
+          JSON.stringify(payload) +
+          "\n\nQUESTION:\n" +
+          userText +
+          "\n\n" +
+          (strictFactsOnly
+            ? "Ответь как на сводный вопрос по статистике тренировок."
+            : "Сделай разбор динамики нескольких тренировок. Если данных мало для сильных выводов — обозначь уровень уверенности."),
+      },
+    ],
+  });
+
+  return (resp.choices?.[0]?.message?.content ?? "").trim();
+}
+
 async function createWorkoutInsightViaLLM(params: {
   db: DbClient;
   userId: string;
@@ -330,6 +326,7 @@ async function createWorkoutInsightViaLLM(params: {
   const forceRegenerate = Boolean(options?.forceRegenerate);
   const followupUserText = (options?.followupUserText ?? "").trim() || null;
   const source = options?.source ?? null;
+  const anchorMessageId = options?.anchorMessageId ?? null;
 
   if (!forceRegenerate) {
     const existing = await getActiveWorkoutInsight({ db, workoutId });
@@ -364,6 +361,7 @@ async function createWorkoutInsightViaLLM(params: {
         "avg_pace_s_per_km",
         "avg_speed_kmh",
         "calories_kcal",
+        "avg_cadence_spm",
       ].join(",")
     )
     .eq("id", workoutId)
@@ -440,10 +438,11 @@ async function createWorkoutInsightViaLLM(params: {
     followup_user_context: followupUserText,
     followup_source: source,
     force_regenerate: forceRegenerate,
+    anchor_message_id: anchorMessageId,
   };
 
-  const promptVersion = "workout_insight_v2";
-  const model = process.env.OPENAI_WORKOUT_MODEL ?? COACH_MODELS.responder ?? "gpt-4.1-mini";
+  const promptVersion = "workout_insight_v3";
+  const model = process.env.OPENAI_WORKOUT_MODEL ?? COACH_MODELS.responder ?? "gpt-4o";
   const purpose = "workout_insight";
 
   const dedupSeed = forceRegenerate
@@ -474,23 +473,37 @@ async function createWorkoutInsightViaLLM(params: {
     locale?.startsWith("ru")
       ? [
           "Ты — внимательный и практичный тренер по выносливости.",
-          "Опирайся ТОЛЬКО на данные из FACTS_JSON и FOLLOWUP_USER_CONTEXT.",
-          "Не выдумывай числа, факты, цели, травмы или историю тренировок.",
-          "Если пользователь дал субъективный фидбек (усталость, боль, RPE, сон, восстановление) — обязательно встрои это в анализ как главный контекст интерпретации.",
-          "Не давай общих абстрактных советов. Привязывай выводы к этой конкретной тренировке.",
-          "Если данные неполные или подозрительные — прямо укажи это в разделе рисков.",
-          "Пиши компактно, по делу, без воды.",
-          "Верни СТРОГО JSON по схеме.",
+          "Опирайся только на данные из FACTS_JSON и FOLLOWUP_USER_CONTEXT.",
+          "Не выдумывай числа, факты, цели, историю или травмы.",
+          "Если пользователь дал субъективный фидбек, встрои его в анализ как главный контекст.",
+          "Не называй человека 'пользователь'. Пиши естественно: 'ты отметил', 'по ощущениям', 'судя по описанию'.",
+          "Не пиши сухо и канцелярски.",
+          "Не советуй агрессивно наращивать нагрузку, если есть усталость, боль, плохой сон или плохое восстановление.",
+          "Если данных недостаточно, прямо скажи это.",
+          "Формат строго:",
+          "## Кратко",
+          "## Что хорошо",
+          "## Риски",
+          "## Что дальше",
+          "## Вопросы",
+          "В разделе 'Вопросы' давай 0–2 вопроса. Если вопросы не нужны — напиши просто '-'",
         ].join("\n")
       : [
           "You are a careful and practical endurance coach.",
-          "Use ONLY values from FACTS_JSON and FOLLOWUP_USER_CONTEXT.",
-          "Do not invent numbers, facts, goals, injuries, or history.",
-          "If the user provided subjective feedback (fatigue, pain, RPE, sleep, recovery), incorporate it explicitly as the main interpretation context.",
-          "Avoid generic advice; tie conclusions to this exact workout.",
-          "If data is incomplete or suspicious, state that clearly in risks.",
-          "Be concise and specific.",
-          "Return STRICT JSON matching the schema.",
+          "Use only FACTS_JSON and FOLLOWUP_USER_CONTEXT.",
+          "Do not invent numbers, facts, goals, history, or injuries.",
+          "If there is subjective feedback, make it the main interpretation context.",
+          "Do not refer to the person as 'the user'.",
+          "Be natural and concise.",
+          "Do not recommend increasing load if there are signs of fatigue, pain, poor sleep, or poor recovery.",
+          "If data is insufficient, say so explicitly.",
+          "Use sections:",
+          "## Brief",
+          "## What went well",
+          "## Risks",
+          "## What next",
+          "## Questions",
+          "Questions can be 0-2. If none are needed, output '-'",
         ].join("\n");
 
   const schema = {
@@ -523,7 +536,7 @@ async function createWorkoutInsightViaLLM(params: {
 
     const resp = await openai.chat.completions.create({
       model,
-      temperature: 0.35,
+      temperature: 0.3,
       response_format: {
         type: "json_schema",
         json_schema: { name: "WorkoutInsight", schema },
@@ -536,19 +549,14 @@ async function createWorkoutInsightViaLLM(params: {
             "FACTS_JSON:\n" +
             JSON.stringify(facts) +
             followupBlock +
-            "\nСделай максимально полезный разбор одной конкретной тренировки.\n" +
-            "Формат content_md:\n" +
-            "## Кратко\n" +
-            "## Что хорошо\n" +
-            "## Риски\n" +
-            "## Что дальше\n" +
-            "## Вопросы\n\n" +
+            "\nСделай полезный разбор одной конкретной тренировки.\n" +
             "Требования:\n" +
-            "1) Если FOLLOWUP_USER_CONTEXT не пустой, обязательно учти его в разделах 'Риски' и 'Что дальше'.\n" +
-            "2) Если есть погода — используй её конкретно, без общих фраз.\n" +
-            "3) Если пользователь жалуется на усталость, боль, тяжесть, плохой сон, плохое восстановление — не предлагай безусловно усиливать нагрузку.\n" +
-            "4) Если данных недостаточно — прямо скажи это.\n" +
-            "5) Не выдумывай чисел.",
+            "1) Если FOLLOWUP_USER_CONTEXT не пустой — обязательно учти его в 'Риски' и 'Что дальше'.\n" +
+            "2) Если есть погода — используй её по делу.\n" +
+            "3) Если есть усталость, тяжесть, боль, плохой сон, плохое восстановление — не советуй резко прибавлять.\n" +
+            "4) Не пиши 'пользователь отметил'.\n" +
+            "5) Не выдумывай факты.\n" +
+            "6) Если вопросы не нужны — в разделе '## Вопросы' поставь '-'.",
         },
       ],
     });
@@ -784,23 +792,111 @@ export async function POST(req: NextRequest) {
 
     const recentHistory = pickRecentHistory(historyAll ?? [], 30);
 
+    stage = "intent_detection";
+    const generalPlanningIntent = isGeneralPlanningIntent(finalText);
+    const multiWorkoutIntent = !generalPlanningIntent && isMultiWorkoutAnalysisIntent(finalText);
+
+    if (multiWorkoutIntent) {
+      stage = "multi_workout_analysis_load";
+
+      const payload = await loadMultiWorkoutPayload({
+        supabase: db,
+        userId: user.id,
+        userText: finalText,
+      });
+
+      let answer = "";
+
+      try {
+        if (payload.summary_windows.every((x) => x.workouts_count === 0)) {
+          answer =
+            "Пока я не вижу тренировок в истории, чтобы посчитать динамику. Как только появятся записи, смогу собрать сводку по объёму, километражу, времени и трендам.";
+        } else if (payload.facts_only_recommended) {
+          answer = buildLocalMultiWorkoutFactAnswer(payload) ?? "";
+        } else {
+          answer = await createMultiWorkoutAnalysisViaLLM({
+            userText: finalText,
+            locale,
+            payload,
+          });
+        }
+      } catch (e) {
+        console.error("multi_workout_analysis_failed", e);
+        answer = buildLocalMultiWorkoutFactAnswer(payload) ?? "";
+      }
+
+      if (!answer) {
+        answer =
+          buildLocalMultiWorkoutFactAnswer(payload) ??
+          "Я посмотрел историю тренировок, но сейчас не смог собрать аккуратный ответ. Попробуй уточнить период: 4 недели, 3 месяца, 6 месяцев или всё время.";
+      }
+
+      const requestedWindowStats =
+        payload.summary_windows.find((x) => x.label === payload.requested_window) ?? null;
+
+      const ins = await insertCoachReply({
+        db,
+        threadId,
+        userId: user.id,
+        replyToId: userMsgRow.id,
+        body: answer,
+        stage: "multi_workout_analysis",
+        meta: {
+          model: payload.facts_only_recommended ? "local+sql" : COACH_MODELS.responder,
+          question_kind: payload.question_kind,
+          requested_window: payload.requested_window,
+          facts_only_recommended: payload.facts_only_recommended,
+          detailed_recent_workouts_count: payload.detailed_recent_workouts.length,
+          monthly_buckets_count: payload.monthly_buckets.length,
+          requested_window_workouts: requestedWindowStats?.workouts_count ?? null,
+          all_time_workouts:
+            payload.summary_windows.find((x) => x.label === "all_time")?.workouts_count ?? null,
+        },
+      });
+
+      return NextResponse.json({
+        threadId,
+        userMessage: userMsgRow,
+        coachMessage: ins.data,
+      });
+    }
+
     stage = "detect_workout_followup";
-    const lastWorkoutBoundCoachMsg = await getLastWorkoutBoundCoachMessageBefore({
-      db,
-      threadId,
-      beforeCreatedAt: userMsgRow.created_at,
-    });
+    const lastWorkoutBoundCoachMsg = !generalPlanningIntent
+      ? await getLastWorkoutBoundCoachMessageBefore({
+          db,
+          threadId,
+          beforeCreatedAt: userMsgRow.created_at,
+        })
+      : null;
 
     const replyWorkoutId = lastWorkoutBoundCoachMsg?.meta?.workout_id
       ? String(lastWorkoutBoundCoachMsg.meta.workout_id)
       : null;
 
-    const isWorkoutFollowup = Boolean(replyWorkoutId) && isLikelyWorkoutFollowup(finalText);
+    const isWorkoutFollowup =
+      !generalPlanningIntent &&
+      Boolean(replyWorkoutId) &&
+      isLikelyWorkoutFollowup(finalText);
 
-    if (isWorkoutFollowup && replyWorkoutId) {
+    if (isWorkoutFollowup && replyWorkoutId && lastWorkoutBoundCoachMsg) {
       stage = "workout_followup_insight";
 
       try {
+        const previousUserFollowups = await getFollowupUserMessagesSinceAnchor({
+          db,
+          threadId,
+          anchorCreatedAt: lastWorkoutBoundCoachMsg.created_at,
+          beforeCreatedAt: userMsgRow.created_at,
+        });
+
+        const subjectiveFollowups = previousUserFollowups
+          .filter((m) => isLikelyWorkoutFollowup(String(m.body ?? "")))
+          .map((m) => String(m.body ?? "").trim())
+          .filter(Boolean);
+
+        const mergedFollowupText = [...subjectiveFollowups, finalText].join("\n");
+
         const insight = await createWorkoutInsightViaLLM({
           db,
           userId: user.id,
@@ -808,8 +904,9 @@ export async function POST(req: NextRequest) {
           locale,
           options: {
             forceRegenerate: true,
-            followupUserText: finalText,
+            followupUserText: mergedFollowupText,
             source: "reply_to_workout_bound_message",
+            anchorMessageId: lastWorkoutBoundCoachMsg.id,
           },
         });
 
@@ -826,10 +923,12 @@ export async function POST(req: NextRequest) {
             stage: "workout_followup_insight",
             meta: {
               model: insight?.model ?? "llm",
-              prompt_version: insight?.prompt_version ?? "workout_insight_v2",
+              prompt_version: insight?.prompt_version ?? "workout_insight_v3",
               workout_id: replyWorkoutId,
               source: "reply_to_workout_bound_message",
+              anchor_message_id: lastWorkoutBoundCoachMsg.id,
               force_regenerated: true,
+              followup_messages_count: subjectiveFollowups.length + 1,
             },
           });
 
@@ -878,7 +977,10 @@ export async function POST(req: NextRequest) {
       plannerNeeds: planner.needs ?? DEFAULT_CONTEXT_NEEDS,
     });
 
-    const workoutIds = (context.workouts ?? []).map((w: any) => String((w as any)?.id ?? "")).filter(Boolean);
+    const workoutIds = (context.workouts ?? [])
+      .map((w: any) => String((w as any)?.id ?? ""))
+      .filter(Boolean);
+
     const insightsByWorkoutId = await preloadInsightsForWorkouts({
       db,
       userId: user.id,
@@ -887,7 +989,7 @@ export async function POST(req: NextRequest) {
 
     if (planner.fast_path?.enabled) {
       const wantsAnalysis = isWorkoutAnalysisIntent(finalText);
-      const looksLikeFollowup = isLikelyWorkoutFollowup(finalText);
+      const looksLikeFollowup = !generalPlanningIntent && isLikelyWorkoutFollowup(finalText);
       const kind = planner.fast_path.kind;
       const isLastOrNth = kind === "last_workout" || kind === "nth_workout";
 
@@ -939,7 +1041,7 @@ export async function POST(req: NextRequest) {
                 stage: looksLikeFollowup ? "workout_followup_insight" : "workout_insight",
                 meta: {
                   model: insight?.model ?? "llm",
-                  prompt_version: insight?.prompt_version ?? "workout_insight_v2",
+                  prompt_version: insight?.prompt_version ?? "workout_insight_v3",
                   workout_id: targetWorkoutId,
                   source: looksLikeFollowup
                     ? "analysis_request_with_subjective_feedback"
