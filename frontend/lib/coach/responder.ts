@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import { PlannerOut, WorkoutFact } from "./types";
 import { safeStringify } from "./utils";
 import { COACH_MODELS } from "./modelConfig";
+import { appendMotivationalTail } from "./motivation";
 
 type WeeklySchedule = {
   run_days?: string[];
@@ -10,7 +11,10 @@ type WeeklySchedule = {
 };
 
 // Экспортируем "быстрый" локальный ответ, чтобы route.ts мог обойти planner/LLM
-export function buildWeeklyScheduleLocalResponse(userText: string, threadMemory: any | null): string | null {
+export function buildWeeklyScheduleLocalResponse(
+  userText: string,
+  threadMemory: any | null
+): string | null {
   const ws = getWeeklyScheduleFromMemory(threadMemory);
   if (!ws) return null;
 
@@ -54,13 +58,16 @@ function getWeeklyScheduleFromMemory(mem: any | null): WeeklySchedule | null {
     const run_days = Array.isArray((ws as any).run_days) ? (ws as any).run_days : [];
     const ofp_days = Array.isArray((ws as any).ofp_days) ? (ws as any).ofp_days : [];
 
-    // нормализация строк
     const norm = (arr: any[]) =>
       arr
         .map((x) => String(x ?? "").trim().toLowerCase())
         .filter(Boolean);
 
-    const out: WeeklySchedule = { run_days: norm(run_days), ofp_days: norm(ofp_days) };
+    const out: WeeklySchedule = {
+      run_days: norm(run_days),
+      ofp_days: norm(ofp_days),
+    };
+
     if (!out.run_days?.length && !out.ofp_days?.length) return null;
     return out;
   } catch {
@@ -82,14 +89,17 @@ function dayCodeToRu(d: string): string {
 }
 
 function pickPreferredMinutes(mem: any | null, fallback = 40): number {
-  const v = mem?.preferences?.preferred_session_minutes?.value ?? mem?.preferences?.preferred_session_minutes ?? null;
+  const v =
+    mem?.preferences?.preferred_session_minutes?.value ??
+    mem?.preferences?.preferred_session_minutes ??
+    null;
+
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? Math.max(10, Math.min(240, n)) : fallback;
 }
 
 function pickConstraints(mem: any | null): string {
-  const t = String(mem?.profile?.constraints ?? mem?.constraints ?? "").trim();
-  return t;
+  return String(mem?.profile?.constraints ?? mem?.constraints ?? "").trim();
 }
 
 function isWeeklyPlanRequest(text: string): boolean {
@@ -104,11 +114,12 @@ function isOfpWhenRequest(text: string): boolean {
 
 function isForceOfpOnDay(text: string): { ok: boolean; dayRu?: string } {
   const t = (text ?? "").toLowerCase();
-  // "поставь офп на вторник"
   const m = t.match(
     /офп\s+на\s+(понедельник|вторник|среду|среда|четверг|пятниц(у|а)|суббот(у|а)|воскресенье)/i
   );
+
   if (!m) return { ok: false };
+
   const raw = String(m[1] ?? "").toLowerCase();
   const ru = raw
     .replace("среду", "Среда")
@@ -121,6 +132,7 @@ function isForceOfpOnDay(text: string): { ok: boolean; dayRu?: string } {
     .replace("субботу", "Суббота")
     .replace("суббота", "Суббота")
     .replace("воскресенье", "Воскресенье");
+
   return { ok: true, dayRu: ru };
 }
 
@@ -132,9 +144,14 @@ function buildLocalNoLoadWeeklyPlan(args: { mem: any | null; ws: WeeklySchedule 
   const runDays = (ws.run_days ?? []).map(dayCodeToRu);
   const ofpDays = (ws.ofp_days ?? []).map(dayCodeToRu);
 
-  // простой “без нагрузки” шаблон
-  const runText = `лёгкая ходьба или очень спокойный бег ${Math.max(20, Math.min(mins, 45))} мин (комфортно, без усталости)`;
-  const ofpText = `ОФП без ударной нагрузки ${Math.max(20, Math.min(mins, 45))} мин: мобильность, баланс, растяжка`;
+  const runText = `лёгкая ходьба или очень спокойный бег ${Math.max(
+    20,
+    Math.min(mins, 45)
+  )} мин (комфортно, без усталости)`;
+  const ofpText = `ОФП без ударной нагрузки ${Math.max(
+    20,
+    Math.min(mins, 45)
+  )} мин: мобильность, баланс, растяжка`;
   const restText = `отдых / прогулка 20–40 мин + лёгкая растяжка 5–10 мин`;
 
   const lines: string[] = [];
@@ -142,11 +159,35 @@ function buildLocalNoLoadWeeklyPlan(args: { mem: any | null; ws: WeeklySchedule 
   for (const d of runDays) lines.push(`- ${d}: ${runText}`);
   for (const d of ofpDays) lines.push(`- ${d}: ${ofpText}`);
 
-  // если хотим чуть понятнее — добавим “остальные дни”
   lines.push(`- Остальные дни: ${restText}`);
 
-  const header = `План на неделю без нагрузки по твоему weekly_schedule${constraints ? ` (${constraints})` : ""}:`;
+  const header = `План на неделю без нагрузки по твоему weekly_schedule${
+    constraints ? ` (${constraints})` : ""
+  }:`;
+
   return [header, ...lines].join("\n");
+}
+
+function shouldApplyMotivationLayer(userText: string, answer: string) {
+  if (!answer.trim()) return false;
+
+  const t = (userText ?? "").toLowerCase();
+
+  if (
+    /сколько/.test(t) ||
+    /километраж/.test(t) ||
+    /общий километраж/.test(t) ||
+    /сколько км/.test(t) ||
+    /сколько часов/.test(t) ||
+    /общее время/.test(t) ||
+    /какие виды спорта/.test(t) ||
+    /какие типы тренировок/.test(t) ||
+    /по каким видам спорта/.test(t)
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 export async function runResponder(args: {
@@ -174,6 +215,14 @@ export async function runResponder(args: {
     "- Если спросили 'когда поставить ОФП' — отвечать строго согласно weekly_schedule.",
     "- weekly_schedule имеет приоритет над preferred_days_per_week.",
     "",
+    "СТИЛЬ ОТВЕТА:",
+    "- Кратко, по делу, по-русски.",
+    "- Не пиши сухим канцеляритом.",
+    "- Не называй человека 'пользователь'.",
+    "- Если вопрос про самочувствие, мотивацию, уверенность, тяжёлый период или сомнения — отвечай по-человечески и поддерживающе.",
+    "- Не давай ложную мотивацию и не хвали без причины.",
+    "- Не добавляй длинные общие дисклеймеры.",
+    "",
     "Формат: кратко, по делу. Можно списком.",
   ].join("\n");
 
@@ -199,5 +248,15 @@ export async function runResponder(args: {
     ],
   });
 
-  return completion.choices[0]?.message?.content ?? "";
+  let answer = completion.choices[0]?.message?.content ?? "";
+  answer = answer.trim();
+
+  if (shouldApplyMotivationLayer(userText, answer)) {
+    answer = appendMotivationalTail({
+      userText,
+      coachText: answer,
+    });
+  }
+
+  return answer;
 }

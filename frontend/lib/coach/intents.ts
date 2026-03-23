@@ -25,6 +25,14 @@ export type RequestedWindowKey =
   | "all_time"
   | null;
 
+// Added MotivationIntentKind type
+export type MotivationIntentKind =
+  | "motivation_dip"
+  | "confidence_dip"
+  | "consistency_struggle"
+  | "burnout_risk"
+  | "unknown";
+
 function normalizeText(value: string) {
   return (value ?? "")
     .toLowerCase()
@@ -122,6 +130,29 @@ const FOLLOWUP_MARKERS = [
   "зашло",
   "не зашло",
   "тяжесть в ногах",
+  // expanded markers for "struggle"
+  "добежал",
+  "но добежал",
+  "еле добежал",
+  "еле доехал",
+  "еле дотерпел",
+  "еле вытянул",
+  "развалился",
+  "разобран",
+  "забил",
+  "не вывез",
+  "не тянулось",
+  "не катило",
+  "не пошло",
+  "тяжко",
+  "ватные ноги",
+  "деревянные ноги",
+  "забитые ноги",
+  "ноги не бежали",
+  "тяжело но добежал",
+  "тяжело, но добежал",
+  "было очень тяжело",
+  "было прям тяжело",
 ];
 
 const GENERAL_PLANNING_MARKERS = [
@@ -439,6 +470,87 @@ const TRAINING_DATA_NUDGE_MARKERS = [
   "синк завершился",
 ];
 
+// Motivation-related marker sets
+const MOTIVATION_DIP_MARKERS = [
+  "мотивация просела",
+  "нет мотивации",
+  "мотивации нет",
+  "мало мотивации",
+  "не хватает мотивации",
+  "пропала мотивация",
+  "упала мотивация",
+  "падает мотивация",
+  "не хочу тренироваться",
+  "не хочется тренироваться",
+  "не хочу бегать",
+  "не хочется бегать",
+  "не хочу выходить на тренировку",
+  "не хочется выходить на тренировку",
+  "тяжело себя заставлять",
+  "трудно себя заставлять",
+  "сложно себя заставлять",
+  "заставлять себя выходить",
+  "не могу заставить себя",
+  "не могу собраться на тренировку",
+  "не могу выйти на тренировку",
+  "лень бегать",
+  "лень тренироваться",
+  "не идет бег",
+  "бег не идет",
+  "не идет тренироваться",
+  "не тянет бегать",
+  "не тянет на тренировку",
+  "выгорел",
+  "выгорела",
+  "выгорание",
+  "подвыгорел",
+  "подвыгорела",
+  "устал от бега",
+  "надоел бег",
+  "надоели тренировки",
+  "не получаю удовольствия от бега",
+  "без настроения на бег",
+  "не хочется выходить",
+  "не хочется на пробежку",
+];
+
+const CONFIDENCE_DIP_MARKERS = [
+  "кажется стал хуже бежать",
+  "мне кажется я стал хуже бежать",
+  "я стал хуже бежать",
+  "как будто стал хуже бежать",
+  "как будто форма просела",
+  "форма просела",
+  "просела форма",
+  "как будто сдал",
+  "сдал по форме",
+  "ощущение что прогресса нет",
+  "есть ощущение что прогресса нет",
+  "чувство что прогресса нет",
+  "прогресса нет",
+  "нет прогресса",
+  "будто прогресса нет",
+  "я хуже бегу",
+  "бегу хуже",
+  "чувствую себя слабее",
+  "стал медленнее",
+  "как будто стал медленнее",
+  "форма ушла",
+  "потерял форму",
+  "теряю форму",
+];
+
+const CONSISTENCY_STRUGGLE_MARKERS = [
+  "сбился режим тренировок",
+  "не получается держать режим",
+  "не могу держать режим",
+  "не получается регулярно тренироваться",
+  "не выходит регулярно бегать",
+  "не получается выходить стабильно",
+  "в последние недели было тяжело себя заставлять",
+  "не хватает дисциплины",
+];
+
 export function isWorkoutBoundCoachMeta(meta: Record<string, any> | null | undefined) {
   if (!meta) return false;
 
@@ -479,6 +591,29 @@ export function isGeneralPlanningIntent(text: string) {
   const t = normalizeText(text);
   if (!t) return false;
   return hasAny(t, GENERAL_PLANNING_MARKERS);
+}
+
+// Detect motivation/mental/energy dip intent and classify them
+export function detectMotivationIntentKind(text: string): MotivationIntentKind {
+  const t = normalizeText(text);
+  if (!t) return "unknown";
+
+  if (hasAny(t, MOTIVATION_DIP_MARKERS)) return "motivation_dip";
+  if (hasAny(t, CONFIDENCE_DIP_MARKERS)) return "confidence_dip";
+  if (hasAny(t, CONSISTENCY_STRUGGLE_MARKERS)) return "consistency_struggle";
+
+  if (
+    (t.includes("устал") || t.includes("выгор")) &&
+    (t.includes("бег") || t.includes("трениров"))
+  ) {
+    return "burnout_risk";
+  }
+
+  return "unknown";
+}
+
+export function isMotivationRelatedIntent(text: string) {
+  return detectMotivationIntentKind(text) !== "unknown";
 }
 
 export function detectRequestedWindow(text: string): RequestedWindowKey {
@@ -645,7 +780,12 @@ export function detectMultiWorkoutQuestionKind(text: string): MultiWorkoutQuesti
   ) {
     return "factual_summary";
   }
+
+  // мотивационные / эмоциональные запросы не должны уходить в multi-workout
+  if (isMotivationRelatedIntent(t)) return "unknown";
+
   if (hasAny(t, PROGRESS_MARKERS)) return "progress_analysis";
+
   if (hasAny(t, TREND_MARKERS)) return "trend_analysis";
 
   return "unknown";
@@ -660,14 +800,33 @@ export function isFactualMultiWorkoutIntent(text: string) {
   );
 }
 
-export function isMultiWorkoutAnalysisIntent(text: string) {
+export function isMultiWorkoutAnalysisIntent(text: string): boolean {
   const t = normalizeText(text);
-  if (!t) return false;
+
+  // ------------------------------------------------------------
+  // если пользователь просит разобрать одну тренировку
+  // НЕ считаем это multi-workout анализом
+  // ------------------------------------------------------------
+
+  if (
+    /последн.*трениров/.test(t) ||
+    /разбери.*трениров/.test(t) ||
+    /эту.*трениров/.test(t) ||
+    /одн.*трениров/.test(t) ||
+    /пришли.*последн.*трениров/.test(t) ||
+    /информац.*последн.*трениров/.test(t) ||
+    /данн.*последн.*трениров/.test(t)
+  ) {
+    return false;
+  }
+
+  // Exclude clear motivation-related inquiries
+  if (isMotivationRelatedIntent(t)) return false;
 
   const hasBroad = hasAny(t, MULTI_WORKOUT_BROAD_MARKERS);
   const hasExplicitMulti = hasAny(t, MULTI_WORKOUT_EXPLICIT_MARKERS);
   const hasDetectedWindow = detectRequestedWindow(t) !== null;
-  const hasDetectedKind = detectMultiWorkoutQuestionKind(t) !== "unknown";
+  // const hasDetectedKind = detectMultiWorkoutQuestionKind(t) !== "unknown";
 
   const hasPluralTrainingContext =
     (t.includes("тренировк") || t.includes("пробежк") || t.includes("бег")) &&
@@ -685,7 +844,7 @@ export function isMultiWorkoutAnalysisIntent(text: string) {
       t.includes("темп") ||
       t.includes("чсс"));
 
-  return hasBroad || hasExplicitMulti || hasDetectedWindow || hasDetectedKind || hasPluralTrainingContext;
+  return hasBroad || hasExplicitMulti || hasDetectedWindow || hasPluralTrainingContext;
 }
 
 export function isTrainingDataNudgeIntent(text: string) {
@@ -741,3 +900,9 @@ export async function getFollowupUserMessagesSinceAnchor(params: {
   if (error) return [];
   return (data ?? []) as CoachMessageLite[];
 }
+
+// ------------------------------------------------------------
+// Motivation intent (proxy export)
+// ------------------------------------------------------------
+
+export const isMotivationIntent = isMotivationRelatedIntent;

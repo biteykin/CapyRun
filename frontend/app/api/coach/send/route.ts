@@ -39,12 +39,15 @@ import {
   isLikelyWorkoutFollowup,
   isMultiWorkoutAnalysisIntent,
   isWorkoutAnalysisIntent,
+  isMotivationIntent,
 } from "@/lib/coach/intents";
 import {
   buildLocalMultiWorkoutFactAnswer,
   isStrictFactualSummaryQuestion,
   loadMultiWorkoutPayload,
 } from "@/lib/coach/multiWorkout";
+
+import { buildMotivationLocalResponse } from "@/lib/coach/motivation";
 
 export const runtime = "nodejs";
 
@@ -409,6 +412,11 @@ async function createMultiWorkoutAnalysisViaLLM(params: {
           "Ты — живой, внимательный и практичный беговой тренер.",
           "Нужно анализировать несколько тренировок и их динамику по окнам времени.",
           "Опирайся только на данные из FACTS_JSON.",
+          "Никогда не делай разбор одной тренировки.",
+          "Если вопрос про форму, прогресс, состояние или динамику — анализируй только серию тренировок.",
+          "Используй агрегаты и окна времени (summary_windows).",
+          "Не пересказывай последнюю пробежку.",
+          "Не начинай ответ с описания одной тренировки.",
           "Не выдумывай дистанции, темпы, пульс, цели, травмы, старты и даты.",
           "Не называй человека 'пользователь'. Пиши естественно: 'у нас', 'по тренировкам', 'по бегу'.",
           "Пиши дружелюбно, без канцелярита и без слащавости.",
@@ -639,8 +647,9 @@ async function createWorkoutInsightViaLLM(params: {
           "## Что хорошо",
           "## Риски",
           "## Что дальше",
-          "## Вопросы",
-          "В разделе 'Вопросы' давай 0–2 вопроса. Если вопросы не нужны — напиши просто '-'",
+          "## Вопросы (опционально)",
+          "Добавляй раздел '## Вопросы' только если действительно есть 1–2 полезных уточняющих вопроса.",
+          "Если вопросов нет — не выводи этот раздел вообще.",
         ].join("\n")
       : [
           "You are a careful and practical endurance coach.",
@@ -710,7 +719,7 @@ async function createWorkoutInsightViaLLM(params: {
             "3) Если есть усталость, тяжесть, боль, плохой сон, плохое восстановление — не советуй резко прибавлять.\n" +
             "4) Не пиши 'пользователь отметил'.\n" +
             "5) Не выдумывай факты.\n" +
-            "6) Если вопросы не нужны — в разделе '## Вопросы' поставь '-'.",
+            "6) Если нечего уточнить — не выводи раздел '## Вопросы' совсем.",
         },
       ],
     });
@@ -951,10 +960,51 @@ export async function POST(req: NextRequest) {
     const trainingDataNudgeIntent = isTrainingDataNudgeIntent(finalText);
     const questionKind = detectMultiWorkoutQuestionKind(finalText);
     const requestedWindow = detectRequestedWindow(finalText);
+
+    const explicitSingleWorkoutAnalysisIntent =
+      !generalPlanningIntent &&
+      isWorkoutAnalysisIntent(finalText) &&
+      questionKind === "unknown" &&
+      requestedWindow == null;
+
+    // ------------------------------------------------------------
+    // Motivation layer (локальный быстрый ответ)
+    // ------------------------------------------------------------
+
+    if (
+      !generalPlanningIntent &&
+      !explicitSingleWorkoutAnalysisIntent &&
+      isMotivationIntent(finalText)
+    ) {
+      const motivationText = buildMotivationLocalResponse({
+        text: finalText,
+        threadMemory,
+      });
+
+      const ins = await insertCoachReply({
+        db,
+        threadId,
+        userId: user.id,
+        replyToId: userMsgRow.id,
+        body: motivationText,
+        stage: "motivation_local",
+        meta: { model: "local" },
+      });
+
+      return NextResponse.json({
+        threadId,
+        userMessage: userMsgRow,
+        coachMessage: ins.data,
+      });
+    }
+
     const factualMultiWorkoutIntent =
       !generalPlanningIntent &&
       (isFactualMultiWorkoutIntent(finalText) || requestedWindow === "all");
-    const multiWorkoutIntent = !generalPlanningIntent && isMultiWorkoutAnalysisIntent(finalText);
+    const multiWorkoutIntent =
+      !generalPlanningIntent &&
+      !explicitSingleWorkoutAnalysisIntent &&
+      isMultiWorkoutAnalysisIntent(finalText);
 
     if (trainingDataNudgeIntent) {
       const ins = await insertCoachReply({
@@ -1116,6 +1166,7 @@ export async function POST(req: NextRequest) {
 
     const isWorkoutFollowup =
       !generalPlanningIntent &&
+      !isMultiWorkoutAnalysisIntent(finalText) &&
       Boolean(replyWorkoutId) &&
       isLikelyWorkoutFollowup(finalText);
 
