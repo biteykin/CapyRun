@@ -69,6 +69,12 @@ export const PlannerSchema = z.object({
       preferred_days_per_week: z.number().int().min(0).max(14).optional(),
       preferred_session_minutes: z.number().int().min(5).max(240).optional(),
       sports_focus: z.array(z.string().max(40)).max(10).optional(),
+      weekly_schedule: z
+        .object({
+          run_days: z.array(z.string().max(16)).max(7).optional(),
+          ofp_days: z.array(z.string().max(16)).max(7).optional(),
+        })
+        .optional(),
     })
     .optional(),
 

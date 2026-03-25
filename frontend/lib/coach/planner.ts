@@ -41,7 +41,7 @@ function parseDateRangeWindowDays(text: string): number | null {
     from = new Date(`${dot[3]}-${mm}-${dd}T00:00:00Z`);
   }
 
-  const ru = t.match(/с\s+(\д{1,2})\s+(январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр)\w*\s+(\д{4})/);
+  const ru = t.match(/с\s+(\d{1,2})\s+(январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр)\w*\s+(\d{4})/);
   if (!from && ru) {
     const day = Number(ru[1]);
     const year = Number(ru[3]);
@@ -85,7 +85,7 @@ function parseCalendarRange(text: string): DateRange | null {
   }
 
   // 2) "с DD.MM.YYYY по DD.MM.YYYY"
-  m = t.match(/с\s+(\d{1,2})\.(\d{1,2})\.(\d{4})\s+по\s+(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+  m = t.match(/с\s+(\d{1,2})\.(\d{1,2})\.(\d{4})\s+по\s+(\d{1,2})\.(\d{1,2})\.(\д{4})/);
   if (m) {
     const d1 = String(m[1]).padStart(2, "0");
     const mo1 = String(m[2]).padStart(2, "0");
@@ -232,6 +232,99 @@ function parseWindowDaysFromText(text: string): number | null {
   if (/\bмесяц\b/.test(t)) return 30;
 
   return null;
+}
+
+function parsePlanningHorizonDays(text: string): number | null {
+  const t = (text ?? "").toLowerCase();
+  if (!t) return null;
+
+  if (
+    /\b7\s*(дн|дня|дней)\b/.test(t) ||
+    /на\s+недел/.test(t) ||
+    /на\s+7\s+дней/.test(t) ||
+    /на\s+ближайшую\s+недел/.test(t) ||
+    /на\s+следующую\s+недел/.test(t)
+  ) {
+    return 7;
+  }
+
+  if (
+    /\b14\s*(дн|дня|дней)\b/.test(t) ||
+    /на\s+2\s*недел/.test(t) ||
+    /на\s+две\s+недел/.test(t) ||
+    /на\s+14\s+дней/.test(t)
+  ) {
+    return 14;
+  }
+
+  if (
+    /на\s+30\s+дней/.test(t) ||
+    /на\s+месяц/.test(t) ||
+    /на\s+30д/.test(t)
+  ) {
+    return 30;
+  }
+
+  if (
+    /на\s+2\s+месяц/.test(t) ||
+    /на\s+два\s+месяц/.test(t) ||
+    /на\s+60\s+дней/.test(t)
+  ) {
+    return 60;
+  }
+
+  return null;
+}
+
+function isReadOnlyPlanningRequest(text: string): boolean {
+  const t = (text ?? "").toLowerCase();
+  if (!t) return false;
+
+  return (
+    /составь\s+план/.test(t) ||
+    /предложи\s+план/.test(t) ||
+    /дай\s+план/.test(t) ||
+    /план\s+трениров/.test(t) ||
+    /план\s+на\s+недел/.test(t) ||
+    /план\s+на\s+2\s*недел/.test(t) ||
+    /план\s+на\s+месяц/.test(t) ||
+    /план\s+на\s+2\s+месяц/.test(t) ||
+    /что\s+мне\s+делать\s+на\s+этой\s+недел/.test(t) ||
+    /что\s+мне\s+делать\s+в\s+ближайшие\s+2\s+недел/.test(t) ||
+    /как\s+мне\s+тренироваться\s+ближайшие/.test(t) ||
+    /распиши\s+тренировки/.test(t) ||
+    /распиши\s+план/.test(t)
+  );
+}
+
+function localReadOnlyPlanPlanner(userText: string): PlannerOut | null {
+  const t = (userText ?? "").trim().toLowerCase();
+  if (!t) return null;
+  if (!isReadOnlyPlanningRequest(t)) return null;
+
+  const horizonDays = parsePlanningHorizonDays(t) ?? 7;
+
+  const workoutsWindowDays =
+    horizonDays <= 14 ? 90 : horizonDays <= 30 ? 120 : 180;
+
+  return {
+    intent: "plan",
+    response_mode: "answer",
+    clarify_question: null,
+    needs: {
+      workouts_window_days: workoutsWindowDays,
+      workouts_limit: 80,
+      include_coach_home: true,
+      include_thread_memory: true,
+      include_geo: false,
+      include_calendar: false,
+    },
+    fast_path: { enabled: false },
+    memory_patch: {},
+    debug: {
+      rationale_short: `local_readonly_plan:${horizonDays}d`,
+    },
+  };
 }
 
 // -----------------------------
@@ -513,6 +606,14 @@ export async function runPlanner(args: {
   }
 
   // 0) быстрые локальные роуты (улучшают UX и экономят токены)
+  const localPlan = localReadOnlyPlanPlanner(userText);
+  if (localPlan) {
+    if (weekly) {
+      localPlan.memory_patch = { ...(localPlan.memory_patch ?? {}), weekly_schedule: weekly } as any;
+    }
+    return localPlan;
+  }
+
   const localFp = localFastPathFromText(userText);
   if (localFp) {
     if (weekly) {
@@ -547,6 +648,9 @@ export async function runPlanner(args: {
     "6) fast_path включай только для очень простых вопросов про тренировки: count/list/last/longest.",
     "7) Если есть слова про боль/травму/подскользнулся/упал — intent='injury'.",
     "8) Если запрос 'рекомендации по последней тренировке' — intent='analysis', fast_path=false.",
+    "9) Если пользователь просит план тренировок на 7/14/30/60 дней, ближайшую неделю, две недели, месяц или два месяца — intent='plan'.",
+    "10) Для read-only планирования НЕ ставь clarify без крайней необходимости.",
+    "11) Для запросов про план тренировок fast_path=false.",
     "",
     "ВАЖНО:",
     "Если пользователь отвечает коротко на предыдущий вопрос тренера",
@@ -565,6 +669,9 @@ export async function runPlanner(args: {
     "- user: 'темп последней тренировки?' => intent=analysis (или simple_fact), needs.workouts_window_days=14, fast_path=false",
     "- user: 'легко' (после вопроса тренера 'как по ощущениям?') => intent=analysis, response_mode=answer, clarify_question=null",
     "- user: 'подскользнулся на льду' => intent=injury",
+    "- user: 'составь план на 7 дней' => intent=plan, response_mode=answer, fast_path=false",
+    "- user: 'дай план тренировок на 2 недели' => intent=plan, response_mode=answer, fast_path=false",
+    "- user: 'как мне тренироваться ближайший месяц?' => intent=plan, response_mode=answer, fast_path=false",
   ].join("\n");
 
   const plannerUser = safeStringify(

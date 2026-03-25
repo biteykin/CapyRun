@@ -48,6 +48,7 @@ import {
 } from "@/lib/coach/multiWorkout";
 
 import { buildMotivationLocalResponse } from "@/lib/coach/motivation";
+import { loadPrimaryGoal, formatGoalForLLM } from "@/lib/coach/goal";
 
 export const runtime = "nodejs";
 
@@ -870,6 +871,12 @@ export async function POST(req: NextRequest) {
     if (!user?.id) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     insertedUserId = user.id;
 
+    stage = "load_active_goal";
+    const activeGoal = await loadPrimaryGoal({
+      supabase: db,
+      userId: user.id,
+    });
+
     stage = "thread_resolve";
     let threadId: string | null = reqThreadId;
 
@@ -927,6 +934,18 @@ export async function POST(req: NextRequest) {
     const memTop = await loadMemoryTopDirect({ supabase: db, userId: user.id });
     const memoryTopForLLM = normalizeMemoryForLLM(memTop?.items ?? []);
     const threadMemory = mergeLegacyMemory(memoryTopForLLM, legacyThreadMemory);
+
+    const threadMemoryWithGoal = activeGoal
+      ? {
+          ...(threadMemory ?? {}),
+          goal: formatGoalForLLM(activeGoal),
+          goals: {
+            ...((threadMemory as any)?.goals ?? {}),
+            current: formatGoalForLLM(activeGoal),
+            primary: formatGoalForLLM(activeGoal),
+          },
+        }
+      : threadMemory;
 
     getDialogState(threadMeta);
 
@@ -1250,7 +1269,7 @@ export async function POST(req: NextRequest) {
     }
 
     stage = "planner";
-    const planner = await runPlanner({ openai, userText: finalText, threadMemory, recentHistory });
+    const planner = await runPlanner({ openai, userText: finalText, threadMemory: threadMemoryWithGoal, recentHistory });
 
     if (planner.memory_patch && Object.keys(planner.memory_patch).length) {
       await applyMemoryPatch({
@@ -1417,7 +1436,8 @@ export async function POST(req: NextRequest) {
         openai,
         userText: finalText,
         planner,
-        threadMemory: mergeLegacyMemory(context.memory ?? null, legacyThreadMemory),
+        // goal: activeGoal, -- goal argument is removed, replaced in threadMemory logic below
+        threadMemory: mergeLegacyMemory(context.memory ?? null, threadMemoryWithGoal ?? legacyThreadMemory),
         workouts: context.workouts ?? [],
         coachHome: context.coachHome ?? null,
         recentHistory,
@@ -1437,7 +1457,19 @@ export async function POST(req: NextRequest) {
       replyToId: userMsgRow.id,
       body: answer,
       stage: "answer",
-      meta: { model: COACH_MODELS.responder },
+      meta: {
+        model: COACH_MODELS.responder,
+        goal_snapshot: activeGoal
+          ? {
+              id: activeGoal.id,
+              title: activeGoal.title ?? null,
+              type: activeGoal.type ?? null,
+              sport: activeGoal.sport ?? null,
+              date_to: activeGoal.dateTo ?? null,
+              status: activeGoal.status ?? null,
+            }
+          : null,
+      },
     });
 
     return NextResponse.json({ threadId, userMessage: userMsgRow, coachMessage: ins.data });
