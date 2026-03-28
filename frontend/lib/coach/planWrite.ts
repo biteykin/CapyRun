@@ -141,7 +141,7 @@ export function isLikelyPlanConfirmAction(
 
   if (a === "confirm_plan") return true;
 
-  return /^(ок|окей|да|okay|подтверждаю|подтвердить|да,? ставим|ставим|сохрани план|сохранить план)$/i.test(
+  return /^(ок|окей|ok|okay|да|подтверждаю|подтвердить|да,? ставим|ставим|сохрани план|сохранить план)$/i.test(
     t
   );
 }

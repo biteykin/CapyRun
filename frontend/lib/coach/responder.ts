@@ -23,6 +23,18 @@ type GoalSnapshot = {
   raw: any | null;
 };
 
+type JsonObject = Record<string, unknown>;
+
+type PlanStepDraft = {
+  type?: string;
+  label: string;
+  duration_min?: number | null;
+  distance_km?: number | null;
+  repeats?: number | null;
+  target?: string | null;
+  notes?: string | null;
+};
+
 function normalizeText(value: string) {
   return (value ?? "")
     .toLowerCase()
@@ -60,6 +72,867 @@ function addDaysToDateOnly(dateOnly: string, days: number) {
   const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
   const dd = String(d.getUTCDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
+}
+
+function asObject(value: unknown): JsonObject | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonObject)
+    : null;
+}
+
+function pickString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) return trimmed;
+    }
+  }
+  return null;
+}
+
+function pickNumber(...values: unknown[]): number | null {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string") {
+      const normalized = value.replace(",", ".").trim();
+      if (!normalized) continue;
+      const parsed = Number(normalized);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return null;
+}
+
+function parseDistanceKmFromText(...values: Array<string | null | undefined>): number | null {
+  for (const raw of values) {
+    const text = String(raw ?? "").replace(",", ".").trim();
+    if (!text) continue;
+
+    const kmMatch = text.match(/(\d+(?:\.\d+)?)\s*км\b/i);
+    if (kmMatch) {
+      const n = Number(kmMatch[1]);
+      if (Number.isFinite(n)) return n;
+    }
+
+    const meterMatch = text.match(/(\d+(?:\.\d+)?)\s*м\b/i);
+    if (meterMatch) {
+      const n = Number(meterMatch[1]);
+      if (Number.isFinite(n)) return Number((n / 1000).toFixed(2));
+    }
+  }
+  return null;
+}
+
+function parseDurationMinFromText(...values: Array<string | null | undefined>): number | null {
+  for (const raw of values) {
+    const text = String(raw ?? "").replace(",", ".").trim();
+    if (!text) continue;
+
+    const minMatch = text.match(/(\d+(?:\.\d+)?)\s*мин\b/i);
+    if (minMatch) {
+      const n = Number(minMatch[1]);
+      if (Number.isFinite(n)) return Math.round(n);
+    }
+
+    const hourMinMatch = text.match(/(\d+)\s*ч(?:ас|аса|)\s*(\d+)?\s*мин?/i);
+    if (hourMinMatch) {
+      const h = Number(hourMinMatch[1] ?? 0);
+      const m = Number(hourMinMatch[2] ?? 0);
+      const total = h * 60 + m;
+      if (Number.isFinite(total) && total > 0) return total;
+    }
+  }
+  return null;
+}
+
+function inferEffortFromText(...values: Array<string | null | undefined>): string | null {
+  const joined = normalizeText(values.filter(Boolean).join(" "));
+  if (!joined) return null;
+
+  if (/очень легко|восстанов/.test(joined)) return "очень легко";
+  if (/легк/.test(joined)) return "легко";
+  if (/умерен|комфорт/.test(joined)) return "умеренно";
+  if (/темпов|порог/.test(joined)) return "умеренно-тяжело";
+  if (/интервал|ускор/.test(joined)) return "тяжелые отрезки, восстановление между ними";
+  return null;
+}
+
+function stringifyStructuredValue(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || null;
+  }
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((item) => {
+        if (typeof item === "string") return item.trim();
+        if (item && typeof item === "object") {
+          const obj = item as JsonObject;
+          const name = pickString(obj.name, obj.label, obj.title);
+          const reps = pickNumber(obj.reps, obj.repeats);
+          const sets = pickNumber(obj.sets);
+          const duration = pickString(obj.duration, obj.duration_sec, obj.duration_min);
+          const chunks = [
+            name,
+            sets != null ? `${sets} подхода` : null,
+            reps != null ? `${reps} повторений` : null,
+            duration,
+          ].filter(Boolean);
+          return chunks.join(", ");
+        }
+        return null;
+      })
+      .filter(Boolean);
+    return parts.length ? parts.join("; ") : null;
+  }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return null;
+    }
+  }
+  return String(value);
+}
+
+function startOfIsoWeek(dateOnly: string) {
+  const m = dateOnly.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return dateOnly;
+
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  const day = d.getUTCDay(); // 0=Sun,1=Mon,...6=Sat
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  d.setUTCDate(d.getUTCDate() + diffToMonday);
+
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function nextIsoMondayFrom(dateOnly: string) {
+  const thisMonday = startOfIsoWeek(dateOnly);
+  return addDaysToDateOnly(thisMonday, 7);
+}
+
+function inferPlanAnchorDate(userText: string, planner: PlannerOut): string {
+  const t = normalizeText(userText);
+  const today = getTodayDateOnlyUtc();
+
+  const explicitlyNextWeek =
+    /следующ(ую|ей)\s+недел/.test(t) ||
+    /на\s+следующую\s+неделю/.test(t);
+
+  const weeklyPlanLike =
+    /на\s+7\s*(дн|дня|дней)/.test(t) ||
+    /на\s+недел/.test(t) ||
+    /на\s+14\s*(дн|дня|дней)/.test(t) ||
+    /на\s+2\s*недел/.test(t);
+
+  if (explicitlyNextWeek || weeklyPlanLike || planner?.intent === "plan") {
+    return nextIsoMondayFrom(today);
+  }
+
+  return today;
+}
+
+function normalizeStructuredPlanDates(
+  plan: StructuredPlan | null,
+  userText: string,
+  planner: PlannerOut
+): StructuredPlan | null {
+  if (!plan) return null;
+
+  const anchor = inferPlanAnchorDate(userText, planner);
+
+  const sessions = (plan.sessions ?? []).map((session, idx) => {
+    const dayIndex =
+      typeof session.day_index === "number" && Number.isFinite(session.day_index)
+        ? Math.max(0, Math.trunc(session.day_index))
+        : idx;
+
+    const normalizedDate = addDaysToDateOnly(anchor, dayIndex);
+
+    return {
+      ...session,
+      day_index: dayIndex,
+      date: normalizedDate,
+    };
+  });
+
+  const horizonDays =
+    Number.isFinite(Number(plan.horizon_days)) && Number(plan.horizon_days) > 0
+      ? Math.trunc(Number(plan.horizon_days))
+      : parsePlanHorizonDays(userText, planner) ?? sessions.length;
+
+  const endsOn = addDaysToDateOnly(anchor, Math.max(0, horizonDays - 1));
+
+  return {
+    ...plan,
+    starts_on: anchor,
+    ends_on: endsOn,
+    overwrite_range: {
+      from: anchor,
+      to: endsOn,
+    },
+    sessions,
+  };
+}
+
+function normalizeWhitespace(value: string | null | undefined): string | null {
+  if (value == null) return null;
+  const s = String(value).replace(/\s+/g, " ").trim();
+  return s || null;
+}
+
+function normalizeNullableString(value: unknown): string | null {
+  if (value == null) return null;
+  const s = String(value).trim();
+  return s || null;
+}
+
+function normalizeNullableNumber(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function hasStepType(steps: PlanStepDraft[], ...types: string[]): boolean {
+  const wanted = new Set(types.map((x) => x.trim().toLowerCase()));
+  return steps.some((step) => {
+    const t = String(step.type ?? "").trim().toLowerCase();
+    return wanted.has(t);
+  });
+}
+
+function sumStepDurations(steps: PlanStepDraft[]): number | null {
+  const total = steps.reduce((sum, step) => {
+    const duration = step.duration_min ?? null;
+    const repeats = step.repeats ?? 1;
+    if (duration == null || !Number.isFinite(duration)) return sum;
+    return sum + duration * repeats;
+  }, 0);
+
+  return total > 0 ? Math.round(total) : null;
+}
+
+function extractHrTargetFromText(...values: Array<string | null | undefined>): string | null {
+  for (const raw of values) {
+    const text = String(raw ?? "").trim();
+    if (!text) continue;
+
+    const pulseMatch =
+      text.match(/пульс\s*(?:до|не выше|не выше чем)?\s*(\d{2,3})/i) ??
+      text.match(/до\s*(\d{2,3})\s*уд\/?мин/i) ??
+      text.match(/(\d{2,3})\s*уд\/?мин/i);
+
+    if (pulseMatch?.[1]) {
+      return `до ${pulseMatch[1]}`;
+    }
+  }
+
+  return null;
+}
+
+function extractHrTargetFromSteps(steps: PlanStepDraft[]): string | null {
+  for (const step of steps) {
+    const target = normalizeNullableString(step.target);
+    const notes = normalizeNullableString(step.notes);
+    const found = extractHrTargetFromText(target, notes);
+    if (found) return found;
+  }
+  return null;
+}
+
+function parseDurationMinutes(text: string | null | undefined): number | null {
+  const s = normalizeText(text ?? "");
+  if (!s) return null;
+
+  const m1 = s.match(/(\d+(?:[.,]\d+)?)\s*мин/);
+  if (m1) {
+    return Math.round(Number(String(m1[1]).replace(",", ".")));
+  }
+
+  const m2 = s.match(/(\d+(?:[.,]\d+)?)\s*час/);
+  if (m2) {
+    return Math.round(Number(String(m2[1]).replace(",", ".")) * 60);
+  }
+
+  return null;
+}
+
+function parseDistanceKm(text: string | null | undefined): number | null {
+  const s = normalizeText(text ?? "");
+  if (!s) return null;
+
+  const km = s.match(/(\d+(?:[.,]\d+)?)\s*км\b/);
+  if (km) return Number(String(km[1]).replace(",", "."));
+
+  const meters = s.match(/(\d+(?:[.,]\d+)?)\s*м\b/);
+  if (meters) return Number(String(meters[1]).replace(",", ".")) / 1000;
+
+  return null;
+}
+
+function parseRepeats(text: string | null | undefined): number | null {
+  const s = normalizeText(text ?? "");
+  if (!s) return null;
+
+  const xPattern = s.match(/(\d+)\s*[xх×]\s*\d+/i);
+  if (xPattern) return Number(xPattern[1]);
+
+  const repeatsPattern = s.match(/(\d+)\s*интервал/);
+  if (repeatsPattern) return Number(repeatsPattern[1]);
+
+  return null;
+}
+
+function parseStrengthExerciseLine(line: string): PlanStepDraft | null {
+  const clean = normalizeWhitespace(line);
+  if (!clean) return null;
+
+  let m =
+    clean.match(/^(.+?):\s*(\d+)\s*подход[а-я]*\s*по\s*(\d+)\s*повтор/i) ||
+    clean.match(/^(.+?)\s+(\d+)\s*[xх×]\s*(\d+)\b/i);
+
+  if (m) {
+    return {
+      type: "exercise",
+      label: normalizeWhitespace(m[1]) ?? "Упражнение",
+      repeats: Number(m[3]),
+      notes: `${m[2]} подхода`,
+    };
+  }
+
+  m =
+    clean.match(/^(.+?):\s*(\d+)\s*подход[а-я]*\s*по\s*(\d+)\s*сек/i) ||
+    clean.match(/^(.+?)\s+(\d+)\s*[xх×]\s*(\d+)\s*сек/i);
+
+  if (m) {
+    return {
+      type: "exercise",
+      label: normalizeWhitespace(m[1]) ?? "Упражнение",
+      repeats: Number(m[2]),
+      duration_min: Number(m[3]) >= 60 ? Math.max(1, Math.round(Number(m[3]) / 60)) : null,
+      notes: `${m[2]} подхода по ${m[3]} сек`,
+    };
+  }
+
+  return null;
+}
+
+function coerceStep(raw: unknown): PlanStepDraft | null {
+  if (!raw || typeof raw !== "object") return null;
+  const item = raw as Record<string, unknown>;
+
+  const label =
+    normalizeNullableString(item.label) ??
+    normalizeNullableString(item.name) ??
+    normalizeNullableString(item.title) ??
+    "Шаг";
+
+  const durationMin =
+    normalizeNullableNumber(item.duration_min) ??
+    parseDurationMinutes(normalizeNullableString(item.duration)) ??
+    parseDurationMinutes(normalizeNullableString(item.notes)) ??
+    null;
+
+  const distanceKm =
+    normalizeNullableNumber(item.distance_km) ??
+    parseDistanceKm(normalizeNullableString(item.distance)) ??
+    parseDistanceKm(label) ??
+    null;
+
+  const repeats =
+    normalizeNullableNumber(item.repeats) ??
+    normalizeNullableNumber(item.sets) ??
+    parseRepeats(label) ??
+    null;
+
+  return normalizeDraftStep({
+    type: normalizeNullableString(item.type) ?? undefined,
+    label,
+    duration_min: durationMin,
+    distance_km: distanceKm,
+    repeats,
+    target: normalizeNullableString(item.target),
+    notes: normalizeNullableString(item.notes),
+  });
+}
+
+function dedupePlanSteps(steps: PlanStepDraft[]): PlanStepDraft[] {
+  const out: PlanStepDraft[] = [];
+  const seen = new Set<string>();
+
+  for (const step of steps) {
+    const key = JSON.stringify({
+      type: step.type ?? null,
+      label: step.label,
+      duration_min: step.duration_min ?? null,
+      distance_km: step.distance_km ?? null,
+      repeats: step.repeats ?? null,
+      target: step.target ?? null,
+      notes: step.notes ?? null,
+    });
+
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(step);
+  }
+
+  return out;
+}
+
+function normalizeStepType(value: string | undefined): string {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function inferStepTypeFromLabel(label: string | null | undefined): string | undefined {
+  const s = normalizeText(label ?? "");
+  if (!s) return undefined;
+
+  if (/размин/.test(s)) return "warmup";
+  if (/замин/.test(s)) return "cooldown";
+  if (/восстанов|отдых|ходьб/.test(s)) return "recovery";
+  if (/быстрый отрезок|интервал|ускор/.test(s)) return "interval";
+  if (
+    /присед|планк|отжим|выпад|ягодич|кор|пресс|берпи|подтяг|жим|тяга/.test(s)
+  ) {
+    return "exercise";
+  }
+  if (/основн/.test(s)) return "main";
+
+  return undefined;
+}
+
+function normalizeDraftStep(step: PlanStepDraft): PlanStepDraft {
+  const inferredType = step.type ?? inferStepTypeFromLabel(step.label);
+  const normalizedDuration =
+    step.duration_min != null && Number.isFinite(step.duration_min) && step.duration_min <= 0
+      ? null
+      : step.duration_min ?? null;
+
+  return {
+    ...step,
+    type: inferredType,
+    duration_min: normalizedDuration,
+  };
+}
+
+function cleanupSessionSteps(steps: PlanStepDraft[]): PlanStepDraft[] {
+  const normalized = dedupePlanSteps(steps.map(normalizeDraftStep));
+  const out: PlanStepDraft[] = [];
+
+  let hasWarmup = false;
+  let hasCooldown = false;
+  let hasMain = false;
+
+  for (const step of normalized) {
+    const t = normalizeStepType(step.type);
+
+    if (t === "warmup") {
+      if (hasWarmup) continue;
+      hasWarmup = true;
+      out.push(step);
+      continue;
+    }
+
+    if (t === "cooldown") {
+      if (hasCooldown) continue;
+      hasCooldown = true;
+      out.push(step);
+      continue;
+    }
+
+    if (t === "main") {
+      const labelKey =
+        normalizeText(step.label) === "основная часть" ? "__generic_main__" : normalizeText(step.label);
+
+      const signature = JSON.stringify({
+        label: labelKey,
+        distance_km: step.distance_km ?? null,
+        duration_min: step.duration_min ?? null,
+        target: step.target ?? null,
+      });
+
+      const alreadySameMain = out.some((existing) => {
+        if (normalizeStepType(existing.type) !== "main") return false;
+        const existingLabelKey =
+          normalizeText(existing.label) === "основная часть"
+            ? "__generic_main__"
+            : normalizeText(existing.label);
+        const existingSignature = JSON.stringify({
+          label: existingLabelKey,
+          distance_km: existing.distance_km ?? null,
+          duration_min: existing.duration_min ?? null,
+          target: existing.target ?? null,
+        });
+        return existingSignature === signature;
+      });
+
+      if (alreadySameMain) continue;
+
+      if (!hasMain) {
+        hasMain = true;
+        out.push(step);
+        continue;
+      }
+
+      if (
+        step.distance_km == null &&
+        step.duration_min == null &&
+        !step.target &&
+        !step.notes
+      ) {
+        continue;
+      }
+
+      out.push(step);
+      continue;
+    }
+
+    out.push(step);
+  }
+
+  return out;
+}
+
+function computeFinalDurationMin(args: {
+  explicitDurationMin: number | null;
+  sport: string;
+  main: string | null;
+  warmup: string | null;
+  cooldown: string | null;
+  strengthBlock: string | null;
+  notes: string | null;
+  steps: PlanStepDraft[];
+}): number | null {
+  const {
+    explicitDurationMin,
+    sport,
+    main,
+    warmup,
+    cooldown,
+    strengthBlock,
+    notes,
+    steps,
+  } = args;
+
+  if (explicitDurationMin != null && Number.isFinite(explicitDurationMin)) {
+    return explicitDurationMin;
+  }
+
+  const isStrength = sport === "strength";
+
+  if (isStrength) {
+    const fromText =
+      parseDurationMinutes(main) ??
+      parseDurationMinutes(notes) ??
+      parseDurationMinutes(strengthBlock) ??
+      null;
+
+    if (fromText != null) return fromText;
+  }
+
+  const hasMainDuration =
+    steps.some((step) => {
+      const t = normalizeStepType(step.type);
+      return (t === "main" || t === "interval" || t === "recovery") && step.duration_min != null;
+    }) || parseDurationMinutes(main) != null;
+
+  if (!hasMainDuration) {
+    return null;
+  }
+
+  const summed = sumStepDurations(steps);
+  if (summed != null) return summed;
+
+  const fromMain = parseDurationMinutes(main);
+  if (fromMain != null) {
+    const wu = parseDurationMinutes(warmup) ?? 0;
+    const cd = parseDurationMinutes(cooldown) ?? 0;
+    return fromMain + wu + cd;
+  }
+
+  return null;
+}
+
+function mergeBaseAndSpecificSteps(
+  baseSteps: PlanStepDraft[],
+  specificSteps: PlanStepDraft[]
+): PlanStepDraft[] {
+  const specific = dedupePlanSteps(specificSteps);
+  const base = dedupePlanSteps(baseSteps);
+
+  const merged: PlanStepDraft[] = [];
+
+  for (const step of base) {
+    const stepType = String(step.type ?? "").trim().toLowerCase();
+
+    if (stepType === "warmup" && hasStepType(specific, "warmup")) continue;
+    if (stepType === "main" && hasStepType(specific, "main", "interval")) continue;
+    if (stepType === "cooldown" && hasStepType(specific, "cooldown")) continue;
+
+    merged.push(step);
+  }
+
+  merged.push(...specific);
+
+  return cleanupSessionSteps(merged);
+}
+
+function buildBaseStepsFromSessionParts(args: {
+  sport: string;
+  title: string;
+  warmup: string | null;
+  main: string | null;
+  cooldown: string | null;
+  hrTarget: string | null;
+  distanceKm: number | null;
+}): PlanStepDraft[] {
+  const { sport, title, warmup, main, cooldown, hrTarget, distanceKm } = args;
+  const out: PlanStepDraft[] = [];
+
+  const lowerTitle = normalizeText(title);
+  const isStrength = sport === "strength" || /офп|сил/.test(lowerTitle);
+  const isInterval = /интервал|отрезк|ускор/.test(`${lowerTitle} ${normalizeText(main ?? "")}`);
+
+  if (warmup) {
+    out.push({
+      type: "warmup",
+      label: "Разминка",
+      duration_min: parseDurationMinutes(warmup),
+      distance_km: parseDistanceKm(warmup),
+      target: extractHrTargetFromText(warmup),
+      notes: null,
+    });
+  }
+
+  if (main && !isStrength && !isInterval) {
+    out.push({
+      type: "main",
+      label: "Основная часть",
+      duration_min: parseDurationMinutes(main),
+      distance_km: distanceKm ?? parseDistanceKm(main),
+      target: hrTarget ?? extractHrTargetFromText(main),
+      notes: null,
+    });
+  }
+
+  if (cooldown) {
+    out.push({
+      type: "cooldown",
+      label: "Заминка",
+      duration_min: parseDurationMinutes(cooldown),
+      distance_km: parseDistanceKm(cooldown),
+      target: extractHrTargetFromText(cooldown),
+      notes: null,
+    });
+  }
+
+  return dedupePlanSteps(out);
+}
+
+function buildIntervalStepsFromText(main: string | null | undefined): PlanStepDraft[] {
+  const s = normalizeText(main ?? "");
+  if (!s) return [];
+
+  const minuteIntervals = s.match(
+    /(\d+)\s*(?:повтор(?:ений|а)?|интервал(?:ов|а)?|отрезк(?:а|ов)?)\s*по\s*(\d+)\s*мин/
+  );
+  const meterIntervals = s.match(
+    /(\d+)\s*(?:повтор(?:ений|а)?|интервал(?:ов|а)?|отрезк(?:а|ов)?)\s*по\s*(\d+)\s*м/
+  );
+  const recoveryMin = s.match(
+    /(\d+)\s*мин(?:ут[аы]?)?\s*(?:ходьбы|трусцы|восстановления|отдыха)/
+  );
+  const recoveryMeters = s.match(
+    /(\d+)\s*м\s*(?:ходьбы|трусцы|восстановления|отдыха)/
+  );
+
+  if (!minuteIntervals && !meterIntervals) return [];
+
+  const repeats = Number((minuteIntervals ?? meterIntervals)?.[1]);
+  const runMin = minuteIntervals ? Number(minuteIntervals[2]) : null;
+  const runKm = meterIntervals ? Number(meterIntervals[2]) / 1000 : null;
+
+  const out: PlanStepDraft[] = [
+    {
+      type: "interval",
+      label: "Быстрый отрезок",
+      duration_min: runMin,
+      distance_km: runKm,
+      repeats,
+      notes: "Рабочий интервал",
+    },
+  ];
+
+  if (recoveryMin || recoveryMeters) {
+    out.push({
+      type: "recovery",
+      label: "Восстановление",
+      duration_min: recoveryMin ? Number(recoveryMin[1]) : null,
+      distance_km: recoveryMeters ? Number(recoveryMeters[1]) / 1000 : null,
+      repeats,
+      notes: "Между отрезками",
+    });
+  }
+
+  return out.map(normalizeDraftStep);
+}
+
+function extractStrengthExercises(text: string | null | undefined): PlanStepDraft[] {
+  const source = normalizeNullableString(text);
+  if (!source) return [];
+
+  const normalized = source
+    .replace(/[•●▪–—]/g, "\n")
+    .replace(/;\s*/g, "\n")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  const lines = normalized
+    .split(/\n+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+  const steps: PlanStepDraft[] = [];
+
+  for (const line of lines) {
+    const clean = line.replace(/^[-*]\s*/, "").trim();
+    const parsed = parseStrengthExerciseLine(clean);
+    if (parsed) steps.push(parsed);
+  }
+
+  return cleanupSessionSteps(steps);
+}
+
+function buildStrengthBlockText(steps: PlanStepDraft[]): string | null {
+  if (!steps.length) return null;
+
+  return steps
+    .map((step) => {
+      const parts: string[] = [step.label];
+      if (step.notes) {
+        parts.push(step.notes);
+      } else {
+        if (step.repeats != null) parts.push(`${step.repeats} повторений`);
+        if (step.duration_min != null) parts.push(`${step.duration_min} мин`);
+        if (step.target) parts.push(step.target);
+      }
+      return parts.join(", ");
+    })
+    .join("; ");
+}
+
+function enrichStructureFromSessionParts(args: {
+  sport: string;
+  title: string;
+  goal: string | null;
+  main: string | null;
+  notes: string | null;
+  effort: string | null;
+  hrTarget: string | null;
+  warmup: string | null;
+  cooldown: string | null;
+  durationMin: number | null;
+  distanceKm: number | null;
+  steps: PlanStepDraft[];
+  strengthBlock: string | null;
+}) {
+  const {
+    sport,
+    title,
+    goal,
+    main,
+    notes,
+    effort,
+    hrTarget,
+    warmup,
+    cooldown,
+    durationMin,
+    distanceKm,
+    steps,
+    strengthBlock,
+  } = args;
+
+  let nextSteps = dedupePlanSteps(steps.filter(Boolean));
+  let nextStrengthBlock = normalizeNullableString(strengthBlock);
+
+  if (!nextSteps.length && /интервал/i.test(`${title} ${goal ?? ""} ${main ?? ""}`)) {
+    nextSteps = buildIntervalStepsFromText(main);
+  }
+
+  const isStrength = sport === "strength" || /офп|сил/i.test(title);
+
+  if (isStrength && !nextSteps.length) {
+    nextSteps = extractStrengthExercises([main, notes, goal, strengthBlock].filter(Boolean).join("\n"));
+  }
+
+  const baseSteps = buildBaseStepsFromSessionParts({
+    sport,
+    title,
+    warmup,
+    main,
+    cooldown,
+    hrTarget,
+    distanceKm,
+  });
+
+  if (isStrength) {
+    nextSteps = mergeBaseAndSpecificSteps(baseSteps, nextSteps);
+  } else if (/интервал/i.test(`${title} ${goal ?? ""} ${main ?? ""}`)) {
+    nextSteps = mergeBaseAndSpecificSteps(
+      baseSteps.filter((x) => x.type === "warmup" || x.type === "cooldown"),
+      nextSteps
+    );
+  } else {
+    nextSteps = mergeBaseAndSpecificSteps(baseSteps, nextSteps);
+  }
+
+  if (isStrength && !nextStrengthBlock) {
+    nextStrengthBlock = buildStrengthBlockText(nextSteps);
+  }
+
+  const finalWarmup =
+    warmup ?? (isStrength ? "5–7 минут суставной разминки и мягкой активации" : null);
+  const finalCooldown =
+    cooldown ?? (isStrength ? "5 минут лёгкой растяжки и восстановления дыхания" : null);
+  const finalMain =
+    main ?? (isStrength && nextStrengthBlock ? `Основной блок: ${nextStrengthBlock}` : null);
+  const finalNotes =
+    notes ??
+    (isStrength
+      ? "Держи технику, не работай через боль, особенно если есть дискомфорт в стопе."
+      : null);
+
+  return {
+    goal,
+    main: finalMain,
+    notes: finalNotes,
+    steps: nextSteps,
+    effort,
+    warmup: finalWarmup,
+    fueling: null,
+    cooldown: finalCooldown,
+    hr_target: hrTarget,
+    hydration: null,
+    distance_km: distanceKm,
+    duration_min: durationMin,
+    strength_block: nextStrengthBlock,
+  };
+}
+
+function draftsToSessionSteps(drafts: PlanStepDraft[]): StructuredPlanSession["steps"] {
+  return drafts.slice(0, 100).map((s) => ({
+    type: s.type ?? null,
+    label: s.label,
+    duration_min: s.duration_min ?? null,
+    distance_km: s.distance_km ?? null,
+    repeats: s.repeats ?? null,
+    target: s.target ?? null,
+    notes: s.notes ?? null,
+  }));
 }
 
 // Экспортируем "быстрый" локальный ответ, чтобы route.ts мог обойти planner/LLM
@@ -442,20 +1315,37 @@ function buildResponderSystemPrompt(params: {
       "",
       "ПОМНИ: кроме текста ты должен вернуть и структурированный JSON плана.",
       "JSON должен быть пригоден для последующей записи плана в БД без повторного парсинга текста.",
+      "КРИТИЧНО: JSON нужен не для галочки — он потом используется в карточке запланированной тренировки.",
+      "Поэтому для КАЖДОЙ тренировки заполняй максимально подробно не только текст ответа, но и structured_plan.sessions[].*.",
+      "Если в тексте тренировки есть детали, они ОБЯЗАНЫ попасть в JSON.",
       "Обязательно заполни в JSON:",
-      "- kind = 'draft_training_plan';",
+      "- kind = 'microcycle';",
       "- starts_on;",
       "- ends_on;",
-      "- overwrite_existing_on_confirm;",
       "- overwrite_range.from и overwrite_range.to;",
       "- sessions[].day_index;",
       "- sessions[].date;",
-      "- sessions[].weekday;",
       "- sessions[].title;",
       "- sessions[].sport;",
-      "- sessions[].session_type;",
-      "- sessions[].status = 'planned';",
       "- sessions[].structure.",
+      "- sessions[].goal;",
+      "- sessions[].duration_min и/или sessions[].distance_km;",
+      "- sessions[].warmup;",
+      "- sessions[].main;",
+      "- sessions[].cooldown;",
+      "- sessions[].effort;",
+      "- sessions[].hr_target, если есть ориентир по пульсу;",
+      "- sessions[].notes, если есть важные комментарии/ограничения;",
+      "- sessions[].steps для интервальных и сложных тренировок;",
+      "- sessions[].strength_block и sessions[].steps для ОФП/силовой.",
+      "",
+      "ПРАВИЛА КАЧЕСТВА ДЛЯ JSON:",
+      "- Не оставляй structure пустым, если в тексте уже есть детали.",
+      "- Если это интервалы, steps должны описывать рабочий отрезок и восстановление, а repeats должен быть заполнен.",
+      "- Если это ОФП, перечисли упражнения в strength_block и по возможности добавь их в steps.",
+      "- Если указана длительность в тексте, перенеси её в duration_min.",
+      "- Если указана дистанция в тексте, перенеси её в distance_km.",
+      "- Не пиши бессмысленные labels вроде 'Шаг' — называй шаги конкретно: 'Быстрый отрезок', 'Восстановление', 'Приседания', 'Планка'.",
     ];
 
     if (horizonDays != null) {
@@ -502,6 +1392,41 @@ function buildResponderSystemPrompt(params: {
 }
 
 function buildPlanResponseSchema() {
+  const planStepItem = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      type: {
+        anyOf: [{ type: "string" }, { type: "null" }],
+      },
+      label: { type: "string" },
+      duration_min: {
+        anyOf: [{ type: "number" }, { type: "null" }],
+      },
+      distance_km: {
+        anyOf: [{ type: "number" }, { type: "null" }],
+      },
+      repeats: {
+        anyOf: [{ type: "number" }, { type: "null" }],
+      },
+      target: {
+        anyOf: [{ type: "string" }, { type: "null" }],
+      },
+      notes: {
+        anyOf: [{ type: "string" }, { type: "null" }],
+      },
+    },
+    required: [
+      "type",
+      "label",
+      "duration_min",
+      "distance_km",
+      "repeats",
+      "target",
+      "notes",
+    ],
+  } as const;
+
   return {
     type: "object",
     additionalProperties: false,
@@ -513,6 +1438,29 @@ function buildPlanResponseSchema() {
           {
             type: "object",
             additionalProperties: true,
+            properties: {
+              sessions: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: true,
+                  properties: {
+                    steps: {
+                      anyOf: [
+                        { type: "null" },
+                        {
+                          type: "array",
+                          items: planStepItem,
+                        },
+                      ],
+                    },
+                    strength_block: {
+                      anyOf: [{ type: "string" }, { type: "null" }],
+                    },
+                  },
+                },
+              },
+            },
           },
         ],
       },
@@ -526,63 +1474,147 @@ function normalizeStructuredPlanSession(
   idx: number,
   startsOn: string
 ): StructuredPlanSession {
+  const itemObj = asObject(item) ?? {};
+  const nestedStructure = asObject(itemObj.structure) ?? {};
+  const rawStructure =
+    itemObj.structure && typeof itemObj.structure === "object"
+      ? (itemObj.structure as Record<string, unknown>)
+      : null;
+
   const dayIndex =
-    typeof item?.day_index === "number" && Number.isFinite(item.day_index)
-      ? Math.max(0, Math.trunc(item.day_index))
+    typeof itemObj.day_index === "number" && Number.isFinite(itemObj.day_index)
+      ? Math.max(0, Math.trunc(itemObj.day_index))
       : idx;
 
   const date =
-    normalizeDateOnly(item?.date) ??
-    normalizeDateOnly(item?.planned_date) ??
+    normalizeDateOnly(pickString(itemObj.date, itemObj.planned_date)) ??
     addDaysToDateOnly(startsOn, dayIndex);
 
-  const title = String(item?.title ?? "Тренировка").trim() || "Тренировка";
-  const sport = String(item?.sport ?? "run");
-  const sessionType = item?.session_type != null ? String(item.session_type) : null;
+  const title = pickString(itemObj.title) ?? "Тренировка";
+  const sport = pickString(itemObj.sport) ?? "run";
+  const sessionType = itemObj.session_type != null ? String(itemObj.session_type) : null;
   const status =
-    item?.status === "draft" || item?.status === "planned" ? item.status : "planned";
+    itemObj.status === "draft" || itemObj.status === "planned" ? itemObj.status : "planned";
 
-  const goal = item?.goal != null ? String(item.goal) : null;
-  const durationMin = Number(item?.duration_min);
-  const distanceKm = Number(item?.distance_km);
-  const effort = item?.effort != null ? String(item.effort) : null;
-  const hrTarget = item?.hr_target != null ? String(item.hr_target) : null;
-  const warmup = item?.warmup != null ? String(item.warmup) : null;
-  const main = item?.main != null ? String(item.main) : null;
-  const cooldown = item?.cooldown != null ? String(item.cooldown) : null;
-  const fueling = item?.fueling != null ? String(item.fueling) : null;
-  const hydration = item?.hydration != null ? String(item.hydration) : null;
-  const notes = item?.notes != null ? String(item.notes) : null;
-  const weekday =
-    item?.weekday != null
-      ? String(item.weekday)
-      : item?.day_label != null
-      ? String(item.day_label)
+  const goal = pickString(itemObj.goal, nestedStructure.goal);
+  const warmup = pickString(itemObj.warmup, nestedStructure.warmup);
+  const main = pickString(itemObj.main, nestedStructure.main);
+  const cooldown = pickString(itemObj.cooldown, nestedStructure.cooldown);
+  const hrTarget = pickString(itemObj.hr_target, nestedStructure.hr_target);
+  const fueling = pickString(itemObj.fueling, nestedStructure.fueling);
+  const hydration = pickString(itemObj.hydration, nestedStructure.hydration);
+  const notes =
+    pickString(itemObj.notes, nestedStructure.notes) ??
+    (rawStructure && rawStructure.notes != null ? String(rawStructure.notes) : null);
+  const weekday = pickString(itemObj.weekday, itemObj.day_label);
+
+  const explicitDurationMin =
+    (() => {
+      const raw =
+        pickNumber(itemObj.duration_min, nestedStructure.duration_min) ??
+        parseDurationMinutes(pickString(itemObj.duration_text, nestedStructure.duration_text)) ??
+        null;
+      return raw != null && Number.isFinite(raw) ? Math.round(raw) : null;
+    })();
+
+  const distanceKmFromFields =
+    pickNumber(itemObj.distance_km, nestedStructure.distance_km) ??
+    parseDistanceKmFromText(title, main, notes);
+  const distanceKm =
+    distanceKmFromFields != null && Number.isFinite(distanceKmFromFields)
+      ? distanceKmFromFields
       : null;
 
-  const steps = Array.isArray(item?.steps) ? item.steps : [];
+  const normalizedGoal = goal ?? normalizeNullableString(rawStructure?.goal) ?? null;
+  const normalizedMain = main ?? normalizeNullableString(rawStructure?.main) ?? null;
+  const normalizedWarmup = warmup ?? normalizeNullableString(rawStructure?.warmup) ?? null;
+  const normalizedCooldown = cooldown ?? normalizeNullableString(rawStructure?.cooldown) ?? null;
+  const normalizedEffort =
+    pickString(itemObj.effort, nestedStructure.effort) ??
+    inferEffortFromText(title, main, notes);
+  const normalizedFueling = fueling ?? normalizeNullableString(rawStructure?.fueling) ?? null;
+  const normalizedHydration = hydration ?? normalizeNullableString(rawStructure?.hydration) ?? null;
+
+  const normalizedDistanceKm =
+    distanceKm ??
+    normalizeNullableNumber(rawStructure?.distance_km) ??
+    parseDistanceKm(title) ??
+    parseDistanceKm(normalizedMain) ??
+    null;
+
+  const mergedSteps = dedupePlanSteps(
+    [
+      ...(Array.isArray(itemObj.steps) ? itemObj.steps : []),
+      ...(Array.isArray(rawStructure?.steps) ? rawStructure.steps : []),
+    ]
+      .map(coerceStep)
+      .filter(Boolean) as PlanStepDraft[]
+  );
+
+  const normalizedHrTarget =
+    hrTarget ??
+    normalizeNullableString(rawStructure?.hr_target) ??
+    extractHrTargetFromText(title, normalizedMain, normalizedWarmup, normalizedCooldown, notes) ??
+    extractHrTargetFromSteps(mergedSteps) ??
+    null;
+
+  const normalizedDurationMinBeforeEnrich =
+    explicitDurationMin ??
+    normalizeNullableNumber(rawStructure?.duration_min) ??
+    parseDurationMinutes(normalizedMain) ??
+    null;
+
   const strengthBlock =
-    item?.strength_block != null && typeof item.strength_block === "object"
-      ? item.strength_block
-      : null;
+    pickString(itemObj.strength_block, nestedStructure.strength_block) ??
+    stringifyStructuredValue(nestedStructure.exercises);
 
-  const structure =
-    item?.structure && typeof item.structure === "object"
-      ? (item.structure as Record<string, any>)
-      : {
-          goal,
-          duration_min: Number.isFinite(durationMin) ? durationMin : null,
-          distance_km: Number.isFinite(distanceKm) ? distanceKm : null,
-          effort,
-          hr_target: hrTarget,
-          warmup,
-          main,
-          cooldown,
-          steps,
-          strength_block: strengthBlock,
-          fueling,
-          hydration,
-        };
+  const enrichedStructure = enrichStructureFromSessionParts({
+    sport,
+    title,
+    goal: normalizedGoal,
+    main: normalizedMain,
+    notes,
+    effort: normalizedEffort,
+    hrTarget: normalizedHrTarget,
+    warmup: normalizedWarmup,
+    cooldown: normalizedCooldown,
+    durationMin: normalizedDurationMinBeforeEnrich,
+    distanceKm: normalizedDistanceKm,
+    steps: mergedSteps,
+    strengthBlock,
+  });
+
+  const cleanedSteps = cleanupSessionSteps(enrichedStructure.steps);
+
+  const finalDurationMin = computeFinalDurationMin({
+    explicitDurationMin: normalizedDurationMinBeforeEnrich,
+    sport,
+    main: enrichedStructure.main,
+    warmup: enrichedStructure.warmup,
+    cooldown: enrichedStructure.cooldown,
+    strengthBlock: enrichedStructure.strength_block,
+    notes,
+    steps: cleanedSteps,
+  });
+
+  const sessionSteps = draftsToSessionSteps(cleanedSteps);
+
+  const structure: Record<string, unknown> = rawStructure
+    ? {
+        ...rawStructure,
+        ...enrichedStructure,
+        duration_min: finalDurationMin,
+        fueling: normalizedFueling,
+        hydration: normalizedHydration,
+        steps: sessionSteps,
+      }
+    : {
+        ...enrichedStructure,
+        duration_min: finalDurationMin,
+        fueling: normalizedFueling,
+        hydration: normalizedHydration,
+        steps: sessionSteps,
+      };
 
   return {
     day_index: dayIndex,
@@ -592,18 +1624,18 @@ function normalizeStructuredPlanSession(
     sport,
     session_type: sessionType,
     status,
-    goal,
-    duration_min: Number.isFinite(durationMin) ? durationMin : null,
-    distance_km: Number.isFinite(distanceKm) ? distanceKm : null,
-    effort,
-    hr_target: hrTarget,
-    warmup,
-    main,
-    cooldown,
-    steps,
-    strength_block: strengthBlock,
-    fueling,
-    hydration,
+    goal: enrichedStructure.goal,
+    duration_min: finalDurationMin,
+    distance_km: enrichedStructure.distance_km,
+    effort: enrichedStructure.effort,
+    hr_target: enrichedStructure.hr_target,
+    warmup: enrichedStructure.warmup,
+    main: enrichedStructure.main,
+    cooldown: enrichedStructure.cooldown,
+    steps: sessionSteps,
+    strength_block: enrichedStructure.strength_block,
+    fueling: normalizedFueling,
+    hydration: normalizedHydration,
     notes,
     structure,
   };
@@ -759,7 +1791,17 @@ async function runPlanResponder(args: {
           "\nstructured_plan — структурированный план для дальнейшей записи в БД." +
           "\nНе оставляй structured_plan пустым, если действительно предложен план." +
           "\nЕсли план на 7 или 14 дней — sessions должны покрывать весь этот период." +
-          "\nДля каждой session.date используй формат YYYY-MM-DD.",
+          "\nДля каждой session.date используй формат YYYY-MM-DD." +
+          "\nДля каждой session обязательно максимально заполни: goal, duration_min и/или distance_km, effort, warmup, main, cooldown, notes, structure." +
+          "\nДля интервальных тренировок обязательно заполни steps." +
+          "\nДля ОФП обязательно заполни strength_block и/или steps с упражнениями." +
+          "\nМаксимально наполняй JSON деталями из текста." +
+          "\nЕсли это интервалы — обязательно заполни steps и repeats." +
+          "\nЕсли это обычный бег (easy / long / tempo) — тоже обязательно заполни steps минимум из 3 блоков: warmup / main / cooldown." +
+          "\nЕсли это ОФП/силовая — обязательно заполни strength_block и по возможности steps с упражнениями." +
+          "\nДля ОФП в steps указывай упражнения предметно: название, подходы, повторения или длительность удержания." +
+          "\nЕсли есть дистанция, обязательно перенеси её в distance_km." +
+          "\nЕсли в тексте есть разминка, основная часть, заминка, пульс, длительность, дистанция — всё это должно быть и в JSON.",
       },
     ],
   });
@@ -768,7 +1810,12 @@ async function runPlanResponder(args: {
   const parsed = safeJsonParse(raw) ?? {};
 
   const text = String(parsed?.text ?? "").trim();
-  const structuredPlan = normalizeStructuredPlan(parsed?.structured_plan, requestedPlanHorizon);
+  const structuredPlanRaw = normalizeStructuredPlan(parsed?.structured_plan, requestedPlanHorizon);
+  const structuredPlan = normalizeStructuredPlanDates(
+    structuredPlanRaw,
+    userText,
+    planner
+  );
 
   if (text) {
     return {

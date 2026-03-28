@@ -1587,12 +1587,21 @@ export async function POST(req: NextRequest) {
       structuredPlan = null;
     }
 
+    const planConfirmationRange = structuredPlan
+      ? getStructuredPlanOverwriteRange(structuredPlan)
+      : null;
+
+    const answerWithPlanConfirmation =
+      structuredPlan && planConfirmationRange
+        ? `${answer.trim()}\n\nПоставить этот план в календарь на ${planConfirmationRange.from} — ${planConfirmationRange.to}?\nОтветь: «ок» или «отмена».`
+        : answer;
+
     const ins = await insertCoachReply({
       db,
       threadId,
       userId: user.id,
       replyToId: userMsgRow.id,
-      body: answer,
+      body: answerWithPlanConfirmation,
       stage: "answer",
       meta: {
         model: COACH_MODELS.responder,
@@ -1601,7 +1610,7 @@ export async function POST(req: NextRequest) {
         plan_confirmation: structuredPlan
           ? {
               supported_actions: ["confirm_plan", "cancel_plan"],
-              overwrite_range: getStructuredPlanOverwriteRange(structuredPlan),
+              overwrite_range: planConfirmationRange,
             }
           : null,
         goal_snapshot: goalSnapshotMeta,
