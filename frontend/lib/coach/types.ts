@@ -101,6 +101,7 @@ export const StructuredPlanStepSchema = z
     duration_min: z.number().int().min(0).max(600).nullable().optional(),
     distance_km: z.number().min(0).max(200).nullable().optional(),
     repeats: z.number().int().min(1).max(100).nullable().optional(),
+    sets: z.number().int().min(1).max(100).nullable().optional(),
     target: z.string().max(200).nullable().optional(),
     notes: z.string().max(1000).nullable().optional(),
   })

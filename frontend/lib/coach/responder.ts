@@ -31,6 +31,7 @@ type PlanStepDraft = {
   duration_min?: number | null;
   distance_km?: number | null;
   repeats?: number | null;
+  sets?: number | null;
   target?: string | null;
   notes?: string | null;
 };
@@ -297,20 +298,24 @@ function normalizeNullableNumber(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function hasStepType(steps: PlanStepDraft[], ...types: string[]): boolean {
-  const wanted = new Set(types.map((x) => x.trim().toLowerCase()));
-  return steps.some((step) => {
-    const t = String(step.type ?? "").trim().toLowerCase();
-    return wanted.has(t);
-  });
+function normalizePositiveNumber(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 function sumStepDurations(steps: PlanStepDraft[]): number | null {
   const total = steps.reduce((sum, step) => {
     const duration = step.duration_min ?? null;
-    const repeats = step.repeats ?? 1;
+    const multiplier =
+      (step.sets != null && Number.isFinite(step.sets) && step.sets > 0
+        ? step.sets
+        : null) ??
+      (step.repeats != null && Number.isFinite(step.repeats) && step.repeats > 0
+        ? step.repeats
+        : null) ??
+      1;
     if (duration == null || !Number.isFinite(duration)) return sum;
-    return sum + duration * repeats;
+    return sum + duration * multiplier;
   }, 0);
 
   return total > 0 ? Math.round(total) : null;
@@ -399,8 +404,8 @@ function parseStrengthExerciseLine(line: string): PlanStepDraft | null {
     return {
       type: "exercise",
       label: normalizeWhitespace(m[1]) ?? "Упражнение",
+      sets: Number(m[2]),
       repeats: Number(m[3]),
-      notes: `${m[2]} подхода`,
     };
   }
 
@@ -412,9 +417,8 @@ function parseStrengthExerciseLine(line: string): PlanStepDraft | null {
     return {
       type: "exercise",
       label: normalizeWhitespace(m[1]) ?? "Упражнение",
-      repeats: Number(m[2]),
-      duration_min: Number(m[3]) >= 60 ? Math.max(1, Math.round(Number(m[3]) / 60)) : null,
-      notes: `${m[2]} подхода по ${m[3]} сек`,
+      sets: Number(m[2]),
+      duration_min: Number(m[3]) / 60,
     };
   }
 
@@ -444,10 +448,9 @@ function coerceStep(raw: unknown): PlanStepDraft | null {
     null;
 
   const repeats =
-    normalizeNullableNumber(item.repeats) ??
-    normalizeNullableNumber(item.sets) ??
-    parseRepeats(label) ??
-    null;
+    normalizeNullableNumber(item.repeats) ?? parseRepeats(label) ?? null;
+
+  const sets = normalizeNullableNumber(item.sets) ?? null;
 
   return normalizeDraftStep({
     type: normalizeNullableString(item.type) ?? undefined,
@@ -455,6 +458,7 @@ function coerceStep(raw: unknown): PlanStepDraft | null {
     duration_min: durationMin,
     distance_km: distanceKm,
     repeats,
+    sets,
     target: normalizeNullableString(item.target),
     notes: normalizeNullableString(item.notes),
   });
@@ -471,6 +475,7 @@ function dedupePlanSteps(steps: PlanStepDraft[]): PlanStepDraft[] {
       duration_min: step.duration_min ?? null,
       distance_km: step.distance_km ?? null,
       repeats: step.repeats ?? null,
+      sets: step.sets ?? null,
       target: step.target ?? null,
       notes: step.notes ?? null,
     });
@@ -487,35 +492,38 @@ function normalizeStepType(value: string | undefined): string {
   return String(value ?? "").trim().toLowerCase();
 }
 
-function inferStepTypeFromLabel(label: string | null | undefined): string | undefined {
+function inferStepTypeFromLabel(label: string | null | undefined): string | null {
   const s = normalizeText(label ?? "");
-  if (!s) return undefined;
-
+  if (!s) return null;
   if (/размин/.test(s)) return "warmup";
   if (/замин/.test(s)) return "cooldown";
   if (/восстанов|отдых|ходьб/.test(s)) return "recovery";
-  if (/быстрый отрезок|интервал|ускор/.test(s)) return "interval";
-  if (
-    /присед|планк|отжим|выпад|ягодич|кор|пресс|берпи|подтяг|жим|тяга/.test(s)
-  ) {
-    return "exercise";
-  }
+  if (/присед|планк|отжим|выпад|ягодич|кор|пресс/.test(s)) return "exercise";
+  if (/интервал|отрезок|ускор/.test(s)) return "interval";
   if (/основн/.test(s)) return "main";
-
-  return undefined;
+  return null;
 }
 
 function normalizeDraftStep(step: PlanStepDraft): PlanStepDraft {
-  const inferredType = step.type ?? inferStepTypeFromLabel(step.label);
-  const normalizedDuration =
-    step.duration_min != null && Number.isFinite(step.duration_min) && step.duration_min <= 0
-      ? null
-      : step.duration_min ?? null;
+  const normalizedType = step.type ?? inferStepTypeFromLabel(step.label) ?? null;
 
   return {
     ...step,
-    type: inferredType,
-    duration_min: normalizedDuration,
+    type: normalizedType ?? undefined,
+    distance_km:
+      step.distance_km != null && Number.isFinite(step.distance_km) && step.distance_km > 0
+        ? step.distance_km
+        : null,
+    duration_min:
+      step.duration_min != null && Number.isFinite(step.duration_min) && step.duration_min > 0
+        ? step.duration_min
+        : null,
+    repeats:
+      step.repeats != null && Number.isFinite(step.repeats) && step.repeats > 0
+        ? step.repeats
+        : null,
+    sets:
+      step.sets != null && Number.isFinite(step.sets) && step.sets > 0 ? step.sets : null,
   };
 }
 
@@ -632,6 +640,9 @@ function computeFinalDurationMin(args: {
       null;
 
     if (fromText != null) return fromText;
+
+    const fromSteps = sumStepDurations(steps);
+    if (fromSteps != null) return fromSteps;
   }
 
   const hasMainDuration =
@@ -655,82 +666,6 @@ function computeFinalDurationMin(args: {
   }
 
   return null;
-}
-
-function mergeBaseAndSpecificSteps(
-  baseSteps: PlanStepDraft[],
-  specificSteps: PlanStepDraft[]
-): PlanStepDraft[] {
-  const specific = dedupePlanSteps(specificSteps);
-  const base = dedupePlanSteps(baseSteps);
-
-  const merged: PlanStepDraft[] = [];
-
-  for (const step of base) {
-    const stepType = String(step.type ?? "").trim().toLowerCase();
-
-    if (stepType === "warmup" && hasStepType(specific, "warmup")) continue;
-    if (stepType === "main" && hasStepType(specific, "main", "interval")) continue;
-    if (stepType === "cooldown" && hasStepType(specific, "cooldown")) continue;
-
-    merged.push(step);
-  }
-
-  merged.push(...specific);
-
-  return cleanupSessionSteps(merged);
-}
-
-function buildBaseStepsFromSessionParts(args: {
-  sport: string;
-  title: string;
-  warmup: string | null;
-  main: string | null;
-  cooldown: string | null;
-  hrTarget: string | null;
-  distanceKm: number | null;
-}): PlanStepDraft[] {
-  const { sport, title, warmup, main, cooldown, hrTarget, distanceKm } = args;
-  const out: PlanStepDraft[] = [];
-
-  const lowerTitle = normalizeText(title);
-  const isStrength = sport === "strength" || /офп|сил/.test(lowerTitle);
-  const isInterval = /интервал|отрезк|ускор/.test(`${lowerTitle} ${normalizeText(main ?? "")}`);
-
-  if (warmup) {
-    out.push({
-      type: "warmup",
-      label: "Разминка",
-      duration_min: parseDurationMinutes(warmup),
-      distance_km: parseDistanceKm(warmup),
-      target: extractHrTargetFromText(warmup),
-      notes: null,
-    });
-  }
-
-  if (main && !isStrength && !isInterval) {
-    out.push({
-      type: "main",
-      label: "Основная часть",
-      duration_min: parseDurationMinutes(main),
-      distance_km: distanceKm ?? parseDistanceKm(main),
-      target: hrTarget ?? extractHrTargetFromText(main),
-      notes: null,
-    });
-  }
-
-  if (cooldown) {
-    out.push({
-      type: "cooldown",
-      label: "Заминка",
-      duration_min: parseDurationMinutes(cooldown),
-      distance_km: parseDistanceKm(cooldown),
-      target: extractHrTargetFromText(cooldown),
-      notes: null,
-    });
-  }
-
-  return dedupePlanSteps(out);
 }
 
 function buildIntervalStepsFromText(main: string | null | undefined): PlanStepDraft[] {
@@ -804,7 +739,7 @@ function extractStrengthExercises(text: string | null | undefined): PlanStepDraf
     if (parsed) steps.push(parsed);
   }
 
-  return cleanupSessionSteps(steps);
+  return dedupePlanSteps(steps);
 }
 
 function buildStrengthBlockText(steps: PlanStepDraft[]): string | null {
@@ -813,12 +748,19 @@ function buildStrengthBlockText(steps: PlanStepDraft[]): string | null {
   return steps
     .map((step) => {
       const parts: string[] = [step.label];
+      if (step.sets != null && step.repeats != null) {
+        parts.push(`${step.sets}x${step.repeats}`);
+      } else if (step.sets != null && step.duration_min != null) {
+        const secs = Math.round(step.duration_min * 60);
+        parts.push(`${step.sets}x${secs} сек`);
+      } else if (step.repeats != null) {
+        parts.push(`${step.repeats} повторений`);
+      } else if (step.duration_min != null) {
+        const secs = Math.round(step.duration_min * 60);
+        parts.push(`${secs} сек`);
+      }
       if (step.notes) {
         parts.push(step.notes);
-      } else {
-        if (step.repeats != null) parts.push(`${step.repeats} повторений`);
-        if (step.duration_min != null) parts.push(`${step.duration_min} мин`);
-        if (step.target) parts.push(step.target);
       }
       return parts.join(", ");
     })
@@ -856,39 +798,60 @@ function enrichStructureFromSessionParts(args: {
     strengthBlock,
   } = args;
 
-  let nextSteps = dedupePlanSteps(steps.filter(Boolean));
+  let nextSteps = dedupePlanSteps(steps.filter(Boolean).map(normalizeDraftStep));
   let nextStrengthBlock = normalizeNullableString(strengthBlock);
 
   if (!nextSteps.length && /интервал/i.test(`${title} ${goal ?? ""} ${main ?? ""}`)) {
-    nextSteps = buildIntervalStepsFromText(main);
+    nextSteps = buildIntervalStepsFromText(main).map(normalizeDraftStep);
   }
 
   const isStrength = sport === "strength" || /офп|сил/i.test(title);
 
   if (isStrength && !nextSteps.length) {
-    nextSteps = extractStrengthExercises([main, notes, goal, strengthBlock].filter(Boolean).join("\n"));
-  }
-
-  const baseSteps = buildBaseStepsFromSessionParts({
-    sport,
-    title,
-    warmup,
-    main,
-    cooldown,
-    hrTarget,
-    distanceKm,
-  });
-
-  if (isStrength) {
-    nextSteps = mergeBaseAndSpecificSteps(baseSteps, nextSteps);
-  } else if (/интервал/i.test(`${title} ${goal ?? ""} ${main ?? ""}`)) {
-    nextSteps = mergeBaseAndSpecificSteps(
-      baseSteps.filter((x) => x.type === "warmup" || x.type === "cooldown"),
-      nextSteps
+    nextSteps = extractStrengthExercises([main, notes, goal].filter(Boolean).join("\n")).map(
+      normalizeDraftStep
     );
-  } else {
-    nextSteps = mergeBaseAndSpecificSteps(baseSteps, nextSteps);
   }
+
+  const isRunLike = sport === "run";
+  if (isRunLike && !/интервал/i.test(`${title} ${goal ?? ""} ${main ?? ""}`)) {
+    if (!nextSteps.some((s) => s.type === "warmup") && warmup) {
+      nextSteps.push(
+        normalizeDraftStep({
+          type: "warmup",
+          label: "Разминка",
+          duration_min: parseDurationMinutes(warmup),
+          distance_km: parseDistanceKm(warmup),
+        })
+      );
+    }
+
+    if (!nextSteps.some((s) => s.type === "main") && (main || distanceKm != null || durationMin != null)) {
+      nextSteps.push(
+        normalizeDraftStep({
+          type: "main",
+          label: "Основная часть",
+          duration_min:
+            parseDurationMinutes(main) ?? (distanceKm == null ? durationMin : null),
+          distance_km: distanceKm ?? parseDistanceKm(main),
+          target: hrTarget ?? null,
+        })
+      );
+    }
+
+    if (!nextSteps.some((s) => s.type === "cooldown") && cooldown) {
+      nextSteps.push(
+        normalizeDraftStep({
+          type: "cooldown",
+          label: "Заминка",
+          duration_min: parseDurationMinutes(cooldown),
+          distance_km: parseDistanceKm(cooldown),
+        })
+      );
+    }
+  }
+
+  nextSteps = dedupePlanSteps(nextSteps.map(normalizeDraftStep));
 
   if (isStrength && !nextStrengthBlock) {
     nextStrengthBlock = buildStrengthBlockText(nextSteps);
@@ -906,6 +869,14 @@ function enrichStructureFromSessionParts(args: {
       ? "Держи технику, не работай через боль, особенно если есть дискомфорт в стопе."
       : null);
 
+  const normalizedDistanceKm =
+    distanceKm != null && Number.isFinite(distanceKm) && distanceKm > 0 ? distanceKm : null;
+
+  const normalizedDurationMin =
+    durationMin != null && Number.isFinite(durationMin) && durationMin > 0
+      ? durationMin
+      : sumStepDurations(nextSteps);
+
   return {
     goal,
     main: finalMain,
@@ -917,19 +888,20 @@ function enrichStructureFromSessionParts(args: {
     cooldown: finalCooldown,
     hr_target: hrTarget,
     hydration: null,
-    distance_km: distanceKm,
-    duration_min: durationMin,
+    distance_km: normalizedDistanceKm,
+    duration_min: normalizedDurationMin,
     strength_block: nextStrengthBlock,
   };
 }
 
 function draftsToSessionSteps(drafts: PlanStepDraft[]): StructuredPlanSession["steps"] {
   return drafts.slice(0, 100).map((s) => ({
-    type: s.type ?? null,
+    type: s.type,
     label: s.label,
     duration_min: s.duration_min ?? null,
-    distance_km: s.distance_km ?? null,
+    distance_km: s.distance_km != null && s.distance_km > 0 ? s.distance_km : null,
     repeats: s.repeats ?? null,
+    sets: s.sets ?? null,
     target: s.target ?? null,
     notes: s.notes ?? null,
   }));
@@ -1319,7 +1291,7 @@ function buildResponderSystemPrompt(params: {
       "Поэтому для КАЖДОЙ тренировки заполняй максимально подробно не только текст ответа, но и structured_plan.sessions[].*.",
       "Если в тексте тренировки есть детали, они ОБЯЗАНЫ попасть в JSON.",
       "Обязательно заполни в JSON:",
-      "- kind = 'microcycle';",
+      "- kind = 'draft_training_plan';",
       "- starts_on;",
       "- ends_on;",
       "- overwrite_range.from и overwrite_range.to;",
@@ -1409,6 +1381,9 @@ function buildPlanResponseSchema() {
       repeats: {
         anyOf: [{ type: "number" }, { type: "null" }],
       },
+      sets: {
+        anyOf: [{ type: "number" }, { type: "null" }],
+      },
       target: {
         anyOf: [{ type: "string" }, { type: "null" }],
       },
@@ -1422,6 +1397,7 @@ function buildPlanResponseSchema() {
       "duration_min",
       "distance_km",
       "repeats",
+      "sets",
       "target",
       "notes",
     ],
@@ -1636,7 +1612,7 @@ function normalizeStructuredPlanSession(
     strength_block: enrichedStructure.strength_block,
     fueling: normalizedFueling,
     hydration: normalizedHydration,
-    notes,
+    notes: enrichedStructure.notes,
     structure,
   };
 }
