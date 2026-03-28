@@ -98,6 +98,47 @@ type WorkoutInsightBuildOptions = {
   anchorMessageId?: string | null;
 };
 
+function buildDegradedCoachReply(params: {
+  userText: string;
+  workouts?: any[] | null;
+  normalizedErrorText?: string | null;
+}) {
+  const { userText, workouts, normalizedErrorText } = params;
+
+  const t = (userText ?? "").toLowerCase();
+  const hasWorkout = Array.isArray(workouts) && workouts.length > 0;
+
+  if (/составь|план|трениров/.test(t)) {
+    return (
+      (normalizedErrorText?.trim() || "Сейчас у нас временная ошибка при генерации ответа тренера.") +
+      "\n\nНо мы можем сразу попробовать ещё раз, либо я соберу новый план на неделю по вашему расписанию."
+    );
+  }
+
+  if (/последн.*трениров|разбер|анализ/.test(t) && hasWorkout) {
+    const local = buildLocalWorkoutAnalysis(workouts?.[0]);
+    if (local) {
+      return (
+        (normalizedErrorText?.trim() || "Сейчас у нас временная ошибка при генерации ответа тренера.") +
+        "\n\n" +
+        local
+      );
+    }
+  }
+
+  if (/сколько|километ|объем|дистанц/.test(t)) {
+    return (
+      (normalizedErrorText?.trim() || "Сейчас у нас временная ошибка при генерации ответа тренера.") +
+      "\n\nМожем сразу повторить запрос или посмотреть базовую статистику по тренировкам."
+    );
+  }
+
+  return (
+    (normalizedErrorText?.trim() || "Сейчас у нас временная ошибка при генерации ответа тренера.") +
+    "\n\nМожем попробовать ещё раз или переключиться на более простой вопрос: последняя тренировка, объём за неделю или план на 7 дней."
+  );
+}
+
 function hashTextShort(value: string) {
   return crypto.createHash("sha1").update(value).digest("hex").slice(0, 12);
 }
@@ -850,6 +891,7 @@ export async function POST(req: NextRequest) {
   let insertedUserMsg: any = null;
   let insertedThreadId: string | null = null;
   let insertedUserId: string | null = null;
+  let plannerFallbackUsed = false;
 
   try {
     stage = "parse_body";
@@ -1368,12 +1410,27 @@ export async function POST(req: NextRequest) {
     }
 
     stage = "planner";
-    const planner = await runPlanner({
-      openai,
-      userText: finalText,
-      threadMemory: threadMemoryWithGoal,
-      recentHistory,
-    });
+    let planner: PlannerOut;
+    try {
+      planner = await runPlanner({
+        openai,
+        userText: finalText,
+        threadMemory: threadMemoryWithGoal,
+        recentHistory,
+      });
+    } catch (e) {
+      console.error("planner_failed_route_fallback", e);
+      plannerFallbackUsed = true;
+      planner = {
+        intent: /составь|план|трениров/i.test(finalText) ? "plan" : "unknown",
+        response_mode: "answer",
+        clarify_question: null,
+        needs: { ...DEFAULT_CONTEXT_NEEDS },
+        fast_path: { enabled: false },
+        memory_patch: {},
+        debug: { rationale_short: "route_level_planner_fallback" },
+      };
+    }
 
     if (planner.memory_patch && Object.keys(planner.memory_patch).length) {
       await applyMemoryPatch({
@@ -1562,6 +1619,8 @@ export async function POST(req: NextRequest) {
     stage = "responder";
     let answer = "";
     let structuredPlan: StructuredPlan | null = null;
+    let responderFallbackUsed = false;
+    let responderErrorText: string | null = null;
 
     try {
       const responderResult = await runResponder({
@@ -1580,10 +1639,13 @@ export async function POST(req: NextRequest) {
       structuredPlan = extracted.structuredPlan;
     } catch (e) {
       const normalized = normalizeAIError(e);
-      answer =
-        userFacingAIErrorText(normalized) ||
-        buildLocalWorkoutAnalysis(context.workouts?.[0]) ||
-        buildFallbackCoachText(false);
+      responderFallbackUsed = true;
+      responderErrorText = userFacingAIErrorText(normalized);
+      answer = buildDegradedCoachReply({
+        userText: finalText,
+        workouts: context.workouts ?? [],
+        normalizedErrorText: responderErrorText,
+      });
       structuredPlan = null;
     }
 
@@ -1605,6 +1667,10 @@ export async function POST(req: NextRequest) {
       stage: "answer",
       meta: {
         model: COACH_MODELS.responder,
+        degraded: plannerFallbackUsed || responderFallbackUsed,
+        planner_fallback_used: plannerFallbackUsed,
+        responder_fallback_used: responderFallbackUsed,
+        responder_error_text: responderErrorText,
         structured_plan: structuredPlan,
         plan_draft_available: Boolean(structuredPlan),
         plan_confirmation: structuredPlan
@@ -1634,7 +1700,10 @@ export async function POST(req: NextRequest) {
     });
 
     if (insertedUserMsg && insertedThreadId && insertedUserId) {
-      const fallback = buildFallbackCoachText(false);
+      const normalized = normalizeAIError(err);
+      const fallback =
+        userFacingAIErrorText(normalized) ||
+        buildFallbackCoachText(false);
 
       const ins = await insertCoachReply({
         db,
@@ -1643,7 +1712,11 @@ export async function POST(req: NextRequest) {
         replyToId: insertedUserMsg.id,
         body: fallback,
         stage: "internal_error",
-        meta: { error: (err as any)?.message ?? String(err), stage },
+        meta: {
+          error: (err as any)?.message ?? String(err),
+          stage,
+          normalized_error: normalized,
+        },
       });
 
       return NextResponse.json({

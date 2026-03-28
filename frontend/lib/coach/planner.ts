@@ -327,6 +327,77 @@ function localReadOnlyPlanPlanner(userText: string): PlannerOut | null {
   };
 }
 
+function buildPlannerFallback(
+  userText: string,
+  weekly?: { run_days?: string[]; ofp_days?: string[] } | null
+): PlannerOut {
+  const t = (userText ?? "").trim().toLowerCase();
+
+  const baseMemoryPatch = weekly ? ({ weekly_schedule: weekly } as any) : {};
+
+  if (isReadOnlyPlanningRequest(t)) {
+    const horizonDays = parsePlanningHorizonDays(t) ?? 7;
+    return {
+      intent: "plan",
+      response_mode: "answer",
+      clarify_question: null,
+      needs: {
+        ...DEFAULT_NEEDS,
+        workouts_window_days: horizonDays <= 14 ? 90 : horizonDays <= 30 ? 120 : 180,
+        workouts_limit: 80,
+        include_coach_home: true,
+        include_thread_memory: true,
+      },
+      fast_path: { enabled: false },
+      memory_patch: baseMemoryPatch,
+      debug: { rationale_short: `planner_fallback_plan:${horizonDays}d` },
+    };
+  }
+
+  if (
+    /последн(яя|юю)\s+трениров/.test(t) ||
+    /вчерашн(яя|юю)\s+трениров/.test(t) ||
+    /разбер[и]? последн/.test(t)
+  ) {
+    return {
+      intent: "analysis",
+      response_mode: "answer",
+      clarify_question: null,
+      needs: { ...DEFAULT_NEEDS, workouts_window_days: 14, workouts_limit: 30 },
+      fast_path: { enabled: false },
+      memory_patch: baseMemoryPatch,
+      debug: { rationale_short: "planner_fallback_last_workout_analysis" },
+    };
+  }
+
+  if (
+    /сколько\s+трениров/.test(t) ||
+    /кол-во\s+трениров/.test(t) ||
+    /количество\s+трениров/.test(t)
+  ) {
+    const windowDays = parseWindowDaysFromText(t) ?? 14;
+    return {
+      intent: "simple_fact",
+      response_mode: "answer",
+      clarify_question: null,
+      needs: { ...DEFAULT_NEEDS, workouts_window_days: windowDays, workouts_limit: 100 },
+      fast_path: { enabled: true, kind: "count_workouts", window_days: windowDays },
+      memory_patch: baseMemoryPatch,
+      debug: { rationale_short: "planner_fallback_count_workouts" },
+    };
+  }
+
+  return {
+    intent: "unknown",
+    response_mode: "answer",
+    clarify_question: null,
+    needs: { ...DEFAULT_NEEDS },
+    fast_path: { enabled: false },
+    memory_patch: baseMemoryPatch,
+    debug: { rationale_short: "planner_fallback_unknown" },
+  };
+}
+
 // -----------------------------
 // Weekly schedule parser (RU days -> ['mon'..'sun'])
 // Examples:
@@ -697,7 +768,8 @@ export async function runPlanner(args: {
     });
   } catch (e) {
     const ne = normalizeErr(e);
-    throw Object.assign(new Error(`planner_openai_call_failed: ${ne.message}`), { _planner: ne });
+    console.error("planner_openai_call_failed", ne);
+    return buildPlannerFallback(userText, weekly);
   }
 
   const raw = completion.choices[0]?.message?.content ?? "{}";
@@ -705,15 +777,7 @@ export async function runPlanner(args: {
   const validated = PlannerSchema.safeParse(parsed);
 
   if (!validated.success) {
-    return {
-      intent: "unknown",
-      response_mode: "answer",
-      clarify_question: null,
-      needs: { ...DEFAULT_NEEDS },
-      fast_path: { enabled: false },
-      memory_patch: weekly ? ({ weekly_schedule: weekly } as any) : {},
-      debug: { rationale_short: "planner_parse_failed_fallback" },
-    };
+    return buildPlannerFallback(userText, weekly);
   }
 
   // normalize
