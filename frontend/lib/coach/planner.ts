@@ -85,7 +85,7 @@ function parseCalendarRange(text: string): DateRange | null {
   }
 
   // 2) "с DD.MM.YYYY по DD.MM.YYYY"
-  m = t.match(/с\s+(\d{1,2})\.(\d{1,2})\.(\d{4})\s+по\s+(\d{1,2})\.(\d{1,2})\.(\д{4})/);
+  m = t.match(/с\s+(\d{1,2})\.(\d{1,2})\.(\d{4})\s+по\s+(\d{1,2})\.(\d{1,2})\.(\d{4})/);
   if (m) {
     const d1 = String(m[1]).padStart(2, "0");
     const mo1 = String(m[2]).padStart(2, "0");
@@ -647,11 +647,6 @@ export async function runPlanner(args: {
     };
     return out;
   }
-
-  // --- NEW: detect reply-to-coach-question ---
-  const lastAssistant = [...recentHistory]
-    .reverse()
-    .find((m) => m.type === "coach");
 
   // --- LOCAL ROUTER: "с 1 января ..." / "итого км" ---
   const rangeDays = parseDateRangeWindowDays(t);
