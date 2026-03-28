@@ -1,7 +1,13 @@
 // lib/coach/responder.ts
 import OpenAI from "openai";
-import { PlannerOut, WorkoutFact } from "./types";
-import { safeStringify } from "./utils";
+import {
+  PlannerOut,
+  WorkoutFact,
+  StructuredPlan,
+  StructuredPlanSession,
+  ResponderResult,
+} from "./types";
+import { safeJsonParse, safeStringify } from "./utils";
 import { COACH_MODELS } from "./modelConfig";
 import { appendMotivationalTail } from "./motivation";
 
@@ -25,6 +31,37 @@ function normalizeText(value: string) {
     .trim();
 }
 
+function normalizeDateOnly(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const s = String(value).trim();
+  if (!s) return null;
+
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  return `${m[1]}-${m[2]}-${m[3]}`;
+}
+
+function getTodayDateOnlyUtc() {
+  const d = new Date();
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function addDaysToDateOnly(dateOnly: string, days: number) {
+  const m = dateOnly.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return dateOnly;
+
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  d.setUTCDate(d.getUTCDate() + days);
+
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 // Экспортируем "быстрый" локальный ответ, чтобы route.ts мог обойти planner/LLM
 export function buildWeeklyScheduleLocalResponse(
   userText: string,
@@ -33,21 +70,16 @@ export function buildWeeklyScheduleLocalResponse(
   const ws = getWeeklyScheduleFromMemory(threadMemory);
   if (!ws) return null;
 
-  // Для тикета №7 не перехватываем обычные запросы
-  // "составь план тренировок на неделю / 2 недели / месяц" —
-  // их должен обрабатывать planner + responder.
   if (isScheduleOnlyWeeklyRequest(userText)) {
     return buildLocalNoLoadWeeklyPlan({ mem: threadMemory, ws });
   }
 
-  // "когда/на какой день ОФП" -> строго ofp_days
   if (isOfpWhenRequest(userText)) {
     const ofp = (ws.ofp_days ?? []).map(dayCodeToRu);
     if (!ofp.length) return `По weekly_schedule у нас не задан день ОФП.`;
     return `ОФП по weekly_schedule: ${ofp.join(", ")}.`;
   }
 
-  // "поставь ОФП на вторник" -> если конфликт, возвращаем к расписанию
   const forced = isForceOfpOnDay(userText);
   if (forced.ok) {
     const ofp = (ws.ofp_days ?? []).map(dayCodeToRu);
@@ -92,16 +124,8 @@ function getWeeklyScheduleFromMemory(mem: any | null): WeeklySchedule | null {
   }
 }
 
-function getGoalFromMemory(mem: any | null): GoalSnapshot | null {
+function buildGoalSnapshotFromUnknown(raw: any): GoalSnapshot | null {
   try {
-    const raw =
-      mem?.goal ??
-      mem?.goals?.current ??
-      mem?.goals?.primary ??
-      mem?.profile?.goal ??
-      mem?.preferences?.goal ??
-      null;
-
     if (!raw) return null;
 
     if (typeof raw === "string") {
@@ -127,8 +151,11 @@ function getGoalFromMemory(mem: any | null): GoalSnapshot | null {
         targetDate:
           String(
             raw.date_to ??
+              raw.dateTo ??
               raw.target_date ??
+              raw.targetDate ??
               raw.event_date ??
+              raw.eventDate ??
               raw.date ??
               ""
           ).trim() || null,
@@ -141,6 +168,24 @@ function getGoalFromMemory(mem: any | null): GoalSnapshot | null {
   } catch {
     return null;
   }
+}
+
+function getGoalFromMemory(mem: any | null): GoalSnapshot | null {
+  const raw =
+    mem?.goal ??
+    mem?.goals?.current ??
+    mem?.goals?.primary ??
+    mem?.profile?.goal ??
+    mem?.preferences?.goal ??
+    null;
+
+  return buildGoalSnapshotFromUnknown(raw);
+}
+
+function getEffectiveGoalSnapshot(goal: any | null | undefined, mem: any | null): GoalSnapshot | null {
+  const explicit = buildGoalSnapshotFromUnknown(goal);
+  if (explicit?.title || explicit?.targetDate || explicit?.notes) return explicit;
+  return getGoalFromMemory(mem);
 }
 
 function dayCodeToRu(d: string): string {
@@ -173,27 +218,15 @@ function pickConstraints(mem: any | null): string {
 function parsePlanHorizonDays(text: string, planner: PlannerOut): number | null {
   const t = normalizeText(text);
 
-  if (
-    /\b60\s*(дн|дня|дней)\b/.test(t) ||
-    /2\s*месяц/.test(t) ||
-    /два месяца/.test(t)
-  ) {
+  if (/\b60\s*(дн|дня|дней)\b/.test(t) || /2\s*месяц/.test(t) || /два месяца/.test(t)) {
     return 60;
   }
 
-  if (
-    /\b30\s*(дн|дня|дней)\b/.test(t) ||
-    /на месяц/.test(t) ||
-    /ближайший месяц/.test(t)
-  ) {
+  if (/\b30\s*(дн|дня|дней)\b/.test(t) || /на месяц/.test(t) || /ближайший месяц/.test(t)) {
     return 30;
   }
 
-  if (
-    /\b14\s*(дн|дня|дней)\b/.test(t) ||
-    /2\s*недел/.test(t) ||
-    /две недел/.test(t)
-  ) {
+  if (/\b14\s*(дн|дня|дней)\b/.test(t) || /2\s*недел/.test(t) || /две недел/.test(t)) {
     return 14;
   }
 
@@ -291,14 +324,8 @@ function buildLocalNoLoadWeeklyPlan(args: { mem: any | null; ws: WeeklySchedule 
   const runDays = (ws.run_days ?? []).map(dayCodeToRu);
   const ofpDays = (ws.ofp_days ?? []).map(dayCodeToRu);
 
-  const runText = `лёгкая ходьба или очень спокойный бег ${Math.max(
-    20,
-    Math.min(mins, 45)
-  )} мин (комфортно, без усталости)`;
-  const ofpText = `ОФП без ударной нагрузки ${Math.max(
-    20,
-    Math.min(mins, 45)
-  )} мин: мобильность, баланс, растяжка`;
+  const runText = `лёгкая ходьба или очень спокойный бег ${Math.max(20, Math.min(mins, 45))} мин (комфортно, без усталости)`;
+  const ofpText = `ОФП без ударной нагрузки ${Math.max(20, Math.min(mins, 45))} мин: мобильность, баланс, растяжка`;
   const restText = `отдых / прогулка 20–40 мин + лёгкая растяжка 5–10 мин`;
 
   const lines: string[] = [];
@@ -350,13 +377,14 @@ function shouldApplyMotivationLayer(userText: string, answer: string, planner: P
 function buildResponderSystemPrompt(params: {
   userText: string;
   planner: PlannerOut;
+  goal?: any | null;
   threadMemory: any | null;
 }) {
-  const { userText, planner, threadMemory } = params;
+  const { userText, planner, goal, threadMemory } = params;
 
   const horizonDays = parsePlanHorizonDays(userText, planner);
   const ws = getWeeklyScheduleFromMemory(threadMemory);
-  const goal = getGoalFromMemory(threadMemory);
+  const effectiveGoal = getEffectiveGoalSnapshot(goal, threadMemory);
 
   const base = [
     "Ты — тренер внутри приложения. Отвечай по-русски.",
@@ -387,15 +415,17 @@ function buildResponderSystemPrompt(params: {
       "СЕЙЧАС ТИП ЗАПРОСА: READ-ONLY ПЛАНИРОВАНИЕ ТРЕНИРОВОК.",
       "Нужно предложить план тренировок без записи в БД.",
       "Это предложение и объяснение, а не подтверждённый план.",
-      "Нужно сверяться с целью из памяти, если она есть.",
+      "Нужно сверяться с целью из контекста, если она есть.",
       "Нужно коротко сказать, помогает ли предложенный план двигаться к цели.",
-      "Если у цели есть дата — явно учитывай, сколько примерно времени осталось до цели.",
       "Не строй план до самой цели целиком — только на запрошенный горизонт.",
       "Если горизонт 7 или 14 дней — план должен быть максимально детальным.",
+      "Максимально детальный план = для каждого бегового дня обязательно указывать:",
+      "- цель тренировки;",
+      "- длительность и/или дистанцию;",
+      "- структуру: разминка / основная часть / заминка;",
+      "- ориентир по усилию;",
+      "- при возможности ориентир по пульсу или по ощущениям.",
       "Если горизонт 30 или 60 дней — дай рамочный план по неделям, а первые 7–14 дней распиши детально.",
-      "Для горизонта 7 дней расписывай каждый тренировочный день подробно: разминка, основная часть, заминка, ориентир по усилию.",
-      "Для горизонта 14 дней расписывай подробно обе недели.",
-      "Для беговых тренировок указывай: цель сессии, длительность/объём, структуру, разминку, основную часть, заминку.",
       "Для ОФП указывай упражнения, подходы и повторения или время.",
       "Если уместно, добавляй краткие советы по питью/еде до или после ключевых тренировок.",
       "Не обещай результат, если данных недостаточно.",
@@ -403,43 +433,48 @@ function buildResponderSystemPrompt(params: {
       "Не делай из каждого дня тяжёлую тренировку.",
       "Если weekly_schedule есть — используй только эти дни для бега и ОФП.",
       "Если weekly_schedule нет — можешь предложить разумную раскладку по дням недели.",
-      "Никогда не пиши названия дней как Tue / Thu / Sat / Sun. Только по-русски: Понедельник, Вторник, Среда, Четверг, Пятница, Суббота, Воскресенье.",
-      "Не ограничивайся одной строкой на тренировочный день, если горизонт 7 или 14 дней.",
-      "Если пользователь спрашивает follow-up вроде 'как этот план помогает мне дойти до цели?', отвечай именно про предложенный план: какую роль играет каждая тренировка и почему такая структура подходит под цель.",
       "",
-      "ФОРМАТ ДЛЯ ПЛАНА:",
+      "ФОРМАТ ДЛЯ ПЛАНА В ТЕКСТЕ:",
       "## Кратко",
       "## Как это связано с целью",
       "## План",
       "## На что обратить внимание",
       "",
-      "В разделе 'План':",
-      "- для 7 / 14 дней: по дням недели, конкретно;",
-      "- для 30 / 60 дней: сначала рамка по неделям, потом детально первые 7–14 дней.",
+      "ПОМНИ: кроме текста ты должен вернуть и структурированный JSON плана.",
+      "JSON должен быть пригоден для последующей записи плана в БД без повторного парсинга текста.",
+      "Обязательно заполни в JSON:",
+      "- kind = 'draft_training_plan';",
+      "- starts_on;",
+      "- ends_on;",
+      "- overwrite_existing_on_confirm;",
+      "- overwrite_range.from и overwrite_range.to;",
+      "- sessions[].day_index;",
+      "- sessions[].date;",
+      "- sessions[].weekday;",
+      "- sessions[].title;",
+      "- sessions[].sport;",
+      "- sessions[].session_type;",
+      "- sessions[].status = 'planned';",
+      "- sessions[].structure.",
     ];
 
     if (horizonDays != null) {
       planRules.push(`ТЕКУЩИЙ ЗАПРОШЕННЫЙ ГОРИЗОНТ: ${horizonDays} дней.`);
     }
 
-    if (goal?.title || goal?.targetDate || goal?.notes) {
+    if (effectiveGoal?.title || effectiveGoal?.targetDate || effectiveGoal?.notes) {
       planRules.push(
-        `ЦЕЛЬ ИЗ ПАМЯТИ: ${safeStringify(
+        `ЦЕЛЬ ИЗ КОНТЕКСТА: ${safeStringify(
           {
-            title: goal?.title,
-            target_date: goal?.targetDate,
-            notes: goal?.notes,
+            title: effectiveGoal?.title,
+            target_date: effectiveGoal?.targetDate,
+            notes: effectiveGoal?.notes,
           },
           2
         )}`
       );
-      if (goal?.targetDate) {
-        planRules.push(
-          "Если target_date указана, в блоке 'Как это связано с целью' коротко поясни, почему такой объём и интенсивность уместны именно на текущем расстоянии до старта."
-        );
-      }
     } else {
-      planRules.push("ЦЕЛЬ ИЗ ПАМЯТИ: явной цели не найдено. Не выдумывай её.");
+      planRules.push("ЦЕЛЬ ИЗ КОНТЕКСТА: явной цели не найдено. Не выдумывай её.");
     }
 
     if (ws) {
@@ -454,13 +489,216 @@ function buildResponderSystemPrompt(params: {
       );
     }
 
-    return [...base, ...planRules, "", "Формат: кратко, по делу. Можно списком."].join("\n");
+    return [
+      ...base,
+      ...planRules,
+      "",
+      "Если вопрос про план или цель — отвечай аналитически и конкретно, без общих фраз.",
+      "Формат: кратко, по делу. Можно списком.",
+    ].join("\n");
   }
 
   return [...base, "Формат: кратко, по делу. Можно списком."].join("\n");
 }
 
-export async function runResponder(args: {
+function buildPlanResponseSchema() {
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      text: { type: "string" },
+      structured_plan: {
+        anyOf: [
+          { type: "null" },
+          {
+            type: "object",
+            additionalProperties: true,
+          },
+        ],
+      },
+    },
+    required: ["text", "structured_plan"],
+  } as const;
+}
+
+function normalizeStructuredPlanSession(
+  item: any,
+  idx: number,
+  startsOn: string
+): StructuredPlanSession {
+  const dayIndex =
+    typeof item?.day_index === "number" && Number.isFinite(item.day_index)
+      ? Math.max(0, Math.trunc(item.day_index))
+      : idx;
+
+  const date =
+    normalizeDateOnly(item?.date) ??
+    normalizeDateOnly(item?.planned_date) ??
+    addDaysToDateOnly(startsOn, dayIndex);
+
+  const title = String(item?.title ?? "Тренировка").trim() || "Тренировка";
+  const sport = String(item?.sport ?? "run");
+  const sessionType = item?.session_type != null ? String(item.session_type) : null;
+  const status =
+    item?.status === "draft" || item?.status === "planned" ? item.status : "planned";
+
+  const goal = item?.goal != null ? String(item.goal) : null;
+  const durationMin = Number(item?.duration_min);
+  const distanceKm = Number(item?.distance_km);
+  const effort = item?.effort != null ? String(item.effort) : null;
+  const hrTarget = item?.hr_target != null ? String(item.hr_target) : null;
+  const warmup = item?.warmup != null ? String(item.warmup) : null;
+  const main = item?.main != null ? String(item.main) : null;
+  const cooldown = item?.cooldown != null ? String(item.cooldown) : null;
+  const fueling = item?.fueling != null ? String(item.fueling) : null;
+  const hydration = item?.hydration != null ? String(item.hydration) : null;
+  const notes = item?.notes != null ? String(item.notes) : null;
+  const weekday =
+    item?.weekday != null
+      ? String(item.weekday)
+      : item?.day_label != null
+      ? String(item.day_label)
+      : null;
+
+  const steps = Array.isArray(item?.steps) ? item.steps : [];
+  const strengthBlock =
+    item?.strength_block != null && typeof item.strength_block === "object"
+      ? item.strength_block
+      : null;
+
+  const structure =
+    item?.structure && typeof item.structure === "object"
+      ? (item.structure as Record<string, any>)
+      : {
+          goal,
+          duration_min: Number.isFinite(durationMin) ? durationMin : null,
+          distance_km: Number.isFinite(distanceKm) ? distanceKm : null,
+          effort,
+          hr_target: hrTarget,
+          warmup,
+          main,
+          cooldown,
+          steps,
+          strength_block: strengthBlock,
+          fueling,
+          hydration,
+        };
+
+  return {
+    day_index: dayIndex,
+    date,
+    weekday,
+    title,
+    sport,
+    session_type: sessionType,
+    status,
+    goal,
+    duration_min: Number.isFinite(durationMin) ? durationMin : null,
+    distance_km: Number.isFinite(distanceKm) ? distanceKm : null,
+    effort,
+    hr_target: hrTarget,
+    warmup,
+    main,
+    cooldown,
+    steps,
+    strength_block: strengthBlock,
+    fueling,
+    hydration,
+    notes,
+    structure,
+  };
+}
+
+function normalizeStructuredPlan(raw: any, fallbackHorizonDays: number | null): StructuredPlan | null {
+  if (!raw || typeof raw !== "object") return null;
+
+  const startsOn = normalizeDateOnly(raw.starts_on) ?? getTodayDateOnlyUtc();
+  const sessionsRaw = Array.isArray(raw.sessions) ? raw.sessions : [];
+
+  const sessions = sessionsRaw
+    .filter((item) => item && typeof item === "object")
+    .map((item, idx) => normalizeStructuredPlanSession(item, idx, startsOn));
+
+  if (!sessions.length) return null;
+
+  const dated = sessions
+    .map((s) => normalizeDateOnly(s.date))
+    .filter(Boolean)
+    .sort() as string[];
+
+  const endsOn =
+    normalizeDateOnly(raw.ends_on) ??
+    dated[dated.length - 1] ??
+    startsOn;
+
+  const overwriteRangeRaw =
+    raw.overwrite_range && typeof raw.overwrite_range === "object"
+      ? raw.overwrite_range
+      : null;
+
+  const overwriteFrom =
+    normalizeDateOnly(overwriteRangeRaw?.from) ??
+    dated[0] ??
+    startsOn;
+
+  const overwriteTo =
+    normalizeDateOnly(overwriteRangeRaw?.to) ??
+    dated[dated.length - 1] ??
+    endsOn;
+
+  const horizonDays = Number(raw.horizon_days);
+  const version = Number(raw.version);
+
+  return {
+    version: 1,
+    kind: "draft_training_plan",
+    horizon_days:
+      Number.isFinite(horizonDays) && horizonDays > 0
+        ? Math.trunc(horizonDays)
+        : fallbackHorizonDays ?? sessions.length,
+    starts_on: startsOn,
+    ends_on: endsOn,
+    goal_id:
+      typeof raw.goal_id === "string" && raw.goal_id.trim()
+        ? raw.goal_id.trim()
+        : null,
+    goal_title: raw.goal_title != null ? String(raw.goal_title) : null,
+    goal_date:
+      normalizeDateOnly(raw.goal_date) ??
+      normalizeDateOnly(raw.target_date) ??
+      null,
+    source_message: raw.source_message != null ? String(raw.source_message) : null,
+    summary: raw.summary != null ? String(raw.summary) : null,
+    rationale:
+      raw.rationale != null
+        ? String(raw.rationale)
+        : raw.goal_relation != null
+        ? String(raw.goal_relation)
+        : null,
+    overwrite_existing_on_confirm:
+      typeof raw.overwrite_existing_on_confirm === "boolean"
+        ? raw.overwrite_existing_on_confirm
+        : true,
+    overwrite_range: {
+      from: overwriteFrom,
+      to: overwriteTo,
+    },
+    sessions,
+    metadata:
+      raw.metadata && typeof raw.metadata === "object"
+        ? raw.metadata
+        : {
+            attention_points: Array.isArray(raw.attention_points)
+              ? raw.attention_points.map((x: any) => String(x)).filter(Boolean)
+              : [],
+            legacy_kind: raw.kind != null ? String(raw.kind) : null,
+            normalized_from_version:
+              Number.isFinite(version) && version > 0 ? Math.trunc(version) : null,
+          },
+  };
+}
+
+async function runPlanResponder(args: {
   openai: OpenAI;
   userText: string;
   planner: PlannerOut;
@@ -469,12 +707,98 @@ export async function runResponder(args: {
   workouts: WorkoutFact[];
   coachHome: any | null;
   recentHistory: { type: string; body: string; created_at: string }[];
-}) {
+}): Promise<ResponderResult> {
   const { openai, userText, planner, goal, threadMemory, workouts, coachHome, recentHistory } = args;
 
   const system = buildResponderSystemPrompt({
     userText,
     planner,
+    goal,
+    threadMemory,
+  });
+
+  const requestedPlanHorizon = parsePlanHorizonDays(userText, planner);
+
+  const userPayload = safeStringify(
+    {
+      user_text: userText,
+      planner,
+      goal,
+      memory: threadMemory,
+      workouts,
+      coach_home: coachHome,
+      recent_dialogue: (recentHistory ?? []).slice(-12),
+      derived_hints: {
+        requested_plan_horizon_days: requestedPlanHorizon,
+        goal_snapshot: getEffectiveGoalSnapshot(goal, threadMemory),
+        weekly_schedule: getWeeklyScheduleFromMemory(threadMemory),
+      },
+    },
+    2
+  );
+
+  const completion = await openai.chat.completions.create({
+    model: COACH_MODELS.responder,
+    temperature: 0.25,
+    max_tokens: 1800,
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "coach_plan_response",
+        schema: buildPlanResponseSchema(),
+      },
+    } as any,
+    messages: [
+      { role: "system", content: system },
+      {
+        role: "user",
+        content:
+          userPayload +
+          "\n\nВерни JSON с полями text и structured_plan." +
+          "\ntext — готовый ответ для чата." +
+          "\nstructured_plan — структурированный план для дальнейшей записи в БД." +
+          "\nНе оставляй structured_plan пустым, если действительно предложен план." +
+          "\nЕсли план на 7 или 14 дней — sessions должны покрывать весь этот период." +
+          "\nДля каждой session.date используй формат YYYY-MM-DD.",
+      },
+    ],
+  });
+
+  const raw = completion.choices[0]?.message?.content ?? "";
+  const parsed = safeJsonParse(raw) ?? {};
+
+  const text = String(parsed?.text ?? "").trim();
+  const structuredPlan = normalizeStructuredPlan(parsed?.structured_plan, requestedPlanHorizon);
+
+  if (text) {
+    return {
+      text,
+      structured_plan: structuredPlan,
+    };
+  }
+
+  return {
+    text: raw.trim() || "Не удалось собрать ответ по плану.",
+    structured_plan: structuredPlan,
+  };
+}
+
+async function runStandardResponder(args: {
+  openai: OpenAI;
+  userText: string;
+  planner: PlannerOut;
+  goal?: any | null;
+  threadMemory: any | null;
+  workouts: WorkoutFact[];
+  coachHome: any | null;
+  recentHistory: { type: string; body: string; created_at: string }[];
+}): Promise<ResponderResult> {
+  const { openai, userText, planner, goal, threadMemory, workouts, coachHome, recentHistory } = args;
+
+  const system = buildResponderSystemPrompt({
+    userText,
+    planner,
+    goal,
     threadMemory,
   });
 
@@ -489,7 +813,7 @@ export async function runResponder(args: {
       recent_dialogue: (recentHistory ?? []).slice(-12),
       derived_hints: {
         requested_plan_horizon_days: parsePlanHorizonDays(userText, planner),
-        goal_snapshot: getGoalFromMemory(threadMemory),
+        goal_snapshot: getEffectiveGoalSnapshot(goal, threadMemory),
         weekly_schedule: getWeeklyScheduleFromMemory(threadMemory),
       },
     },
@@ -498,8 +822,8 @@ export async function runResponder(args: {
 
   const completion = await openai.chat.completions.create({
     model: COACH_MODELS.responder,
-    temperature: planner?.intent === "plan" ? 0.25 : 0.2,
-    max_tokens: planner?.intent === "plan" ? 1300 : 650,
+    temperature: 0.2,
+    max_tokens: 650,
     messages: [
       { role: "system", content: system },
       { role: "user", content: userPayload },
@@ -516,5 +840,27 @@ export async function runResponder(args: {
     });
   }
 
-  return answer;
+  return {
+    text: answer,
+    structured_plan: null,
+  };
+}
+
+export async function runResponder(args: {
+  openai: OpenAI;
+  userText: string;
+  planner: PlannerOut;
+  goal?: any | null;
+  threadMemory: any | null;
+  workouts: WorkoutFact[];
+  coachHome: any | null;
+  recentHistory: { type: string; body: string; created_at: string }[];
+}): Promise<ResponderResult> {
+  const { userText, planner } = args;
+
+  if (isReadOnlyPlanIntent(userText, planner)) {
+    return runPlanResponder(args);
+  }
+
+  return runStandardResponder(args);
 }

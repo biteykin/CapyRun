@@ -6,10 +6,13 @@ import "server-only";
 
 import { runPlanner } from "@/lib/coach/planner";
 import { COACH_MODELS } from "@/lib/coach/modelConfig";
-import { runResponder, buildWeeklyScheduleLocalResponse } from "@/lib/coach/responder";
+import {
+  runResponder,
+  buildWeeklyScheduleLocalResponse,
+} from "@/lib/coach/responder";
 import { buildFastPathAnswer } from "@/lib/coach/fastPath";
 import { buildCoachContext } from "@/lib/coach/context";
-import { PlannerOut } from "@/lib/coach/types";
+import type { PlannerOut, StructuredPlan } from "@/lib/coach/types";
 
 import {
   buildFallbackCoachText,
@@ -42,13 +45,20 @@ import {
   isMotivationIntent,
 } from "@/lib/coach/intents";
 import {
-  buildLocalMultiWorkoutFactAnswer,
   isStrictFactualSummaryQuestion,
   loadMultiWorkoutPayload,
 } from "@/lib/coach/multiWorkout";
 
 import { buildMotivationLocalResponse } from "@/lib/coach/motivation";
 import { loadPrimaryGoal, formatGoalForLLM } from "@/lib/coach/goal";
+import {
+  confirmStructuredPlanIntoDb,
+  extractResponderTextAndPlan,
+  getLatestCoachPlanDraftMessage,
+  getStructuredPlanOverwriteRange,
+  isLikelyPlanCancelAction,
+  isLikelyPlanConfirmAction,
+} from "@/lib/coach/planWrite";
 
 export const runtime = "nodejs";
 
@@ -404,7 +414,6 @@ async function createMultiWorkoutAnalysisViaLLM(params: {
   const { userText, locale, payload, questionKind, requestedWindow } = params;
 
   const model = process.env.OPENAI_WORKOUT_MODEL ?? COACH_MODELS.responder ?? "gpt-4o-mini";
-
   const strictFactsOnly = questionKind === "factual_summary" || isStrictFactualSummaryQuestion(userText);
 
   const system =
@@ -531,7 +540,9 @@ async function createWorkoutInsightViaLLM(params: {
     .maybeSingle();
 
   if (wErr || !workout) throw new Error(`Failed to load workout: ${wErr?.message ?? "not found"}`);
-  if (String(workout.user_id) !== String(userId)) throw new Error("Forbidden (workout not owned by user)");
+  if (String(workout.user_id) !== String(userId)) {
+    throw new Error("Forbidden (workout not owned by user)");
+  }
 
   const { data: segments, error: segErr } = await db
     .from("workout_segments")
@@ -629,7 +640,9 @@ async function createWorkoutInsightViaLLM(params: {
     .select("id")
     .single();
 
-  if (reqErr || !reqRow?.id) throw new Error(`Failed to insert ai_requests: ${reqErr?.message ?? "no id"}`);
+  if (reqErr || !reqRow?.id) {
+    throw new Error(`Failed to insert ai_requests: ${reqErr?.message ?? "no id"}`);
+  }
   const requestId = String(reqRow.id);
 
   const system =
@@ -802,7 +815,9 @@ async function createWorkoutInsightViaLLM(params: {
     )
     .single();
 
-  if (insErr || !insRow) throw new Error(`Failed to insert ai_insights: ${insErr?.message ?? "no row"}`);
+  if (insErr || !insRow) {
+    throw new Error(`Failed to insert ai_insights: ${insErr?.message ?? "no row"}`);
+  }
 
   if (forceRegenerate) {
     const { error: supersedeErr } = await db
@@ -850,6 +865,8 @@ export async function POST(req: NextRequest) {
     const locale = (body?.locale ?? "ru") as string;
     const client_nonce = body?.client_nonce ?? null;
     const reqThreadId = body?.threadId ?? null;
+    const action = (body?.action ?? null) as string | null;
+    const timezone = (body?.timezone ?? "Europe/Berlin") as string;
 
     stage = "auth";
     let user: { id: string } | null = null;
@@ -918,7 +935,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!threadId) return NextResponse.json({ error: "thread_resolve_failed" }, { status: 500 });
+    if (!threadId) {
+      return NextResponse.json({ error: "thread_resolve_failed" }, { status: 500 });
+    }
     insertedThreadId = threadId;
 
     stage = "thread_meta_read";
@@ -935,14 +954,16 @@ export async function POST(req: NextRequest) {
     const memoryTopForLLM = normalizeMemoryForLLM(memTop?.items ?? []);
     const threadMemory = mergeLegacyMemory(memoryTopForLLM, legacyThreadMemory);
 
+    const formattedGoal = activeGoal ? formatGoalForLLM(activeGoal) : null;
+
     const threadMemoryWithGoal = activeGoal
       ? {
           ...(threadMemory ?? {}),
-          goal: formatGoalForLLM(activeGoal),
+          goal: formattedGoal,
           goals: {
             ...((threadMemory as any)?.goals ?? {}),
-            current: formatGoalForLLM(activeGoal),
-            primary: formatGoalForLLM(activeGoal),
+            current: formattedGoal,
+            primary: formattedGoal,
           },
         }
       : threadMemory;
@@ -980,15 +1001,86 @@ export async function POST(req: NextRequest) {
     const questionKind = detectMultiWorkoutQuestionKind(finalText);
     const requestedWindow = detectRequestedWindow(finalText);
 
+    stage = "plan_confirmation_detection";
+    const latestPlanDraftMessage =
+      !generalPlanningIntent
+        ? await getLatestCoachPlanDraftMessage({
+            db,
+            threadId,
+            beforeCreatedAt: userMsgRow.created_at,
+          })
+        : null;
+
+    const latestStructuredPlan = latestPlanDraftMessage?.meta?.structured_plan as
+      | StructuredPlan
+      | undefined;
+
+    if (latestStructuredPlan && isLikelyPlanCancelAction(action, finalText)) {
+      const ins = await insertCoachReply({
+        db,
+        threadId,
+        userId: user.id,
+        replyToId: userMsgRow.id,
+        body: "Ок, этот план не сохраняем. Могу предложить другой вариант на тот же период.",
+        stage: "plan_cancelled",
+        meta: {
+          model: "local",
+          cancelled_plan_message_id: latestPlanDraftMessage?.id ?? null,
+        },
+      });
+
+      return NextResponse.json({
+        threadId,
+        userMessage: userMsgRow,
+        coachMessage: ins.data,
+      });
+    }
+
+    if (latestStructuredPlan && isLikelyPlanConfirmAction(action, finalText)) {
+      stage = "plan_confirm_write";
+
+      const saved = await confirmStructuredPlanIntoDb({
+        db,
+        userId: user.id,
+        goalId: activeGoal?.id ?? null,
+        timezone,
+        plan: latestStructuredPlan,
+      });
+
+      const ins = await insertCoachReply({
+        db,
+        threadId,
+        userId: user.id,
+        replyToId: userMsgRow.id,
+        body:
+          `Готово ✅ Я поставил план в календарь тренировок.\n\n` +
+          `Что сделал:\n` +
+          `- создал план на период ${saved.startsOn} — ${saved.endsOn};\n` +
+          `- очистил существующие плановые тренировки в этом диапазоне (${saved.overwriteRange.from} — ${saved.overwriteRange.to});\n` +
+          `- добавил ${saved.sessionsCount} тренировок в план.\n\n` +
+          `Теперь можем отдельно скорректировать любой день, если нужно.`,
+        stage: "plan_saved",
+        meta: {
+          model: "local+db",
+          user_plan_id: saved.userPlanId,
+          sessions_count: saved.sessionsCount,
+          overwrite_range: saved.overwriteRange,
+          source_plan_message_id: latestPlanDraftMessage?.id ?? null,
+        },
+      });
+
+      return NextResponse.json({
+        threadId,
+        userMessage: userMsgRow,
+        coachMessage: ins.data,
+      });
+    }
+
     const explicitSingleWorkoutAnalysisIntent =
       !generalPlanningIntent &&
       isWorkoutAnalysisIntent(finalText) &&
       questionKind === "unknown" &&
       requestedWindow == null;
-
-    // ------------------------------------------------------------
-    // Motivation layer (локальный быстрый ответ)
-    // ------------------------------------------------------------
 
     if (
       !generalPlanningIntent &&
@@ -1020,6 +1112,7 @@ export async function POST(req: NextRequest) {
     const factualMultiWorkoutIntent =
       !generalPlanningIntent &&
       (isFactualMultiWorkoutIntent(finalText) || requestedWindow === "all");
+
     const multiWorkoutIntent =
       !generalPlanningIntent &&
       !explicitSingleWorkoutAnalysisIntent &&
@@ -1107,6 +1200,7 @@ export async function POST(req: NextRequest) {
         userId: user.id,
         userText: finalText,
       });
+
       let answer = "";
       const factsOnlyRecommended = questionKind === "factual_summary";
       const allTimeTotals = await loadAllTimeWorkoutTotals({
@@ -1117,7 +1211,7 @@ export async function POST(req: NextRequest) {
       try {
         if (
           payload.detailed_recent_workouts.length < 3 &&
-          (payload.summary_windows[0]?.workouts_count < 3)
+          payload.summary_windows[0]?.workouts_count < 3
         ) {
           answer =
             "Пока у нас маловато последних тренировок, чтобы уверенно разбирать динамику. Но уже можно смотреть на регулярность, объём и ощущения.";
@@ -1132,7 +1226,8 @@ export async function POST(req: NextRequest) {
         }
       } catch (e) {
         console.error("multi_workout_analysis_failed", e);
-        answer = "Я не смог получить анализ по истории тренировок, но могу собрать базовую статистику при необходимости.";
+        answer =
+          "Я не смог получить анализ по истории тренировок, но могу собрать базовую статистику при необходимости.";
       }
 
       const ins = await insertCoachReply({
@@ -1265,11 +1360,20 @@ export async function POST(req: NextRequest) {
         meta: { model: "local" },
       });
 
-      return NextResponse.json({ threadId, userMessage: userMsgRow, coachMessage: ins.data });
+      return NextResponse.json({
+        threadId,
+        userMessage: userMsgRow,
+        coachMessage: ins.data,
+      });
     }
 
     stage = "planner";
-    const planner = await runPlanner({ openai, userText: finalText, threadMemory: threadMemoryWithGoal, recentHistory });
+    const planner = await runPlanner({
+      openai,
+      userText: finalText,
+      threadMemory: threadMemoryWithGoal,
+      recentHistory,
+    });
 
     if (planner.memory_patch && Object.keys(planner.memory_patch).length) {
       await applyMemoryPatch({
@@ -1286,6 +1390,22 @@ export async function POST(req: NextRequest) {
       threadId,
       plannerNeeds: planner.needs ?? DEFAULT_CONTEXT_NEEDS,
     });
+
+    const responderThreadMemory = mergeLegacyMemory(
+      context.memory ?? null,
+      threadMemoryWithGoal ?? legacyThreadMemory
+    );
+
+    const goalSnapshotMeta = activeGoal
+      ? {
+          id: activeGoal.id,
+          title: activeGoal.title ?? null,
+          type: activeGoal.type ?? null,
+          sport: activeGoal.sport ?? null,
+          date_to: activeGoal.dateTo ?? null,
+          status: activeGoal.status ?? null,
+        }
+      : null;
 
     const workoutIds = (context.workouts ?? [])
       .map((w: any) => String((w as any)?.id ?? ""))
@@ -1312,7 +1432,7 @@ export async function POST(req: NextRequest) {
           questionKind === "progress_analysis");
 
       if (disableFastPathForBroadPeriodQuestion) {
-        // специально не даём fast_path перехватывать широкие вопросы по периодам/динамике
+        // wide period/dynamics question: skip fast path
       } else if (wantsAnalysis && isLastOrNth) {
         let targetWorkoutId: string | null = null;
 
@@ -1370,7 +1490,11 @@ export async function POST(req: NextRequest) {
                 },
               });
 
-              return NextResponse.json({ threadId, userMessage: userMsgRow, coachMessage: ins.data });
+              return NextResponse.json({
+                threadId,
+                userMessage: userMsgRow,
+                coachMessage: ins.data,
+              });
             }
           } catch (e: any) {
             meta.workout_insight_error = e?.message ?? String(e);
@@ -1399,7 +1523,11 @@ export async function POST(req: NextRequest) {
           meta,
         });
 
-        return NextResponse.json({ threadId, userMessage: userMsgRow, coachMessage: ins.data });
+        return NextResponse.json({
+          threadId,
+          userMessage: userMsgRow,
+          coachMessage: ins.data,
+        });
       }
 
       if (!disableFastPathForBroadPeriodQuestion) {
@@ -1423,31 +1551,40 @@ export async function POST(req: NextRequest) {
           meta: { model: "fast_path" },
         });
 
-        return NextResponse.json({ threadId, userMessage: userMsgRow, coachMessage: ins.data });
+        return NextResponse.json({
+          threadId,
+          userMessage: userMsgRow,
+          coachMessage: ins.data,
+        });
       }
     }
 
     stage = "responder";
-
     let answer = "";
+    let structuredPlan: StructuredPlan | null = null;
 
     try {
-      answer = await runResponder({
+      const responderResult = await runResponder({
         openai,
         userText: finalText,
         planner,
-        // goal: activeGoal, -- goal argument is removed, replaced in threadMemory logic below
-        threadMemory: mergeLegacyMemory(context.memory ?? null, threadMemoryWithGoal ?? legacyThreadMemory),
+        goal: formattedGoal,
+        threadMemory: responderThreadMemory,
         workouts: context.workouts ?? [],
         coachHome: context.coachHome ?? null,
         recentHistory,
       });
+
+      const extracted = extractResponderTextAndPlan(responderResult);
+      answer = extracted.text;
+      structuredPlan = extracted.structuredPlan;
     } catch (e) {
       const normalized = normalizeAIError(e);
       answer =
         userFacingAIErrorText(normalized) ||
         buildLocalWorkoutAnalysis(context.workouts?.[0]) ||
         buildFallbackCoachText(false);
+      structuredPlan = null;
     }
 
     const ins = await insertCoachReply({
@@ -1459,20 +1596,28 @@ export async function POST(req: NextRequest) {
       stage: "answer",
       meta: {
         model: COACH_MODELS.responder,
-        goal_snapshot: activeGoal
+        structured_plan: structuredPlan,
+        plan_draft_available: Boolean(structuredPlan),
+        plan_confirmation: structuredPlan
           ? {
-              id: activeGoal.id,
-              title: activeGoal.title ?? null,
-              type: activeGoal.type ?? null,
-              sport: activeGoal.sport ?? null,
-              date_to: activeGoal.dateTo ?? null,
-              status: activeGoal.status ?? null,
+              supported_actions: ["confirm_plan", "cancel_plan"],
+              overwrite_range: getStructuredPlanOverwriteRange(structuredPlan),
             }
           : null,
+        goal_snapshot: goalSnapshotMeta,
+        has_structured_plan: Boolean(structuredPlan),
+        structured_plan_sessions_count: Array.isArray(structuredPlan?.sessions)
+          ? structuredPlan.sessions.length
+          : null,
+        structured_plan_horizon_days: structuredPlan?.horizon_days ?? null,
       },
     });
 
-    return NextResponse.json({ threadId, userMessage: userMsgRow, coachMessage: ins.data });
+    return NextResponse.json({
+      threadId,
+      userMessage: userMsgRow,
+      coachMessage: ins.data,
+    });
   } catch (err) {
     console.error("coach_send unexpected", {
       stage,
@@ -1501,4 +1646,4 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
-}
+} 

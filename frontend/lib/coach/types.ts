@@ -86,3 +86,101 @@ export const PlannerSchema = z.object({
 });
 
 export type PlannerOut = z.infer<typeof PlannerSchema>;
+
+/**
+ * Structured plan contract for ticket #8:
+ * responder may return both human-readable text and machine-readable plan JSON.
+ * This JSON is stored in coach_messages.meta and later can be confirmed by the user
+ * and written into user_plans / user_plan_sessions.
+ */
+
+export const StructuredPlanStepSchema = z
+  .object({
+    type: z.string().max(40).optional(),
+    label: z.string().max(200),
+    duration_min: z.number().int().min(0).max(600).nullable().optional(),
+    distance_km: z.number().min(0).max(200).nullable().optional(),
+    repeats: z.number().int().min(1).max(100).nullable().optional(),
+    target: z.string().max(200).nullable().optional(),
+    notes: z.string().max(1000).nullable().optional(),
+  })
+  .strict();
+
+export type StructuredPlanStep = z.infer<typeof StructuredPlanStepSchema>;
+
+export const StructuredPlanSessionSchema = z
+  .object({
+    day_index: z.number().int().min(0).max(120).nullable().optional(),
+    date: z.string().max(32).nullable().optional(),
+    weekday: z.string().max(32).nullable().optional(),
+
+    title: z.string().max(200),
+    sport: z.string().max(32).default("run"),
+    session_type: z.string().max(40).nullable().optional(),
+    status: z.enum(["planned", "draft"]).default("planned"),
+
+    goal: z.string().max(500).nullable().optional(),
+    duration_min: z.number().int().min(0).max(600).nullable().optional(),
+    distance_km: z.number().min(0).max(200).nullable().optional(),
+    effort: z.string().max(64).nullable().optional(),
+    hr_target: z.string().max(128).nullable().optional(),
+
+    warmup: z.string().max(1000).nullable().optional(),
+    main: z.string().max(4000).nullable().optional(),
+    cooldown: z.string().max(1000).nullable().optional(),
+
+    steps: z.array(StructuredPlanStepSchema).max(100).default([]),
+
+    strength_block: z.string().max(4000).nullable().optional(),
+    fueling: z.string().max(2000).nullable().optional(),
+    hydration: z.string().max(2000).nullable().optional(),
+    notes: z.string().max(4000).nullable().optional(),
+
+    structure: z.record(z.string(), z.unknown()).nullable().optional(),
+  })
+  .strict();
+
+export type StructuredPlanSession = z.infer<typeof StructuredPlanSessionSchema>;
+
+export const StructuredPlanSchema = z
+  .object({
+    version: z.literal(1).default(1),
+    kind: z.enum(["draft_training_plan"]).default("draft_training_plan"),
+
+    horizon_days: z.number().int().min(1).max(120),
+    starts_on: z.string().max(32).nullable().optional(),
+    ends_on: z.string().max(32).nullable().optional(),
+
+    goal_id: z.string().uuid().nullable().optional(),
+    goal_title: z.string().max(300).nullable().optional(),
+    goal_date: z.string().max(32).nullable().optional(),
+
+    source_message: z.string().max(4000).nullable().optional(),
+    summary: z.string().max(4000).nullable().optional(),
+    rationale: z.string().max(4000).nullable().optional(),
+
+    overwrite_existing_on_confirm: z.boolean().default(true),
+    overwrite_range: z
+      .object({
+        from: z.string().max(32),
+        to: z.string().max(32),
+      })
+      .nullable()
+      .optional(),
+
+    sessions: z.array(StructuredPlanSessionSchema).min(1).max(120),
+
+    metadata: z.record(z.string(), z.unknown()).nullable().optional(),
+  })
+  .strict();
+
+export type StructuredPlan = z.infer<typeof StructuredPlanSchema>;
+
+export const ResponderResultSchema = z
+  .object({
+    text: z.string(),
+    structured_plan: StructuredPlanSchema.nullable().optional(),
+  })
+  .strict();
+
+export type ResponderResult = z.infer<typeof ResponderResultSchema>;
