@@ -1,5 +1,3 @@
-// frontend/components/coach/CoachChat.client.tsx
-
 "use client";
 
 import * as React from "react";
@@ -9,6 +7,10 @@ import { supabase } from "@/lib/supabaseBrowser";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
+import CoachMessageBubble, {
+  formatCoachMessageTime,
+} from "@/components/coach/CoachMessageBubble";
+import CoachTypingIndicator from "@/components/coach/CoachTypingIndicator";
 
 // --- Types ---
 type RawMessage = {
@@ -32,36 +34,24 @@ type ChatMessageVM = {
 
 // --- Helpers ---
 function makeNonce() {
-  // достаточно для дедупа в UI
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function msgKey(m: Partial<RawMessage> & { meta?: any }) {
-  // 1) иначе по client_nonce (важно для optimistic и temp-coach)
   const cn = m?.meta?.client_nonce;
   if (typeof cn === "string" && cn.length) {
     const t = (m as any)?.type ?? "unknown";
     return `cn:${cn}:t:${t}`;
   }
-  // 2) стабильный ключ по id
   if (m?.id) return `id:${m.id}`;
-  // 3) fallback
   return `fb:${m.type}:${m.created_at}:${(m.body ?? "").slice(0, 24)}`;
 }
 
 function mergeDedup(prev: RawMessage[], incoming: RawMessage[]) {
-  // merge так, чтобы:
-  // - server message заменял optimistic по client_nonce
-  // - temp сообщения не исчезали при refetch, пока не приехал серверный аналог
-
   const map = new Map<string, RawMessage>();
-  // 1) кладём prev
   for (const m of prev) map.set(msgKey(m), m);
-  // 2) кладём incoming (перезаписывает prev, если тот же key)
   for (const m of incoming) map.set(msgKey(m), m);
-  // 3) если пришло серверное сообщение с id, но у нас был optimistic по client_nonce,
-  //    то оставим серверное, а optimistic не дублируем.
-  // (это уже достигается одинаковым key cn:..., потому что мы прокидываем client_nonce в meta)
+
   const arr = Array.from(map.values());
   arr.sort((a, b) => {
     const ta = new Date(a.created_at).getTime();
@@ -79,7 +69,6 @@ export default function CoachChat(props: {
 }) {
   const { threadId, initialMessages, currentUserId } = props;
 
-  // Инициализация сообщений (history)
   const [messages, setMessages] = React.useState<RawMessage[]>(() => {
     const msgArr: RawMessage[] = (initialMessages ?? []).map((m: any) => ({
       id: m.id,
@@ -102,7 +91,6 @@ export default function CoachChat(props: {
     setHydrated(true);
   }, []);
 
-  // 1) Mark thread as read on first chat open
   React.useEffect(() => {
     (async () => {
       const { error } = await supabase.rpc("coach_mark_thread_read", {
@@ -114,7 +102,6 @@ export default function CoachChat(props: {
     })();
   }, [threadId]);
 
-  // 2) Realtime subscription to new messages, no duplicates by key
   React.useEffect(() => {
     const channel = supabase
       .channel(`coach-thread-${threadId}`)
@@ -140,19 +127,13 @@ export default function CoachChat(props: {
 
   React.useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length]);
+  }, [messages.length, isSending]);
 
   const formatTime = React.useCallback(
-    (iso: string) => {
-      if (!hydrated) return "—:—";
-      const d = new Date(iso);
-      if (Number.isNaN(d.getTime())) return "—:—";
-      return d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-    },
+    (iso: string) => formatCoachMessageTime(iso, hydrated),
     [hydrated]
   );
 
-  // --- UI: не спамим чат сотней одинаковых авто-сообщений ---
   const AUTO_LIMIT = 10;
   const [showAllAuto, setShowAllAuto] = React.useState(false);
 
@@ -160,13 +141,11 @@ export default function CoachChat(props: {
     const auto = messages.filter((m) => m.meta?.kind === "workout_first_message");
     if (showAllAuto) return messages;
     if (auto.length <= AUTO_LIMIT) return messages;
-    // скрываем старые авто-сообщения, оставляем только последние AUTO_LIMIT
-    const autoIdsToKeep = new Set(
-      auto
-        .slice(-AUTO_LIMIT)
-        .map((m) => m.id)
+
+    const autoIdsToKeep = new Set(auto.slice(-AUTO_LIMIT).map((m) => m.id));
+    return messages.filter(
+      (m) => m.meta?.kind !== "workout_first_message" || autoIdsToKeep.has(m.id)
     );
-    return messages.filter((m) => m.meta?.kind !== "workout_first_message" || autoIdsToKeep.has(m.id));
   }, [messages, showAllAuto]);
 
   const hiddenAutoCount = useMemo(() => {
@@ -174,25 +153,14 @@ export default function CoachChat(props: {
     return Math.max(0, auto - AUTO_LIMIT);
   }, [messages]);
 
-  // markRead isn't strictly needed anymore for read-on-open, but we keep for manual "mark read" button
   const markRead = React.useCallback(async () => {
-    const { error } = await supabase.rpc("coach_mark_thread_read", { p_thread_id: threadId });
+    const { error } = await supabase.rpc("coach_mark_thread_read", {
+      p_thread_id: threadId,
+    });
     if (error) {
-      // best-effort: read receipt не должен ломать отправку/UX
       console.warn("[coach] mark read failed", error);
     }
   }, [threadId]);
-
-  // Загрузка истории — пример реализации для дальнейшей интеграции при необходимости
-  // async function loadHistory() {
-  //   try {
-  //     const res = await fetch(`/api/coach/history?threadId=${threadId}`, { method: "GET" });
-  //     if (!res.ok) return;
-  //     const data = await res.json();
-  //     const serverMsgs: RawMessage[] = (data.messages ?? []) as RawMessage[];
-  //     setMessages((prev) => mergeDedup(prev, serverMsgs));
-  //   } catch {}
-  // }
 
   const handleSend = async () => {
     const trimmed = text.trim();
@@ -203,7 +171,6 @@ export default function CoachChat(props: {
     const client_nonce = makeNonce();
     const nowIso = new Date().toISOString();
 
-    // optimistic user message (ONE)
     const optimisticUser: RawMessage = {
       id: `temp-user-${client_nonce}`,
       thread_id: threadId,
@@ -220,7 +187,6 @@ export default function CoachChat(props: {
     try {
       const res = await fetch("/api/coach/send", {
         method: "POST",
-        // важно: Supabase auth живёт в cookie, на некоторых сетапах без include куки не улетают
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ threadId, text: trimmed, client_nonce }),
@@ -236,36 +202,25 @@ export default function CoachChat(props: {
       };
 
       const userMsg = data.userMessage as RawMessage;
-      const coachMsg = data.coachMessage as RawMessage | undefined;
 
-      // Если бэк прислал dbg — покажем в консоль (помогает понять, почему "заглушка")
       if (data?.dbg) {
         console.warn("[coach] /api/coach/send dbg", data.dbg);
       }
 
-      // гарантируем client_nonce, чтобы заменить optimistic user-сообщение
       const patchedUser = {
         ...userMsg,
         meta: { ...(userMsg.meta ?? {}), client_nonce },
       } as RawMessage;
 
-      // ВАЖНО: coachMessage НЕ добавляем вручную.
-      // Он придёт через realtime subscription (postgres_changes).
       setMessages((prev) => mergeDedup(prev, [patchedUser]));
 
-      // we are in the chat, so we consider it read
       try {
         await markRead();
       } catch (e) {
         console.warn("[coach] markRead threw", e);
       }
-      // optional: мягкий refetch истории, если нужно
-      // await loadHistory();
     } catch (e) {
-      // если упали после вставки userMsg на сервере — мы уже показываем optimistic.
-      // НЕ показываем модалку, которая провоцирует повторную отправку и дубли.
       console.error("coach_send_failed", e);
-      // можно показать тихий toast, если у вас есть
     } finally {
       setIsSending(false);
     }
@@ -300,33 +255,22 @@ export default function CoachChat(props: {
 
           {messages.length === 0 && (
             <div className="text-xs text-muted-foreground">
-              Пока сообщений нет. Напиши тренеру, расскажи о своих целях и последней тренировке — он ответит и предложит,
-              с чего начать.
+              Пока сообщений нет. Напиши тренеру, расскажи о своих целях и последней
+              тренировке — он ответит и предложит, с чего начать.
             </div>
           )}
 
           {displayMessages.map((m) => (
-            <div key={msgKey(m)} className={cn("flex", getRole(m) === "user" ? "justify-end" : "justify-start")}>
-              <div
-                className={cn(
-                  "max-w-[75%] rounded-lg px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap break-words",
-                  getRole(m) === "user"
-                    ? "bg-[color:var(--btn-primary-main,#E58B21)] text-[color:var(--btn-primary-text,#0E0E0E)]"
-                    : "bg-muted text-foreground"
-                )}
-              >
-                {getRole(m) === "coach" && (
-                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    Тренер
-                  </div>
-                )}
-
-                {m.body}
-
-                <div className="mt-1 text-[9px] text-muted-foreground opacity-80">{formatTime(m.created_at)}</div>
-              </div>
-            </div>
+            <CoachMessageBubble
+              key={msgKey(m)}
+              role={getRole(m)}
+              body={m.body}
+              createdAt={m.created_at}
+              hydrated={hydrated}
+            />
           ))}
+
+          {isSending ? <CoachTypingIndicator /> : null}
 
           <div ref={bottomRef} />
         </div>
@@ -340,7 +284,13 @@ export default function CoachChat(props: {
             placeholder="Задай вопрос тренеру или опиши, как прошла тренировка… (Enter — отправить, Shift+Enter — новая строка)"
           />
           <div className="flex items-center justify-end gap-2">
-            <Button type="button" variant="secondary" size="sm" disabled={isSending} onClick={() => setText("")}>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={isSending}
+              onClick={() => setText("")}
+            >
               Очистить
             </Button>
             <Button

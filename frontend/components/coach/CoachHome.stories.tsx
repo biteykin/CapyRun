@@ -1,5 +1,5 @@
 // frontend/components/coach/CoachHome.stories.tsx
-import type { Meta, StoryObj } from "@storybook/react";
+import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import CoachHome from "./CoachHome.client";
 
 const meta: Meta<typeof CoachHome> = {

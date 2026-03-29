@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import type { Meta, StoryObj } from "@storybook/react";
+import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import CoachChat from "./CoachChat.client";
 
 const meta: Meta<typeof CoachChat> = {

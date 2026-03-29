@@ -18,11 +18,10 @@ const preview: Preview = {
       },
     },
     backgrounds: {
-      default: "light",
-      values: [
-        { name: "light", value: "#ffffff" },
-        { name: "dark", value: "#0e0e0e" },
-      ],
+      options: {
+        light: { name: "light", value: "#ffffff" },
+        dark: { name: "dark", value: "#0e0e0e" }
+      }
     },
     a11y: { test: "todo" },
   },
@@ -36,6 +35,12 @@ const preview: Preview = {
       return <Story />;
     },
   ],
+
+  initialGlobals: {
+    backgrounds: {
+      value: "light"
+    }
+  }
 };
 
 export default preview;

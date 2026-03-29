@@ -1,7 +1,12 @@
+// This file has been automatically migrated to valid ESM format by Storybook.
+import { fileURLToPath } from "node:url";
 // frontend/.storybook/main.ts
 import type { StorybookConfig } from "@storybook/nextjs-vite";
 import { mergeConfig } from "vite";
-import path from "path";
+import path, { dirname } from "path";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const config: StorybookConfig = {
   framework: {
@@ -17,11 +22,10 @@ const config: StorybookConfig = {
   ],
 
   addons: [
-    "@storybook/addon-essentials",
     "@storybook/addon-a11y",
     "@storybook/addon-docs",
     "@storybook/addon-onboarding",
-    "@storybook/addon-vitest",
+    "@storybook/addon-vitest"
   ],
 
   docs: {
