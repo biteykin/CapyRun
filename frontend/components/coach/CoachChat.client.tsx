@@ -241,9 +241,7 @@ export default function CoachChat(props: {
 
   return (
     <Card className="flex h-full min-h-0 flex-col overflow-hidden">
-      <CardContent className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
-        <div className="text-xs text-muted-foreground">Общий чат с тренером</div>
-
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden p-4">
         <div className="relative min-h-0 flex-1 overflow-hidden rounded-md border bg-muted/10">
           <div
             ref={scrollRef}
