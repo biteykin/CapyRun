@@ -1,16 +1,16 @@
+// frontend/components/coach/CoachChat.client.tsx
+
 "use client";
 
 import * as React from "react";
-import { useMemo } from "react";
+import { useLayoutEffect, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseBrowser";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
-import CoachMessageBubble, {
-  formatCoachMessageTime,
-} from "@/components/coach/CoachMessageBubble";
-import CoachTypingIndicator from "@/components/coach/CoachTypingIndicator";
+import CoachMessageBubble from "./CoachMessageBubble";
+import CoachTypingIndicator from "./CoachTypingIndicator";
 
 // --- Types ---
 type RawMessage = {
@@ -23,25 +23,15 @@ type RawMessage = {
   created_at: string;
 };
 
-type ChatMessageVM = {
-  id: string;
-  role: "user" | "coach" | "system";
-  body: string;
-  created_at: string;
-  author_id?: string;
-  meta?: any;
-};
-
-// --- Helpers ---
 function makeNonce() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function msgKey(m: Partial<RawMessage> & { meta?: any }) {
-  const cn = m?.meta?.client_nonce;
-  if (typeof cn === "string" && cn.length) {
+  const clientNonce = m?.meta?.client_nonce;
+  if (typeof clientNonce === "string" && clientNonce.length) {
     const t = (m as any)?.type ?? "unknown";
-    return `cn:${cn}:t:${t}`;
+    return `cn:${clientNonce}:t:${t}`;
   }
   if (m?.id) return `id:${m.id}`;
   return `fb:${m.type}:${m.created_at}:${(m.body ?? "").slice(0, 24)}`;
@@ -49,6 +39,7 @@ function msgKey(m: Partial<RawMessage> & { meta?: any }) {
 
 function mergeDedup(prev: RawMessage[], incoming: RawMessage[]) {
   const map = new Map<string, RawMessage>();
+
   for (const m of prev) map.set(msgKey(m), m);
   for (const m of incoming) map.set(msgKey(m), m);
 
@@ -58,6 +49,7 @@ function mergeDedup(prev: RawMessage[], incoming: RawMessage[]) {
     const tb = new Date(b.created_at).getTime();
     return ta - tb;
   });
+
   return arr;
 }
 
@@ -70,7 +62,7 @@ export default function CoachChat(props: {
   const { threadId, initialMessages, currentUserId } = props;
 
   const [messages, setMessages] = React.useState<RawMessage[]>(() => {
-    const msgArr: RawMessage[] = (initialMessages ?? []).map((m: any) => ({
+    return (initialMessages ?? []).map((m: any) => ({
       id: m.id,
       thread_id: m.thread_id,
       author_id: m.author_id,
@@ -79,14 +71,15 @@ export default function CoachChat(props: {
       meta: m.meta,
       created_at: m.created_at,
     }));
-    return msgArr;
   });
 
   const [text, setText] = React.useState("");
   const [isSending, setIsSending] = React.useState(false);
-  const bottomRef = React.useRef<HTMLDivElement | null>(null);
-
   const [hydrated, setHydrated] = React.useState(false);
+  const [showAllAuto, setShowAllAuto] = React.useState(false);
+
+  const scrollRef = React.useRef<HTMLDivElement | null>(null);
+
   React.useEffect(() => {
     setHydrated(true);
   }, []);
@@ -125,17 +118,26 @@ export default function CoachChat(props: {
     };
   }, [threadId]);
 
-  React.useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
   }, [messages.length, isSending]);
 
   const formatTime = React.useCallback(
-    (iso: string) => formatCoachMessageTime(iso, hydrated),
+    (iso: string) => {
+      if (!hydrated) return "—:—";
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return "—:—";
+      return d.toLocaleTimeString("ru-RU", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    },
     [hydrated]
   );
 
   const AUTO_LIMIT = 10;
-  const [showAllAuto, setShowAllAuto] = React.useState(false);
 
   const displayMessages = useMemo(() => {
     const auto = messages.filter((m) => m.meta?.kind === "workout_first_message");
@@ -201,15 +203,13 @@ export default function CoachChat(props: {
         dbg?: any;
       };
 
-      const userMsg = data.userMessage as RawMessage;
-
       if (data?.dbg) {
         console.warn("[coach] /api/coach/send dbg", data.dbg);
       }
 
       const patchedUser = {
-        ...userMsg,
-        meta: { ...(userMsg.meta ?? {}), client_nonce },
+        ...data.userMessage,
+        meta: { ...(data.userMessage.meta ?? {}), client_nonce },
       } as RawMessage;
 
       setMessages((prev) => mergeDedup(prev, [patchedUser]));
@@ -240,39 +240,48 @@ export default function CoachChat(props: {
   }
 
   return (
-    <Card className="flex h-full min-h-0 flex-col">
-      <CardContent className="flex min-h-0 flex-1 flex-col gap-3 p-4">
+    <Card className="flex h-full min-h-0 flex-col overflow-hidden">
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
         <div className="text-xs text-muted-foreground">Общий чат с тренером</div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto rounded-md border bg-muted/10 p-3 space-y-3">
-          {hiddenAutoCount > 0 && !showAllAuto && (
-            <div className="flex items-center justify-center">
-              <Button variant="secondary" size="sm" onClick={() => setShowAllAuto(true)}>
-                Показать ещё авто-отчёты ({hiddenAutoCount})
-              </Button>
+        <div className="relative min-h-0 flex-1 overflow-hidden rounded-md border bg-muted/10">
+          <div
+            ref={scrollRef}
+            className="h-full overflow-y-auto p-3 space-y-3"
+          >
+            {hiddenAutoCount > 0 && !showAllAuto && (
+              <div className="flex items-center justify-center">
+                <Button variant="secondary" size="sm" onClick={() => setShowAllAuto(true)}>
+                  Показать ещё авто-отчёты ({hiddenAutoCount})
+                </Button>
+              </div>
+            )}
+
+            {messages.length === 0 && (
+              <div className="text-xs text-muted-foreground">
+                Пока сообщений нет. Напиши тренеру, расскажи о своих целях и последней
+                тренировке — он ответит и предложит, с чего начать.
+              </div>
+            )}
+
+            {displayMessages.map((m) => (
+              <CoachMessageBubble
+                key={msgKey(m)}
+                role={getRole(m)}
+                body={m.body}
+                createdAt={m.created_at}
+                hydrated={hydrated}
+              />
+            ))}
+
+            <div className="h-12" />
+          </div>
+
+          {isSending ? (
+            <div className="pointer-events-none absolute bottom-2 left-0 right-0 px-3">
+              <CoachTypingIndicator />
             </div>
-          )}
-
-          {messages.length === 0 && (
-            <div className="text-xs text-muted-foreground">
-              Пока сообщений нет. Напиши тренеру, расскажи о своих целях и последней
-              тренировке — он ответит и предложит, с чего начать.
-            </div>
-          )}
-
-          {displayMessages.map((m) => (
-            <CoachMessageBubble
-              key={msgKey(m)}
-              role={getRole(m)}
-              body={m.body}
-              createdAt={m.created_at}
-              hydrated={hydrated}
-            />
-          ))}
-
-          {isSending ? <CoachTypingIndicator /> : null}
-
-          <div ref={bottomRef} />
+          ) : null}
         </div>
 
         <div className="mt-2 flex flex-col gap-2 border-t pt-2">

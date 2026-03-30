@@ -21,6 +21,7 @@ import {
 } from "@/lib/coach/utils";
 
 import { getDialogState } from "@/lib/coach/dialogState";
+import { tryStaticAnswer } from "@/lib/coach/staticAnswers";
 
 import {
   loadMemoryTopDirect,
@@ -1400,6 +1401,26 @@ export async function POST(req: NextRequest) {
         body: wsLocal,
         stage: "local_weekly_schedule",
         meta: { model: "local" },
+      });
+
+      return NextResponse.json({
+        threadId,
+        userMessage: userMsgRow,
+        coachMessage: ins.data,
+      });
+    }
+
+    stage = "static_answers";
+    const staticAnswer = tryStaticAnswer(finalText);
+    if (staticAnswer) {
+      const ins = await insertCoachReply({
+        db,
+        threadId,
+        userId: user.id,
+        replyToId: userMsgRow.id,
+        body: staticAnswer,
+        stage: "static_answer",
+        meta: { model: "static_qa" },
       });
 
       return NextResponse.json({
