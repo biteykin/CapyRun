@@ -7,6 +7,14 @@ import PlansCalendarHost from "@/components/plans/PlansCalendarHost.client";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+type ActiveGoal = {
+  id: string;
+  title: string | null;
+  type: string | null;
+  sport: string | null;
+  date_to: string | null;
+} | null;
+
 type PlanSessionRow = {
   id: string;
   user_plan_id: string | null;
@@ -14,9 +22,29 @@ type PlanSessionRow = {
   sport: string | null;
   status: string | null;
   title: string | null;
+  structure?: {
+    goal?: string | null;
+    main?: string | null;
+    notes?: string | null;
+    steps?: any[] | null;
+    effort?: string | null;
+    warmup?: string | null;
+    cooldown?: string | null;
+    hr_target?: string | null;
+    distance_km?: number | null;
+    duration_min?: number | null;
+    strength_block?: string | null;
+    hydration?: string | null;
+    fueling?: string | null;
+  } | null;
   notes?: string | null;
   link_workout_id?: string | null;
 };
+
+function formatPlannedDescription(s: PlanSessionRow): string | null {
+  const st = s.structure ?? null;
+  return st?.notes ?? s.notes ?? st?.main ?? null;
+}
 
 type WorkoutRow = {
   id: string;
@@ -123,6 +151,21 @@ export default async function PlansPage() {
 
   const workouts: WorkoutRow[] = (workoutsRaw ?? []) as any;
 
+  const { data: activeGoalRaw, error: goalErr } = await supabase
+    .from("goals")
+    .select("id, title, type, sport, date_to")
+    .eq("user_id", user.id)
+    .eq("status", "active")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (goalErr) {
+    console.error("goals error", goalErr);
+  }
+
+  const activeGoal: ActiveGoal = (activeGoalRaw as any) ?? null;
+
   // Нормализованный список событий для календаря
   const events = [
     // Плановые сессии
@@ -133,9 +176,22 @@ export default async function PlansPage() {
       kind: "planned" as const,
       status: s.status,
       sport: s.sport,
-      description: s.notes ?? null,
+      description: formatPlannedDescription(s),
       user_plan_id: s.user_plan_id,
       link_workout_id: s.link_workout_id,
+      structure: s.structure ?? null,
+      notes: s.notes ?? s.structure?.notes ?? null,
+      goal: s.structure?.goal ?? null,
+      main: s.structure?.main ?? null,
+      warmup: s.structure?.warmup ?? null,
+      cooldown: s.structure?.cooldown ?? null,
+      effort: s.structure?.effort ?? null,
+      hr_target: s.structure?.hr_target ?? null,
+      strength_block: s.structure?.strength_block ?? null,
+      steps: s.structure?.steps ?? null,
+      planned_distance_km: s.structure?.distance_km ?? null,
+      planned_duration_min: s.structure?.duration_min ?? null,
+      planned_date: s.planned_date,
       source: "plan" as const,
     })),
     // Фактические тренировки
@@ -165,7 +221,11 @@ export default async function PlansPage() {
   return (
     <main className="w-full space-y-5">
       <h1 className="text-2xl font-extrabold">План тренировок</h1>
-      <PlansCalendarHost events={events} initialMonthISO={initialMonthISO} />
+      <PlansCalendarHost
+        events={events}
+        initialMonthISO={initialMonthISO}
+        activeGoal={activeGoal}
+      />
     </main>
   );
 }

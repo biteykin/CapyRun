@@ -16,6 +16,18 @@ export type PlanEvent = {
   sport?: string | null;
   duration_sec?: number | null;
   distance_m?: number | null;
+  structure?: any;
+  notes?: string | null;
+  goal?: string | null;
+  main?: string | null;
+  warmup?: string | null;
+  cooldown?: string | null;
+  effort?: string | null;
+  hr_target?: string | null;
+  strength_block?: string | null;
+  steps?: any[] | null;
+  planned_duration_min?: number | null;
+  planned_distance_km?: number | null;
   isCompleted?: boolean;  // Флаг, который выставляем в Host
   [key: string]: any;
 };
@@ -63,6 +75,23 @@ function getDaysGrid(viewDate: Date): Date[] {
     days.push(d);
   }
   return days;
+}
+
+function getEventMetaLine(e: PlanEvent): string | null {
+  if (e.kind === "workout") {
+    if (e.distance_m && e.distance_m > 0) return `${(e.distance_m / 1000).toFixed(1)} км`;
+    if (e.duration_sec && e.duration_sec > 0) return `${Math.round(e.duration_sec / 60)} мин`;
+    return e.sport ? String(e.sport) : null;
+  }
+
+  if (e.planned_distance_km && e.planned_distance_km > 0) {
+    return `${Number(e.planned_distance_km).toFixed(1)} км`;
+  }
+  if (e.planned_duration_min && e.planned_duration_min > 0) {
+    return `${Math.round(Number(e.planned_duration_min))} мин`;
+  }
+  if (e.sport === "strength" && e.strength_block) return "ОФП";
+  return e.goal ?? e.sport ?? null;
 }
 
 export default function PlansCalendar({
@@ -193,13 +222,23 @@ export default function PlansCalendar({
                       type="button"
                       onClick={() => onEventClick?.(e)}
                       className={cn(
-                        "block w-full truncate rounded-md border px-2 py-1 text-left text-xs",
+                        "block w-full rounded-md border px-2 py-1 text-left text-xs",
                         !e.isCompleted && "hover:bg-muted"
                       )}
                       style={style}
                       title={e.title}
                     >
-                      {e.title}
+                      <div className="truncate font-medium">{e.title}</div>
+                      {getEventMetaLine(e) ? (
+                        <div
+                          className={cn(
+                            "mt-0.5 truncate text-[10px] opacity-80",
+                            e.isCompleted ? "text-white/90" : "text-muted-foreground"
+                          )}
+                        >
+                          {getEventMetaLine(e)}
+                        </div>
+                      ) : null}
                     </button>
                   );
                 })}

@@ -267,6 +267,20 @@ function normalizeStructuredPlanDates(
       ? Math.trunc(Number(plan.horizon_days))
       : parsePlanHorizonDays(userText, planner) ?? sessions.length;
 
+  const trimmedSessions = sessions.filter((session) => {
+    const dayIndex =
+      typeof session.day_index === "number" && Number.isFinite(session.day_index)
+        ? Math.max(0, Math.trunc(session.day_index))
+        : 0;
+
+    return dayIndex < horizonDays;
+  });
+
+  const finalSessions =
+    trimmedSessions.length > 0
+      ? trimmedSessions
+      : sessions.slice(0, Math.max(1, horizonDays));
+
   const endsOn = addDaysToDateOnly(anchor, Math.max(0, horizonDays - 1));
 
   return {
@@ -277,7 +291,7 @@ function normalizeStructuredPlanDates(
       from: anchor,
       to: endsOn,
     },
-    sessions,
+    sessions: finalSessions,
   };
 }
 
@@ -1748,7 +1762,7 @@ async function runPlanResponder(args: {
   const completion = await openai.chat.completions.create({
     model: COACH_MODELS.responder,
     temperature: 0.25,
-    max_tokens: 1800,
+    max_tokens: 3200,
     response_format: {
       type: "json_schema",
       json_schema: {
@@ -1801,7 +1815,8 @@ async function runPlanResponder(args: {
   }
 
   return {
-    text: raw.trim() || "Не удалось собрать ответ по плану.",
+    text:
+      "Не удалось корректно собрать план в нужном формате. Попробуй ещё раз — я пересоберу его аккуратно.",
     structured_plan: structuredPlan,
   };
 }

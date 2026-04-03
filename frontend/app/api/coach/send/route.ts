@@ -99,6 +99,96 @@ type WorkoutInsightBuildOptions = {
   anchorMessageId?: string | null;
 };
 
+function roundToBpm(n: number) {
+  return Math.round(n);
+}
+
+function extractHrMaxCandidates(text: string): number[] {
+  const t = String(text ?? "").replace(/,/g, ".").toLowerCase();
+  const out: number[] = [];
+
+  const patterns = [
+    /макс(?:имальный)?\s*пульс[^0-9]{0,20}(\d{2,3})/gi,
+    /hr[\s_-]*max[^0-9]{0,20}(\d{2,3})/gi,
+    /макс[^0-9]{0,20}(\d{2,3})/gi,
+    /допустим[^0-9]{0,20}(\d{2,3})/gi,
+  ];
+
+  for (const re of patterns) {
+    let m: RegExpExecArray | null = null;
+    while ((m = re.exec(t))) {
+      const n = Number(m[1]);
+      if (Number.isFinite(n) && n >= 120 && n <= 230) out.push(n);
+    }
+  }
+
+  const generic = t.match(/\b(1[2-9]\d|20\d|21\d|22\d|23\d)\b/g) ?? [];
+  for (const raw of generic) {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n >= 120 && n <= 230) out.push(n);
+  }
+
+  return [...new Set(out)];
+}
+
+function isHrZoneEasyQuestion(text: string) {
+  const t = String(text ?? "").toLowerCase();
+  const hasPulse = /пульс|чсс|hr/.test(t);
+  const hasZone = /зон|zone/.test(t);
+  const hasEasy = /легк|легкий|легкие|easy|разговорн|комфорт/.test(t);
+  const hasConcrete = /какой|конкрет|цифр|сколько|диапазон|на какой/.test(t);
+
+  return (
+    (hasPulse && hasZone) ||
+    (hasPulse && hasEasy) ||
+    (hasZone && hasEasy) ||
+    (hasPulse && hasConcrete && /бежать|бег/.test(t))
+  );
+}
+
+function buildHrZoneEasyReply(text: string) {
+  const candidates = extractHrMaxCandidates(text);
+  const primary = candidates[0] ?? null;
+  const secondary = candidates[1] ?? null;
+
+  if (primary && secondary && primary !== secondary) {
+    const p1Low = roundToBpm(primary * 0.65);
+    const p1High = roundToBpm(primary * 0.75);
+    const p2Low = roundToBpm(secondary * 0.65);
+    const p2High = roundToBpm(secondary * 0.75);
+
+    return (
+      `Да, это действительно две большие разницы 👍\n\n` +
+      `Для лёгкого бега я бы ориентировался не на “формальную зону 1–2”, а на **верх лёгкого / низ аэробного easy** — обычно это около **65–75% от реального HRmax**.\n\n` +
+      `Если считать от **${primary}**, то ориентир для лёгкого бега: **${p1Low}–${p1High} уд/мин**.\n` +
+      `Если считать от **${secondary}**, то ориентир: **${p2Low}–${p2High} уд/мин**.\n\n` +
+      `👉 На практике я бы бежал ближе к диапазону **${p2Low}–${p2High}**, если ты реально недавно видел пульс около ${secondary} и это не был потолок.\n\n` +
+      `Если у тебя на **125** очень легко и свободно — это ок для восстановления.\n` +
+      `Если на **150** уже становится “небыстро, но заметно тяжелее”, то для большинства лёгких пробежек это уже, скорее всего, верх easy или даже выше.\n\n` +
+      `Мой совет: для обычного лёгкого бега держать пульс так, чтобы сохранялся **разговорный темп без натяга**. Если хочешь, я могу сразу предложить тебе **рабочий диапазон easy / steady / tempo** в цифрах.`
+    );
+  }
+
+  if (primary) {
+    const low = roundToBpm(primary * 0.65);
+    const high = roundToBpm(primary * 0.75);
+    return (
+      `Если брать максимальный пульс **${primary}**, то для лёгкого бега я бы рекомендовал ориентир примерно **${low}–${high} уд/мин** 🟢\n\n` +
+      `Это обычно комфортный, разговорный темп: дышится спокойно, можно говорить фразами, нет ощущения что “поддавливаешь”.\n\n` +
+      `👉 Если на этом диапазоне тебе всё ещё тяжело, лучше сместиться ближе к нижней границе.\n` +
+      `👉 Если на ${low} совсем прогулка, а на ${high} уже ощутимо, то твой реальный easy чаще всего будет где-то в середине диапазона.\n\n` +
+      `Если хочешь, я могу сразу расписать тебе **конкретные пульсовые диапазоны для лёгкого, умеренного и интенсивного бега**.`
+    );
+  }
+
+  return (
+    `Да, ты прав — “легко” на **125** и “легко” на **150** могут быть совсем разными по факту.\n\n` +
+    `Для лёгкого бега я бы ориентировался не просто на подпись “1–2 зона”, а на **ощущение разговорного темпа** и диапазон примерно **65–75% от реального максимального пульса**.\n\n` +
+    `То есть лёгкий бег — это не просто “не быстро”, а такой темп, где ты не закисляешься и не терпишь нагрузку.\n\n` +
+    `Напиши мне свой **максимальный пульс**, и я дам тебе **конкретную цифру и диапазон**, на каком пульсе лучше бегать easy.`
+  );
+}
+
 function buildDegradedCoachReply(params: {
   userText: string;
   workouts?: any[] | null;
@@ -1027,6 +1117,30 @@ export async function POST(req: NextRequest) {
       .single();
 
     insertedUserMsg = userMsgRow;
+
+    stage = "hr_zone_easy_local";
+    if (isHrZoneEasyQuestion(finalText)) {
+      const answer = buildHrZoneEasyReply(finalText);
+      const ins = await insertCoachReply({
+        db,
+        threadId,
+        userId: user.id,
+        replyToId: userMsgRow.id,
+        body: answer,
+        stage: "hr_zone_easy_local",
+        meta: {
+          model: "local",
+          faq_kind: "hr_zone_easy",
+          hrmax_candidates: extractHrMaxCandidates(finalText),
+        },
+      });
+
+      return NextResponse.json({
+        threadId,
+        userMessage: userMsgRow,
+        coachMessage: ins.data,
+      });
+    }
 
     stage = "load_history";
     const { data: historyAll } = await db

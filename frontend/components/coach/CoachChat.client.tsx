@@ -1,18 +1,20 @@
-// frontend/components/coach/CoachChat.client.tsx
-
 "use client";
 
 import * as React from "react";
 import { useLayoutEffect, useMemo } from "react";
-import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseBrowser";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import CoachMessageBubble from "./CoachMessageBubble";
-import CoachTypingIndicator from "./CoachTypingIndicator";
+import CoachPlanActions from "./CoachPlanActions";
 
-// --- Types ---
 type RawMessage = {
   id: string;
   thread_id: string;
@@ -22,6 +24,14 @@ type RawMessage = {
   meta: any;
   created_at: string;
 };
+
+const QUICK_ACTIONS = [
+  "Разбери последнюю тренировку",
+  "Составь план на неделю",
+  "Как улучшить результат?",
+  "Что у меня по прогрессу?",
+  "Когда лучше отдыхать?",
+] as const;
 
 function makeNonce() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -79,6 +89,7 @@ export default function CoachChat(props: {
   const [showAllAuto, setShowAllAuto] = React.useState(false);
 
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
+  const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
 
   React.useEffect(() => {
     setHydrated(true);
@@ -124,19 +135,6 @@ export default function CoachChat(props: {
     el.scrollTop = el.scrollHeight;
   }, [messages.length, isSending]);
 
-  const formatTime = React.useCallback(
-    (iso: string) => {
-      if (!hydrated) return "—:—";
-      const d = new Date(iso);
-      if (Number.isNaN(d.getTime())) return "—:—";
-      return d.toLocaleTimeString("ru-RU", {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-    },
-    [hydrated]
-  );
-
   const AUTO_LIMIT = 10;
 
   const displayMessages = useMemo(() => {
@@ -155,6 +153,53 @@ export default function CoachChat(props: {
     return Math.max(0, auto - AUTO_LIMIT);
   }, [messages]);
 
+  const typingMessage = React.useMemo<RawMessage | null>(() => {
+    if (!isSending) return null;
+    return {
+      id: "__typing__",
+      thread_id: threadId,
+      author_id: "coach",
+      type: "coach",
+      body: "__typing__",
+      meta: { kind: "typing_indicator" },
+      created_at: new Date().toISOString(),
+    };
+  }, [isSending, threadId]);
+
+  const displayMessagesWithTyping = React.useMemo(() => {
+    return typingMessage ? [...displayMessages, typingMessage] : displayMessages;
+  }, [displayMessages, typingMessage]);
+
+  const [pendingPlanActionMessageId, setPendingPlanActionMessageId] = React.useState<
+    string | null
+  >(null);
+  const [resolvedPlanMessageIds, setResolvedPlanMessageIds] = React.useState<string[]>(
+    []
+  );
+
+  const latestPlanActionMessageId = React.useMemo(() => {
+    const actionable = [...messages]
+      .reverse()
+      .find(
+        (m) =>
+          m.type === "coach" &&
+          Boolean(m.meta?.plan_confirmation) &&
+          !resolvedPlanMessageIds.includes(m.id)
+      );
+
+    return actionable?.id ?? null;
+  }, [messages, resolvedPlanMessageIds]);
+
+  React.useEffect(() => {
+    if (!pendingPlanActionMessageId) return;
+    const hasResolutionMessage = messages.some(
+      (m) =>
+        m.type === "coach" &&
+        (m.meta?.stage === "plan_saved" || m.meta?.stage === "plan_cancelled")
+    );
+    if (hasResolutionMessage) setPendingPlanActionMessageId(null);
+  }, [messages, pendingPlanActionMessageId]);
+
   const markRead = React.useCallback(async () => {
     const { error } = await supabase.rpc("coach_mark_thread_read", {
       p_thread_id: threadId,
@@ -164,66 +209,77 @@ export default function CoachChat(props: {
     }
   }, [threadId]);
 
-  const handleSend = async () => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
+  const sendMessage = React.useCallback(
+    async (messageText: string, options?: { action?: string | null }) => {
+      const action = options?.action ?? null;
+      const trimmed = messageText.trim();
+      if (!trimmed) return;
+      if (isSending) return;
 
-    setIsSending(true);
+      setIsSending(true);
 
-    const client_nonce = makeNonce();
-    const nowIso = new Date().toISOString();
+      const client_nonce = makeNonce();
+      const nowIso = new Date().toISOString();
 
-    const optimisticUser: RawMessage = {
-      id: `temp-user-${client_nonce}`,
-      thread_id: threadId,
-      author_id: currentUserId,
-      type: "user",
-      body: trimmed,
-      meta: { client_nonce, temp: true },
-      created_at: nowIso,
-    };
-
-    setMessages((prev) => mergeDedup(prev, [optimisticUser]));
-    setText("");
-
-    try {
-      const res = await fetch("/api/coach/send", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ threadId, text: trimmed, client_nonce }),
-      });
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      const data = (await res.json()) as {
-        threadId: string;
-        userMessage: RawMessage;
-        coachMessage?: RawMessage;
-        dbg?: any;
+      const optimisticUser: RawMessage = {
+        id: `temp-user-${client_nonce}`,
+        thread_id: threadId,
+        author_id: currentUserId,
+        type: "user",
+        body: trimmed,
+        meta: { client_nonce, temp: true },
+        created_at: nowIso,
       };
 
-      if (data?.dbg) {
-        console.warn("[coach] /api/coach/send dbg", data.dbg);
+      setMessages((prev) => mergeDedup(prev, [optimisticUser]));
+      if (trimmed === text.trim()) {
+        setText("");
       }
-
-      const patchedUser = {
-        ...data.userMessage,
-        meta: { ...(data.userMessage.meta ?? {}), client_nonce },
-      } as RawMessage;
-
-      setMessages((prev) => mergeDedup(prev, [patchedUser]));
 
       try {
-        await markRead();
+        const res = await fetch("/api/coach/send", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ threadId, text: trimmed, client_nonce, action }),
+        });
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const data = (await res.json()) as {
+          threadId: string;
+          userMessage: RawMessage;
+          coachMessage?: RawMessage;
+          dbg?: any;
+        };
+
+        if (data?.dbg) {
+          console.warn("[coach] /api/coach/send dbg", data.dbg);
+        }
+
+        const patchedUser = {
+          ...data.userMessage,
+          meta: { ...(data.userMessage.meta ?? {}), client_nonce },
+        } as RawMessage;
+
+        setMessages((prev) => mergeDedup(prev, [patchedUser]));
+
+        try {
+          await markRead();
+        } catch (e) {
+          console.warn("[coach] markRead threw", e);
+        }
       } catch (e) {
-        console.warn("[coach] markRead threw", e);
+        console.error("coach_send_failed", e);
+      } finally {
+        setIsSending(false);
       }
-    } catch (e) {
-      console.error("coach_send_failed", e);
-    } finally {
-      setIsSending(false);
-    }
+    },
+    [currentUserId, isSending, markRead, text, threadId]
+  );
+
+  const handleSend = async () => {
+    await sendMessage(text);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -243,10 +299,7 @@ export default function CoachChat(props: {
     <Card className="flex h-full min-h-0 flex-col overflow-hidden">
       <CardContent className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden p-4">
         <div className="relative min-h-0 flex-1 overflow-hidden rounded-md border bg-muted/10">
-          <div
-            ref={scrollRef}
-            className="h-full overflow-y-auto p-3 space-y-3"
-          >
+          <div ref={scrollRef} className="h-full overflow-y-auto p-3 space-y-3">
             {hiddenAutoCount > 0 && !showAllAuto && (
               <div className="flex items-center justify-center">
                 <Button variant="secondary" size="sm" onClick={() => setShowAllAuto(true)}>
@@ -257,58 +310,122 @@ export default function CoachChat(props: {
 
             {messages.length === 0 && (
               <div className="text-xs text-muted-foreground">
-                Пока сообщений нет. Напиши тренеру, расскажи о своих целях и последней
-                тренировке — он ответит и предложит, с чего начать.
+                Пока сообщений нет. Напиши Капи о своей цели, тренировке или плане — разберёмся вместе.
               </div>
             )}
 
-            {displayMessages.map((m) => (
-              <CoachMessageBubble
-                key={msgKey(m)}
-                role={getRole(m)}
-                body={m.body}
-                createdAt={m.created_at}
-                hydrated={hydrated}
-              />
-            ))}
+            {displayMessagesWithTyping.map((m) => {
+              const isTyping = m.meta?.kind === "typing_indicator";
+              const isPlanActionableMessage =
+                m.type === "coach" &&
+                Boolean(m.meta?.plan_confirmation) &&
+                m.id === latestPlanActionMessageId &&
+                !isTyping &&
+                !resolvedPlanMessageIds.includes(m.id);
 
-            <div className="h-12" />
+              const isPlanActionLoading =
+                pendingPlanActionMessageId != null && pendingPlanActionMessageId === m.id;
+
+              return (
+                <CoachMessageBubble
+                  key={msgKey(m)}
+                  role={getRole(m)}
+                  createdAt={isTyping ? null : m.created_at}
+                  hydrated={hydrated}
+                  afterBody={
+                    isPlanActionableMessage ? (
+                      <CoachPlanActions
+                        isLoading={isPlanActionLoading}
+                        disabled={isSending}
+                        confirmLabel="Добавить"
+                        cancelLabel="Отменить"
+                        onConfirm={() => {
+                          setPendingPlanActionMessageId(m.id);
+                          setResolvedPlanMessageIds((prev) => [
+                            ...new Set([...prev, m.id]),
+                          ]);
+                          void sendMessage("ок", { action: "confirm_plan" });
+                        }}
+                        onCancel={() => {
+                          setPendingPlanActionMessageId(m.id);
+                          setResolvedPlanMessageIds((prev) => [
+                            ...new Set([...prev, m.id]),
+                          ]);
+                          void sendMessage("отмена", { action: "cancel_plan" });
+                        }}
+                      />
+                    ) : null
+                  }
+                  body={
+                    isTyping ? (
+                      <div className="flex items-center gap-1.5 py-0.5">
+                        <span className="h-2 w-2 rounded-full bg-muted-foreground/75 animate-bounce [animation-delay:-0.2s]" />
+                        <span className="h-2 w-2 rounded-full bg-muted-foreground/75 animate-bounce [animation-delay:-0.1s]" />
+                        <span className="h-2 w-2 rounded-full bg-muted-foreground/75 animate-bounce" />
+                      </div>
+                    ) : (
+                      m.body
+                    )
+                  }
+                />
+              );
+            })}
+
+            <div className="h-2" />
           </div>
-
-          {isSending ? (
-            <div className="pointer-events-none absolute bottom-2 left-0 right-0 px-3">
-              <CoachTypingIndicator />
-            </div>
-          ) : null}
         </div>
 
         <div className="mt-2 flex flex-col gap-2 border-t pt-2">
           <Textarea
+            ref={textareaRef}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}
             rows={2}
-            placeholder="Задай вопрос тренеру или опиши, как прошла тренировка… (Enter — отправить, Shift+Enter — новая строка)"
+            placeholder='Напиши Капи… например: "разбери тренировку" или "составь план"'
           />
-          <div className="flex items-center justify-end gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              disabled={isSending}
-              onClick={() => setText("")}
-            >
-              Очистить
-            </Button>
-            <Button
-              type="button"
-              variant="primary"
-              size="sm"
-              disabled={isSending || !text.trim()}
-              onClick={handleSend}
-            >
-              {isSending ? "Отправляем…" : "Отправить тренеру"}
-            </Button>
+
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button type="button" variant="secondary" size="sm" disabled={isSending}>
+                    +
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-64">
+                  {QUICK_ACTIONS.map((action) => (
+                    <DropdownMenuItem
+                      key={action}
+                      onClick={() => void sendMessage(action)}
+                    >
+                      {action}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={isSending}
+                onClick={() => setText("")}
+              >
+                Очистить
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                disabled={isSending || !text.trim()}
+                onClick={handleSend}
+              >
+                {isSending ? "Отправляем…" : "Отправить тренеру"}
+              </Button>
+            </div>
           </div>
         </div>
       </CardContent>

@@ -109,6 +109,7 @@ export default function CoachMessageBubble(props: {
   label?: string | null;
   className?: string;
   bubbleClassName?: string;
+  afterBody?: React.ReactNode;
 }) {
   const {
     role,
@@ -118,6 +119,7 @@ export default function CoachMessageBubble(props: {
     label,
     className,
     bubbleClassName,
+    afterBody,
   } = props;
 
   const isUser = role === "user";
@@ -156,6 +158,8 @@ export default function CoachMessageBubble(props: {
         <div className="min-w-0">
           {bodyNode}
         </div>
+
+        {afterBody ? <div>{afterBody}</div> : null}
 
         {createdAt ? (
           <div className="mt-1 text-[9px] text-muted-foreground opacity-80">
