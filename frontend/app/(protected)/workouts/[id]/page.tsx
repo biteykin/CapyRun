@@ -18,16 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import ConfirmActionDialog from "@/components/ui/confirm-action-dialog";
 import { Textarea } from "@/components/ui/textarea";
 
 import { AppTooltip } from "@/components/ui/AppTooltip";
@@ -716,21 +707,16 @@ export default function WorkoutDetailPage() {
         </Card>
       </section>
 
-      {/* Delete modal */}
-      <AlertDialog open={pendingDelete} onOpenChange={setPendingDelete}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Удалить тренировку?</AlertDialogTitle>
-            <AlertDialogDescription>Это действие необратимо.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Отмена</AlertDialogCancel>
-            <AlertDialogAction className="bg-red-600 hover:bg-red-700" onClick={doDelete}>
-              Удалить
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmActionDialog
+        open={pendingDelete}
+        onOpenChange={setPendingDelete}
+        title="Удалить тренировку?"
+        description="Это действие необратимо."
+        confirmLabel="Удалить"
+        cancelLabel="Отмена"
+        confirmVariant="danger"
+        onConfirm={doDelete}
+      />
     </main>
   );
 }

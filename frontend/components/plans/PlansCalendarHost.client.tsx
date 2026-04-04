@@ -9,24 +9,20 @@ import {
   Route,
   Timer,
   Activity,
-  Target,
   Sparkles,
   CheckCircle2,
-  ListChecks,
 } from "lucide-react";
 import PlansCalendar, { type PlanEvent } from "./PlansCalendar.client";
 import { supabase } from "@/lib/supabaseBrowser";
 import {
   AlertDialog,
-  AlertDialogAction,
-  AlertDialogDescription,
-  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogFooter,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import ConfirmActionDialog from "@/components/ui/confirm-action-dialog";
 
 type ActiveGoal = {
   id: string;
@@ -57,6 +53,8 @@ type ExtendedEvent = PlanEvent & {
     distance_km?: number | null;
     duration_min?: number | null;
     strength_block?: string | null;
+    hydration?: string | null;
+    fueling?: string | null;
   } | null;
 };
 
@@ -94,39 +92,6 @@ function formatDistance(m?: number | null) {
   if (!m || m <= 0) return "—";
   const km = m / 1000;
   return `${km.toFixed(1)} км`;
-}
-
-function statusLabel(evt: ExtendedEvent | null): string {
-  if (!evt) return "—";
-
-  // Фактическая тренировка
-  if (evt.kind === "workout") {
-    return "Выполнена";
-  }
-
-  const s = (evt.status || "").toString();
-
-  switch (s) {
-    case "planned":
-      return "Запланирована";
-    case "moved":
-      return "Перенесена";
-    case "completed":
-      return "Выполнена";
-    case "missed":
-      return "Пропущена";
-    case "canceled":
-      return "Отменена";
-    default:
-      return s || "—";
-  }
-}
-
-function kindLabel(evt: ExtendedEvent | null): string {
-  if (!evt) return "—";
-  if (evt.kind === "workout") return "Фактическая тренировка";
-  if (evt.kind === "planned") return "Плановая тренировка";
-  return "Тренировка";
 }
 
 function formatPlannedDistance(km?: number | null) {
@@ -231,27 +196,78 @@ function getStepTheme(type?: string | null) {
   return STEP_THEME_BY_TYPE[type ?? ""] ?? STEP_THEME_BY_TYPE.default;
 }
 
-function getTrainingBenefit(evt: ExtendedEvent | null) {
-  const title = String(evt?.title ?? "").toLowerCase();
-  const goal = String(evt?.goal ?? evt?.structure?.goal ?? "").toLowerCase();
-  const sport = String(evt?.sport ?? "").toLowerCase();
+function getTrainingBenefit(evt: ExtendedEvent | null, activeGoal?: ActiveGoal) {
+  if (!evt) return "Эта тренировка поддерживает общий прогресс и помогает двигаться к цели без перегруза.";
 
-  if (sport === "strength" || title.includes("офп") || goal.includes("офп")) {
-    return "Укрепляет мышцы и устойчивость, помогает бегать стабильнее и снижать риск перегрузок.";
+  const title = String(evt.title ?? "").toLowerCase();
+  const sport = String(evt.sport ?? "").toLowerCase();
+  const structure = evt.structure ?? null;
+  const goal = String(structure?.goal ?? "").toLowerCase();
+
+  const text = `${title} ${goal} ${sport}`;
+  const activeGoalTitle = activeGoal?.title?.trim() || null;
+  const goalSuffix = activeGoalTitle
+    ? ` Это также помогает в достижении цели «${activeGoalTitle}».`
+    : "";
+
+  if (text.includes("длинн")) {
+    return (
+      "Развивает выносливость, помогает спокойнее держать нагрузку на длительной работе и укрепляет базу под более длинные дистанции." +
+      goalSuffix
+    );
   }
-  if (title.includes("темпов") || goal.includes("темпов")) {
-    return "Развивает темповую выносливость и помогает дольше держать уверенный рабочий темп.";
+
+  if (text.includes("темпов")) {
+    return (
+      "Учит держать устойчиво высокий, но контролируемый темп. Помогает повышать пороговую выносливость и напрямую влияет на способность бежать быстрее на целевой дистанции." +
+      goalSuffix
+    );
   }
-  if (title.includes("интервал") || goal.includes("интервал")) {
-    return "Прокачивает скорость и работу на более высоком усилии без потери контроля.";
+
+  if (text.includes("интерв")) {
+    return (
+      "Развивает скорость, экономичность и переносимость интенсивной нагрузки. Помогает улучшать форму и поднимать потолок текущих возможностей." +
+      goalSuffix
+    );
   }
-  if (title.includes("длинн") || goal.includes("длинн")) {
-    return "Укрепляет выносливость и уверенность на длинной дистанции.";
+
+  if (text.includes("легк")) {
+    return (
+      "Даёт аэробную базу, помогает восстанавливаться и поддерживать объём без лишнего стресса. Это фундамент, на котором держится весь план." +
+      goalSuffix
+    );
   }
-  if (title.includes("легк") || goal.includes("легк")) {
-    return "Поддерживает аэробную базу и помогает восстановиться без лишней нагрузки.";
+
+  if (text.includes("офп") || text.includes("сил") || sport === "strength") {
+    return (
+      "Укрепляет мышцы и связки, улучшает стабильность и снижает риск травм. Такая работа помогает увереннее переносить беговой объём и держать технику." +
+      goalSuffix
+    );
   }
-  return "Поддерживает форму и помогает двигаться к цели без хаотичных тренировок.";
+
+  return `Поддерживает прогресс по плану, помогает развивать нужные качества и постепенно приближает к текущей спортивной цели.${goalSuffix}`;
+}
+
+function getChecklistItems(evt: ExtendedEvent | null): string[] {
+  if (!evt) return [];
+
+  const sport = String(evt.sport ?? "").toLowerCase();
+  const structure = evt.structure ?? null;
+  const steps = Array.isArray(structure?.steps) ? structure.steps : [];
+  const hasWarmup = steps.some((s) => s?.type === "warmup") || !!structure?.warmup;
+  const hasCooldown = steps.some((s) => s?.type === "cooldown") || !!structure?.cooldown;
+
+  const items: string[] = [];
+
+  if (hasWarmup) items.push("Сделать короткую разминку перед стартом");
+  if (sport === "run") items.push("Подготовить часы, форму и кроссовки заранее");
+  if (sport === "strength") items.push("Проверить технику и не работать через боль");
+  if (structure?.hydration) items.push(`По воде: ${structure.hydration}`);
+  else items.push("Заранее подумать о воде, если тренировка затянется");
+  if (structure?.fueling) items.push(`По питанию: ${structure.fueling}`);
+  if (hasCooldown) items.push("Оставить 5–10 минут на заминку после тренировки");
+
+  return items.slice(0, 5);
 }
 
 function getTrainingPurposeLabel(evt: ExtendedEvent | null) {
@@ -319,47 +335,6 @@ function getExecutionTips(evt: ExtendedEvent | null): string[] {
   return tips.slice(0, 4);
 }
 
-function getGoalLinkCopy(evt: ExtendedEvent | null, activeGoal?: ActiveGoal) {
-  if (!activeGoal) return null;
-
-  const goalTitle = activeGoal.title ?? "твоей цели";
-  const goalType = String(activeGoal.type ?? "").toLowerCase();
-  const title = String(evt?.title ?? "").toLowerCase();
-
-  if (goalType.includes("hm") || goalTitle.toLowerCase().includes("полумара")) {
-    if (title.includes("длинн")) {
-      return `Эта тренировка напрямую работает на подготовку к цели «${goalTitle}»: она укрепляет выносливость и уверенность на дистанции.`;
-    }
-    if (title.includes("темпов")) {
-      return `Эта тренировка помогает цели «${goalTitle}»: она повышает способность держать более высокий темп дольше.`;
-    }
-    if (title.includes("интервал")) {
-      return `Эта тренировка поддерживает цель «${goalTitle}»: она развивает скорость и запас мощности.`;
-    }
-    if (title.includes("легк")) {
-      return `Эта тренировка помогает цели «${goalTitle}» через поддержку аэробной базы и аккуратное восстановление.`;
-    }
-  }
-
-  return `Эта тренировка поддерживает движение к цели «${goalTitle}» и помогает накапливать форму системно, а не хаотично.`;
-}
-
-function getPreWorkoutChecklist(evt: ExtendedEvent | null): string[] {
-  const title = String(evt?.title ?? "").toLowerCase();
-  const sport = String(evt?.sport ?? "").toLowerCase();
-  const items = ["Проверь кроссовки и экипировку", "Убедись, что часы / трекер заряжены"];
-
-  if (sport === "strength" || title.includes("офп")) {
-    items.push("Подготовь место и инвентарь для упражнений");
-    items.push("Сделай короткую суставную разминку перед началом");
-    return items;
-  }
-
-  items.push("Возьми воду, если тренировка длинная или интенсивная");
-  items.push("Проверь, что знаешь основной блок и ориентир по усилию");
-  return items;
-}
-
 export default function PlansCalendarHost({
   events,
   initialMonthISO,
@@ -413,8 +388,6 @@ export default function PlansCalendarHost({
   };
 
   const dateStr = selected ? formatDateRu(selected.date) : "—";
-  const statusStr = statusLabel(selected);
-  const kindStr = kindLabel(selected);
   const description = (selected?.description as string | null | undefined) ?? null;
   const sport = selected?.sport ?? null;
   const distanceStr = formatDistance(selected?.distance_m);
@@ -431,6 +404,8 @@ export default function PlansCalendarHost({
   const plannedDistanceStr = formatPlannedDistance(
     (selected as any)?.planned_distance_km ?? structure?.distance_km ?? null
   );
+  const trainingBenefit = getTrainingBenefit(selected, activeGoal);
+  const checklistItems = getChecklistItems(selected);
   const plannedDurationStr = formatMinutes(
     (selected as any)?.planned_duration_min ?? structure?.duration_min ?? null
   );
@@ -438,9 +413,6 @@ export default function PlansCalendarHost({
 
   const purposeLabel = getTrainingPurposeLabel(selected);
   const executionTips = getExecutionTips(selected);
-  const trainingBenefit = getTrainingBenefit(selected);
-  const goalLinkCopy = getGoalLinkCopy(selected, activeGoal);
-  const preWorkoutChecklist = getPreWorkoutChecklist(selected);
 
   const doDelete = React.useCallback(async () => {
     if (!selected || !isPlanned || isDeleting) return;
@@ -564,15 +536,6 @@ export default function PlansCalendarHost({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <DetailRow label="Статус" value={statusStr} />
-                <DetailRow label="Тип" value={kindStr} />
-                <DetailRow label="Вид спорта" value={sport ?? "—"} />
-                {isPlanned ? (
-                  <DetailRow label="Цель" value={plannedGoal ?? "—"} />
-                ) : null}
-              </div>
-
               {isPlanned ? (
                 <>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -603,25 +566,13 @@ export default function PlansCalendarHost({
 
                   <div className="rounded-xl border p-4">
                     <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
-                      <Sparkles className="h-4 w-4" />
+                      <Flag className="h-4 w-4" />
                       Что даст эта тренировка
                     </div>
                     <div className="text-sm text-muted-foreground">
                       {trainingBenefit}
                     </div>
                   </div>
-
-                  {goalLinkCopy ? (
-                    <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
-                      <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-primary">
-                        <Target className="h-4 w-4" />
-                        Связь с целью
-                      </div>
-                      <div className="text-sm text-foreground/90">
-                        {goalLinkCopy}
-                      </div>
-                    </div>
-                  ) : null}
 
                   {plannedSteps.length > 0 ? (
                     <div className="rounded-xl border p-4">
@@ -684,6 +635,23 @@ export default function PlansCalendarHost({
                     </div>
                   ) : null}
 
+                  {checklistItems.length > 0 ? (
+                    <div className="rounded-xl border p-4">
+                      <div className="mb-3 text-sm font-semibold">Чеклист перед тренировкой</div>
+                      <div className="space-y-2">
+                        {checklistItems.map((item, idx) => (
+                          <div
+                            key={`${selected?.id}-check-${idx}`}
+                            className="flex items-start gap-2 text-sm text-muted-foreground"
+                          >
+                            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-600" />
+                            <span>{item}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div className="rounded-xl border p-4">
                     <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
                       <Flag className="h-4 w-4" />
@@ -696,21 +664,6 @@ export default function PlansCalendarHost({
                           className="rounded-lg bg-muted/20 px-3 py-2 text-sm text-muted-foreground"
                         >
                           {tip}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border p-4">
-                    <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
-                      <ListChecks className="h-4 w-4" />
-                      Чеклист перед тренировкой
-                    </div>
-                    <div className="space-y-2">
-                      {preWorkoutChecklist.map((item, idx) => (
-                        <div key={`${selected?.id}-check-${idx}`} className="flex items-start gap-2">
-                          <CheckCircle2 className="mt-0.5 h-4 w-4 text-muted-foreground" />
-                          <div className="text-sm text-muted-foreground">{item}</div>
                         </div>
                       ))}
                     </div>
@@ -768,32 +721,32 @@ export default function PlansCalendarHost({
               </Button>
             ) : null}
 
-            <AlertDialogCancel>Закрыть</AlertDialogCancel>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setSelected(null);
+                setConfirmDeleteOpen(false);
+              }}
+            >
+              Закрыть
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
-        <AlertDialogContent className="max-w-md">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Удалить тренировку из плана?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Тренировка будет удалена из календаря плана. Это действие можно будет
-              восстановить только вручную, если добавить её заново.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Отмена</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-red-600 hover:bg-red-700"
-              disabled={isDeleting}
-              onClick={doDelete}
-            >
-              {isDeleting ? "Удаляем…" : "Удалить"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmActionDialog
+        open={confirmDeleteOpen}
+        onOpenChange={setConfirmDeleteOpen}
+        title="Удалить тренировку?"
+        description="Это действие необратимо."
+        confirmLabel="Удалить"
+        cancelLabel="Отмена"
+        confirmVariant="danger"
+        isLoading={isDeleting}
+        onConfirm={doDelete}
+        contentClassName="max-w-md"
+      />
     </>
   );
 }

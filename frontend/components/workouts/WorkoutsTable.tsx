@@ -31,16 +31,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import ConfirmActionDialog from "@/components/ui/confirm-action-dialog";
 import { MoreHorizontal, Eye, Pencil, Trash2 } from "lucide-react";
 import {
   Pagination,
@@ -659,28 +650,18 @@ function RowActions({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent onClick={(e) => e.stopPropagation()}>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Удалить тренировку?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Это действие необратимо. Тренировка{ name ? ` «${name}»` : "" } будет удалена из CapyRun.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setConfirmOpen(false)}>
-              Отмена
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={doDelete}
-              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
-              disabled={deleting}
-            >
-              {deleting ? "Удаляем…" : "Удалить"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmActionDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title="Удалить тренировку?"
+        description={`Это действие необратимо. Тренировка${name ? ` «${name}»` : ""} будет удалена из CapyRun.`}
+        confirmLabel={deleting ? "Удаляем…" : "Удалить"}
+        cancelLabel="Отмена"
+        confirmVariant="danger"
+        isLoading={deleting}
+        onConfirm={doDelete}
+        contentClassName="max-w-md"
+      />
     </span>
   );
 }

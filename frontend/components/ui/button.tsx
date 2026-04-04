@@ -12,7 +12,6 @@ import { cn } from "@/lib/utils"; // если нет — временно зам
  *    lemon  -> .btn .btn-yellow
  *    light  -> .btn .btn-light
  *    icon   -> .btn .btn-icon
- *    danger -> .btn .btn-delete
  *
  * Это позволит безболезненно мигрировать всё к единому виду.
  */
@@ -64,7 +63,13 @@ const buttonVariants = cva(
           "btn btn-light text-[color:hsl(var(--btn-light-text))] border [border-color:hsl(var(--btn-light-border))] " +
           "[background:hsl(var(--btn-light-bg))] hover:[background:hsl(var(--btn-light-hover-bg))]",
         icon: "btn btn-icon",
-        danger: "btn btn-delete",
+        danger:
+          "border border-black/10 bg-[#dc2626] text-white " +
+          "font-semibold " +
+          "shadow-[inset_0_-2px_0_rgba(0,0,0,0.25)] " +
+          "hover:brightness-95 " +
+          "active:translate-y-px active:shadow-[inset_0_-1px_0_rgba(0,0,0,0.3)] " +
+          "focus-visible:ring-black/10 ring-offset-0",
 
         // уже существующий вариант dropdown — оставляем для выпадающих меню
         dropdown:
@@ -110,7 +115,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
      * не ломая их стили (они в .btn уже есть и не конфликтуют).
      */
     const isLegacy =
-      variant === "lemon" || variant === "light" || variant === "icon" || variant === "danger";
+      variant === "lemon" || variant === "light" || variant === "icon";
 
     const sizePatch =
       size === "sm" ? "h-8 px-3 text-sm"

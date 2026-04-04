@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import ConfirmActionDialog from "@/components/ui/confirm-action-dialog";
 
 type GoalRow = {
   id: string;
@@ -139,6 +140,7 @@ export default function GoalsList({ goals, onAddGoal }: GoalsListProps) {
   const [editMode, setEditMode] = React.useState(false);
   const [deletingId, setDeletingId] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [pendingDeleteGoal, setPendingDeleteGoal] = React.useState<GoalRow | null>(null);
 
   // синхронизация при обновлении пропсов
   React.useEffect(() => {
@@ -147,8 +149,11 @@ export default function GoalsList({ goals, onAddGoal }: GoalsListProps) {
 
   if (!items || items.length === 0) return null;
 
-  async function handleDelete(goalId: string) {
+  async function handleDelete(goalId?: string) {
+    if (!goalId) return;
+
     if (deletingId) return;
+
     setDeletingId(goalId);
     setError(null);
 
@@ -162,6 +167,7 @@ export default function GoalsList({ goals, onAddGoal }: GoalsListProps) {
 
       // локально убираем цель из списка
       setItems((prev) => prev.filter((g) => g.id !== goalId));
+      setPendingDeleteGoal(null);
     } catch (e: any) {
       console.error("goal delete error", e);
       setError("Не удалось удалить цель. Попробуй ещё раз.");
@@ -307,8 +313,8 @@ export default function GoalsList({ goals, onAddGoal }: GoalsListProps) {
                     className={cn(
                       "border-destructive/70 text-destructive hover:bg-destructive/10"
                     )}
-                    disabled={deletingId === g.id}
-                    onClick={() => handleDelete(g.id)}
+                    disabled={deletingId === g.id || !!pendingDeleteGoal}
+                    onClick={() => setPendingDeleteGoal(g)}
                   >
                     {deletingId === g.id ? "Удаляем…" : "Удалить"}
                   </Button>
@@ -318,6 +324,20 @@ export default function GoalsList({ goals, onAddGoal }: GoalsListProps) {
           );
         })}
       </div>
+
+      <ConfirmActionDialog
+        open={!!pendingDeleteGoal}
+        onOpenChange={(open) => {
+          if (!open && !deletingId) setPendingDeleteGoal(null);
+        }}
+        title="Удалить цель?"
+        description={`Это действие необратимо.${pendingDeleteGoal?.title ? ` Цель «${pendingDeleteGoal.title}» будет удалена.` : ""}`}
+        confirmLabel={deletingId ? "Удаляем…" : "Удалить"}
+        cancelLabel="Отмена"
+        confirmVariant="danger"
+        isLoading={!!deletingId}
+        onConfirm={() => handleDelete(pendingDeleteGoal?.id)}
+      />
     </section>
   );
 }
