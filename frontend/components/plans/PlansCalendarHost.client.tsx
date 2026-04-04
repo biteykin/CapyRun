@@ -13,14 +13,21 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import PlansCalendar, { type PlanEvent } from "./PlansCalendar.client";
+import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseBrowser";
 import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogFooter,
-} from "@/components/ui/alert-dialog";
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Dialog,
+  DialogPortal,
+  DialogOverlay,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import * as RD from "@radix-ui/react-dialog";
 import { Button } from "@/components/ui/button";
 import ConfirmActionDialog from "@/components/ui/confirm-action-dialog";
 
@@ -158,37 +165,104 @@ const STEP_THEME_BY_TYPE: Record<
     timeline: string;
     pill: string;
     tone: string;
+    timelineStyle?: React.CSSProperties;
+    pillStyle?: React.CSSProperties;
   }
 > = {
   warmup: {
-    timeline: "bg-primary/15 border-primary/25",
-    pill: "bg-primary/10 text-primary border-primary/20",
-    tone: "border-l-primary bg-primary/5",
+    timeline: "",
+    pill: "",
+    tone: "border-l-[rgb(41,73,246)] bg-[rgb(212,219,253,0.35)]",
+    timelineStyle: {
+      backgroundColor: "#D4DBFD",
+      color: "#0E0E0E",
+      borderColor: "rgba(41,73,246,0.2)",
+    },
+    pillStyle: {
+      backgroundColor: "#D4DBFD",
+      color: "#2949F6",
+      borderColor: "rgba(41,73,246,0.25)",
+    },
   },
+
   interval: {
-    timeline: "bg-yellow/20 border-yellow/30",
-    pill: "bg-yellow/15 text-foreground border-yellow/30",
-    tone: "border-l-yellow bg-yellow/10",
+    timeline: "",
+    pill: "",
+    tone: "border-l-[rgb(89,34,159)] bg-[rgba(209,193,228,0.6)]",
+    timelineStyle: {
+      backgroundColor: "#D1C1E4",
+      color: "#0E0E0E",
+      borderColor: "rgba(89,34,159,0.2)",
+    },
+    pillStyle: {
+      backgroundColor: "#D1C1E4",
+      color: "#59229F",
+      borderColor: "rgba(89,34,159,0.25)",
+    },
   },
+
   recovery: {
-    timeline: "bg-success/20 border-success/30",
-    pill: "bg-success/15 text-foreground border-success/30",
-    tone: "border-l-success bg-success/10",
+    timeline: "",
+    pill: "",
+    tone: "border-l-[rgb(78,132,36)] bg-[rgb(217,238,218,0.5)]",
+    timelineStyle: {
+      backgroundColor: "#D9EEDA",
+      color: "#0E0E0E",
+      borderColor: "rgba(78,132,36,0.2)",
+    },
+    pillStyle: {
+      backgroundColor: "#D9EEDA",
+      color: "#4E8424",
+      borderColor: "rgba(78,132,36,0.25)",
+    },
   },
+
   cooldown: {
-    timeline: "bg-muted border-border",
-    pill: "bg-muted text-muted-foreground border-border",
-    tone: "border-l-border bg-muted/40",
+    timeline: "",
+    pill: "",
+    tone: "border-l-[rgb(170,172,168)] bg-[rgb(240,241,236,0.7)]",
+    timelineStyle: {
+      backgroundColor: "#F0F1EC",
+      color: "#595958",
+      borderColor: "rgba(170,172,168,0.25)",
+    },
+    pillStyle: {
+      backgroundColor: "#F0F1EC",
+      color: "#595958",
+      borderColor: "rgba(170,172,168,0.25)",
+    },
   },
+
   exercise: {
-    timeline: "bg-[color:var(--data-color-11)]/20 border-[color:var(--data-color-11)]/30",
-    pill: "bg-[color:var(--data-color-11)]/10 text-foreground border-[color:var(--data-color-11)]/30",
-    tone: "border-l-[color:var(--data-color-11)] bg-[color:var(--data-color-11)]/5",
+    timeline: "",
+    pill: "",
+    tone: "border-l-[rgb(89,34,159)] bg-[rgb(209,193,228,0.4)]",
+    timelineStyle: {
+      backgroundColor: "#D1C1E4",
+      color: "#0E0E0E",
+      borderColor: "rgba(89,34,159,0.2)",
+    },
+    pillStyle: {
+      backgroundColor: "#D1C1E4",
+      color: "#59229F",
+      borderColor: "rgba(89,34,159,0.25)",
+    },
   },
+
   default: {
-    timeline: "bg-muted/60 border-border",
-    pill: "bg-muted text-muted-foreground border-border",
-    tone: "border-l-primary bg-muted/20",
+    timeline: "",
+    pill: "",
+    tone: "border-l-[rgb(240,145,55)] bg-[rgba(240,145,55,0.12)]",
+    timelineStyle: {
+      backgroundColor: "#F0E7D4",
+      color: "#0E0E0E",
+      borderColor: "rgba(240,145,55,0.2)",
+    },
+    pillStyle: {
+      backgroundColor: "#F0E7D4",
+      color: "#F09137",
+      borderColor: "rgba(240,145,55,0.25)",
+    },
   },
 };
 
@@ -393,7 +467,6 @@ export default function PlansCalendarHost({
   const distanceStr = formatDistance(selected?.distance_m);
   const durationStr = formatDuration(selected?.duration_sec);
   const structure = selected?.structure ?? null;
-  const plannedGoal = structure?.goal ?? (selected as any)?.goal ?? null;
   const plannedMain = structure?.main ?? (selected as any)?.main ?? null;
   const plannedEffort = structure?.effort ?? (selected as any)?.effort ?? null;
   const plannedHrTarget = structure?.hr_target ?? (selected as any)?.hr_target ?? null;
@@ -451,7 +524,7 @@ export default function PlansCalendarHost({
         onEventClick={handleEventClick}
       />
 
-      <AlertDialog
+      <Dialog
         open={!!selected}
         onOpenChange={(open) => {
           if (!open) {
@@ -460,19 +533,37 @@ export default function PlansCalendarHost({
           }
         }}
       >
-        <AlertDialogContent className="flex h-[min(85vh,900px)] w-[min(960px,calc(100vw-2rem))] max-w-[960px] flex-col overflow-hidden p-0">
-          <AlertDialogHeader className="shrink-0">
-            <AlertDialogTitle className="px-6 pt-6">
+        <DialogPortal>
+          <DialogOverlay
+            className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
+            onClick={() => {
+              setSelected(null);
+              setConfirmDeleteOpen(false);
+            }}
+          />
+          <RD.Content
+            className={cn(
+              "fixed left-1/2 top-1/2 z-50 flex h-[min(85vh,900px)] w-[min(960px,calc(100vw-2rem))] max-w-[960px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden " +
+                "rounded-[var(--radius-lg,var(--radius))] border border-border bg-background p-0 text-foreground shadow-strong " +
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            )}
+            onPointerDownOutside={() => {
+              setSelected(null);
+              setConfirmDeleteOpen(false);
+            }}
+          >
+          <div className="shrink-0">
+            <DialogTitle className="px-6 pt-6">
               {selected?.title || "Тренировка"}
-            </AlertDialogTitle>
-          </AlertDialogHeader>
+            </DialogTitle>
+          </div>
 
           {/* Тело модалки со скроллом */}
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
             <div className="space-y-4 text-sm">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="rounded-xl border bg-muted/20 p-4 sm:col-span-2">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
+                <Card className="gap-4 bg-muted/20 py-4 sm:col-span-2">
+                  <CardContent className="flex flex-wrap items-start justify-between gap-3 px-4">
                     <div className="space-y-3">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="inline-flex items-center rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
@@ -532,52 +623,72 @@ export default function PlansCalendarHost({
                         </>
                       )}
                     </div>
-                  </div>
-                </div>
+                  </CardContent>
+                </Card>
               </div>
 
               {isPlanned ? (
                 <>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    <div className="rounded-xl border p-4">
-                      <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <Card className="gap-4 py-4">
+                      <CardHeader className="px-4 pb-0">
+                        <CardTitle className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                          <Activity className="h-4 w-4" />
+                          Целевой пульс
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-4">
+                        <div className="text-sm font-medium">
+                          {plannedHrTarget || "без ориентира по пульсу"}
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="gap-4 py-4">
+                      <CardHeader className="px-4 pb-0">
+                        <CardTitle className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                          <Timer className="h-4 w-4" />
+                          Длительность
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-4">
+                        <div className="text-sm font-medium">{plannedDurationStr}</div>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="gap-4 py-4">
+                      <CardHeader className="px-4 pb-0">
+                        <CardTitle className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                          <Activity className="h-4 w-4" />
+                          Интенсивность
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-4">
+                        <div className="text-sm font-medium">{plannedEffort ?? "—"}</div>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  <Card className="gap-4 py-4">
+                    <CardHeader className="px-4 pb-0">
+                      <CardTitle className="flex items-center gap-2 text-sm font-semibold">
                         <Flag className="h-4 w-4" />
-                        Цель
+                        Что даст эта тренировка
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-4">
+                      <div className="text-sm text-muted-foreground">
+                        {trainingBenefit}
                       </div>
-                      <div className="text-sm font-medium">{plannedGoal ?? "—"}</div>
-                    </div>
-
-                    <div className="rounded-xl border p-4">
-                      <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                        <Timer className="h-4 w-4" />
-                        Длительность
-                      </div>
-                      <div className="text-sm font-medium">{plannedDurationStr}</div>
-                    </div>
-
-                    <div className="rounded-xl border p-4">
-                      <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                        <Activity className="h-4 w-4" />
-                        Интенсивность
-                      </div>
-                      <div className="text-sm font-medium">{plannedEffort ?? "—"}</div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border p-4">
-                    <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
-                      <Flag className="h-4 w-4" />
-                      Что даст эта тренировка
-                    </div>
-                    <div className="text-sm text-muted-foreground">
-                      {trainingBenefit}
-                    </div>
-                  </div>
+                    </CardContent>
+                  </Card>
 
                   {plannedSteps.length > 0 ? (
-                    <div className="rounded-xl border p-4">
-                      <div className="mb-3 text-sm font-semibold">План тренировки</div>
-                      <div className="mb-4">
+                    <Card className="gap-4 py-4">
+                      <CardHeader className="px-4 pb-0">
+                        <CardTitle className="text-sm font-semibold">План тренировки</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4 px-4">
                         <div className="mb-2 text-xs font-medium text-muted-foreground">
                           Визуализация тренировки
                         </div>
@@ -587,129 +698,181 @@ export default function PlansCalendarHost({
                               Number(step?.duration_min ?? 0) > 0
                                 ? Number(step.duration_min)
                                 : Number(step?.distance_km ?? 1);
-                            const flexGrow = Math.max(1, raw);
+                            const repeats =
+                              Number(step?.repeats ?? 0) > 0 ? Number(step.repeats) : 1;
+                            const weighted = raw * repeats;
+                            const flexGrow = Math.max(1, weighted);
                             const theme = getStepTheme(step?.type);
 
                             return (
                               <div
                                 key={`${selected?.id}-viz-${idx}`}
                                 className={`min-w-[56px] border-r px-2 py-3 text-center text-[10px] font-semibold last:border-r-0 ${theme.timeline}`}
-                                style={{ flex: `${flexGrow} 1 0%` }}
+                                style={{
+                                  flex: `${flexGrow} 1 0%`,
+                                  ...theme.timelineStyle,
+                                }}
                                 title={formatStep(step)}
                               >
-                                <div className="truncate">{step?.label ?? `Шаг ${idx + 1}`}</div>
+                                <div className="truncate">
+                                  {step?.label ?? `Шаг ${idx + 1}`}
+                                </div>
                               </div>
                             );
                           })}
                         </div>
-                      </div>
-                      <div className="space-y-3">
-                        {plannedSteps.map((step, idx) => (
+                      </CardContent>
+                      <CardContent className="space-y-3 px-4">
+                        {plannedSteps.map((step, idx) => {
+                          const stepTheme = getStepTheme(step?.type);
+                          return (
                           <div
                             key={`${selected?.id}-step-${idx}`}
-                            className={`rounded-lg border-l-4 px-4 py-3 ${getStepTheme(step?.type).tone}`}
+                            className={`rounded-lg border-l-4 px-4 py-3 ${stepTheme.tone}`}
                           >
                             <div className="flex items-start justify-between gap-3">
                               <div>
                                 <div className="text-sm font-medium">
                                   {step?.label ?? `Шаг ${idx + 1}`}
                                 </div>
-                                <div className="mt-1 text-xs text-muted-foreground">
+                                <div className="mt-1 text-sm text-muted-foreground">
                                   {formatStep(step)}
                                 </div>
                                 {step?.notes ? (
-                                  <div className="mt-1 text-xs text-muted-foreground">
+                                  <div className="mt-1 text-sm text-muted-foreground">
                                     {String(step.notes)}
                                   </div>
                                 ) : null}
                               </div>
                               <div
-                                className={`rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${getStepTheme(step?.type).pill}`}
+                                className={`rounded-full border border-solid px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${stepTheme.pill}`}
+                                style={stepTheme.pillStyle}
                               >
                                 {step?.type ?? "step"}
                               </div>
                             </div>
                           </div>
+                          );
+                        })}
+                      </CardContent>
+
+                      {plannedNotes ? (
+                        <CardContent className="border-t px-4 pt-4">
+                          <div className="mb-2 text-sm font-semibold">Примечания</div>
+                          <div className="text-sm text-muted-foreground">
+                            {plannedNotes}
+                          </div>
+                        </CardContent>
+                      ) : null}
+                    </Card>
+                  ) : (
+                    <Card className="gap-4 py-4">
+                      <CardHeader className="px-4 pb-0">
+                        <CardTitle className="text-sm font-semibold">План тренировки</CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-4">
+                        <div className="text-sm text-muted-foreground">
+                          Структура тренировки пока не заполнена
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  <Card className="gap-4 py-4">
+                    <CardHeader className="px-4 pb-0">
+                      <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                        <Flag className="h-4 w-4" />
+                        Как выполнять
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-4">
+                      <ul className="space-y-2">
+                        {executionTips.map((tip, idx) => (
+                          <li
+                            key={`${selected?.id}-tip-${idx}`}
+                            className="flex items-start gap-2 text-sm"
+                          >
+                            <span className="mt-[6px] h-1.5 w-1.5 shrink-0 rounded-full bg-black" />
+                            <span className="text-muted-foreground">{tip}</span>
+                          </li>
                         ))}
-                      </div>
-                    </div>
+                      </ul>
+                    </CardContent>
+                  </Card>
+
+                  {plannedStrengthBlock ? (
+                    <Card className="gap-4 py-4">
+                      <CardHeader className="px-4 pb-0">
+                        <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                          <Dumbbell className="h-4 w-4" />
+                          Силовой блок
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-4">
+                        <div className="text-sm text-muted-foreground">{plannedStrengthBlock}</div>
+                      </CardContent>
+                    </Card>
                   ) : null}
 
                   {checklistItems.length > 0 ? (
-                    <div className="rounded-xl border p-4">
-                      <div className="mb-3 text-sm font-semibold">Чеклист перед тренировкой</div>
-                      <div className="space-y-2">
+                    <Card className="gap-4 py-4">
+                      <CardHeader className="px-4 pb-0">
+                        <CardTitle className="text-sm font-semibold">Чеклист перед тренировкой</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-2 px-4">
                         {checklistItems.map((item, idx) => (
                           <div
                             key={`${selected?.id}-check-${idx}`}
-                            className="flex items-start gap-2 text-sm text-muted-foreground"
+                            className="flex items-start gap-2 text-sm"
                           >
-                            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-600" />
-                            <span>{item}</span>
+                            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[rgb(45,118,1)]" />
+                            <span className="text-muted-foreground">{item}</span>
                           </div>
                         ))}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="rounded-xl border p-4">
-                    <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
-                      <Flag className="h-4 w-4" />
-                      Как выполнять
-                    </div>
-                    <div className="space-y-2">
-                      {executionTips.map((tip, idx) => (
-                        <div
-                          key={`${selected?.id}-tip-${idx}`}
-                          className="rounded-lg bg-muted/20 px-3 py-2 text-sm text-muted-foreground"
-                        >
-                          {tip}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    {plannedHrTarget ? (
-                      <DetailRow label="Целевой пульс" value={plannedHrTarget} />
-                    ) : null}
-                    {plannedStrengthBlock ? (
-                      <div className="rounded-xl border p-4 sm:col-span-2">
-                        <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
-                          <Dumbbell className="h-4 w-4" />
-                          Силовой блок
-                        </div>
-                        <div className="text-sm text-muted-foreground">{plannedStrengthBlock}</div>
-                      </div>
-                    ) : null}
-                  </div>
-
-                  {(plannedNotes || description || plannedMain) ? (
-                    <div className="rounded-xl border p-4">
-                      <div className="mb-2 text-sm font-semibold">Примечания</div>
-                      <div className="text-sm text-muted-foreground">
-                        {plannedNotes ?? description ?? plannedMain ?? "—"}
-                      </div>
-                    </div>
+                      </CardContent>
+                    </Card>
                   ) : null}
                 </>
               ) : (
                 <>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <DetailRow label="Дистанция" value={distanceStr} />
                     <DetailRow label="Время" value={durationStr} />
                   </div>
 
-                  <div className="rounded-xl border p-4">
-                    <div className="mb-2 text-sm font-semibold">Описание тренировки</div>
-                    <div className="text-sm text-muted-foreground">{description || "—"}</div>
-                  </div>
+                  <Card className="gap-4 py-4">
+                    <CardHeader className="px-4 pb-0">
+                      <CardTitle className="text-sm font-semibold">Описание тренировки</CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-4">
+                      <div className="text-sm text-muted-foreground">{description || "—"}</div>
+                    </CardContent>
+                  </Card>
+
+                  {checklistItems.length > 0 ? (
+                    <Card className="gap-4 py-4">
+                      <CardHeader className="px-4 pb-0">
+                        <CardTitle className="text-sm font-semibold">Чеклист перед тренировкой</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-2 px-4">
+                        {checklistItems.map((item, idx) => (
+                          <div
+                            key={`${selected?.id}-check-${idx}`}
+                            className="flex items-start gap-2 text-sm"
+                          >
+                            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[rgb(45,118,1)]" />
+                            <span className="text-muted-foreground">{item}</span>
+                          </div>
+                        ))}
+                      </CardContent>
+                    </Card>
+                  ) : null}
                 </>
               )}
             </div>
           </div>
 
-          <AlertDialogFooter className="shrink-0 flex flex-row justify-end gap-2 border-t px-6 py-4">
+          <div className="shrink-0 flex flex-row justify-end gap-2 border-t px-6 py-4">
             {isPlanned ? (
               <Button
                 type="button"
@@ -731,9 +894,10 @@ export default function PlansCalendarHost({
             >
               Закрыть
             </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+          </div>
+          </RD.Content>
+        </DialogPortal>
+      </Dialog>
 
       <ConfirmActionDialog
         open={confirmDeleteOpen}

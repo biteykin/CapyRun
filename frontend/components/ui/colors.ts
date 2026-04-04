@@ -99,6 +99,23 @@ export const COLORS_NAMED: Record<string, ColorEntry[]> = {
     { hex: "#934FFF", name: "data-color-14" },
     { hex: "#2DCEBC", name: "data-color-15" },
   ],
+
+  analytics: [
+    { hex: "#2949F6", name: "analytics-blue" },
+    { hex: "#D4DBFD", name: "analytics-blue-light" },
+    { hex: "#59229F", name: "analytics-purple" },
+    { hex: "#D1C1E4", name: "analytics-purple-light" },
+    { hex: "#4E8424", name: "analytics-green" },
+    { hex: "#D9EEDA", name: "analytics-green-light" },
+    { hex: "#CA4623", name: "analytics-red" },
+    { hex: "#F2D5D4", name: "analytics-red-light" },
+    { hex: "#F09137", name: "analytics-yellow" },
+    { hex: "#F6E1C7", name: "analytics-yellow-light" },
+    { hex: "#2CB7B0", name: "analytics-teal" },
+    { hex: "#CFEFED", name: "analytics-teal-light" },
+    { hex: "#283158", name: "analytics-navy" },
+    { hex: "#D7DCE8", name: "analytics-navy-light" },
+  ],
 };
 
 /** Легаси-выгрузка только hex (если где-то ещё используется) */
@@ -122,5 +139,22 @@ export const COLORS_HEX: Record<string, string[]> = {
     "#E15425", // btn-danger-border
     "#EF3707", // btn-danger-text
     "#F6C2B5", // btn-danger-hover
+  ],
+
+  analytics: [
+    "#2949F6",
+    "#D4DBFD",
+    "#59229F",
+    "#D1C1E4",
+    "#4E8424",
+    "#D9EEDA",
+    "#CA4623",
+    "#F2D5D4",
+    "#F09137",
+    "#F6E1C7",
+    "#2CB7B0",
+    "#CFEFED",
+    "#283158",
+    "#D7DCE8",
   ],
 };
