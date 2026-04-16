@@ -50,8 +50,9 @@ function MarkdownMessage(props: {
             {children}
           </blockquote>
         ),
-        code: ({ inline, children }) =>
-          inline ? (
+        code: (props: any) => {
+          const { inline, children } = props as { inline?: boolean; children?: React.ReactNode };
+          return inline ? (
             <code
               className={cn(
                 "rounded px-1 py-0.5 font-mono text-[0.95em]",
@@ -64,7 +65,8 @@ function MarkdownMessage(props: {
             </code>
           ) : (
             <code className="font-mono text-[0.95em]">{children}</code>
-          ),
+          );
+        },
         pre: ({ children }) => (
           <pre
             className={cn(
@@ -144,7 +146,7 @@ export default function CoachMessageBubble(props: {
         className={cn(
           "max-w-[75%] rounded-lg px-3 py-2 text-xs leading-relaxed break-words",
           isUser
-            ? "bg-[color:var(--btn-primary-main,#E58B21)] text-[color:var(--btn-primary-text,#0E0E0E)]"
+            ? "bg-[rgb(246,176,33)] text-[color:var(--btn-primary-text,#0E0E0E)]"
             : "bg-muted text-foreground",
           bubbleClassName
         )}

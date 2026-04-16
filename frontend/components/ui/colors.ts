@@ -12,26 +12,26 @@ export function rgbString(hex: string) {
 
 /** Именованные палитры (группы → массив {hex, name}) */
 export const COLORS_NAMED: Record<string, ColorEntry[]> = {
-  primary: [{ hex: "#F0F1EC", name: "bg-primary" }],
+  primary: [{ hex: "#EDECEA", name: "bg-primary" }], // ← чуть теплее, ближе к телу Kick75
 
   danger: [
-    { hex: "#FD9287", name: "bg-danger-lighter" }, // 253,146,135
-    { hex: "#D43519", name: "bg-danger-light" },
-    { hex: "#D0220B", name: "bg-danger" },
-    { hex: "#851907", name: "bg-danger-dark" },
+    { hex: "#FF9999", name: "bg-danger-lighter" }, // светлый Nintendo-красный
+    { hex: "#E60012", name: "bg-danger-light" },   // чистый Nintendo-красный
+    { hex: "#CC000F", name: "bg-danger" },          // насыщенный красный
+    { hex: "#880008", name: "bg-danger-dark" },     // тёмный красный
   ],
 
   warning: [
-    { hex: "#F0E7D4", name: "bg-warning-highlight" },
-    { hex: "#F3950A", name: "bg-warning" },
-    { hex: "#D7811C", name: "bg-warning-dark" },
+    { hex: "#FFF8CC", name: "bg-warning-highlight" }, // светлый LEGO-жёлтый
+    { hex: "#FFD600", name: "bg-warning" },           // LEGO-жёлтый (Mario coin)
+    { hex: "#C9A800", name: "bg-warning-dark" },      // тёмный жёлтый
   ],
 
   success: [
-    { hex: "#D9E5D1", name: "bg-success-highlight" },
-    { hex: "#4E8E27", name: "bg-success-light" },
-    { hex: "#2D7601", name: "bg-success" },
-    { hex: "#1D4700", name: "bg-success-dark" },
+    { hex: "#C5EDD0", name: "bg-success-highlight" }, // светлый Mario-зелёный
+    { hex: "#00C85A", name: "bg-success-light" },     // яркий Mario-зелёный
+    { hex: "#00A84F", name: "bg-success" },           // Mario Pipe Green
+    { hex: "#007A38", name: "bg-success-dark" },      // тёмный Mario-зелёный
   ],
 
   "primary-alt": [
@@ -55,66 +55,64 @@ export const COLORS_NAMED: Record<string, ColorEntry[]> = {
   ],
 
   buttons: [
-    { name: "btn-primary-main",   hex: "#E58B21" },
-    { name: "btn-primary-shadow", hex: "#D69036" },
-    { name: "btn-primary-border", hex: "#A16413" },
+    { name: "btn-primary-main",   hex: "#FFD600" }, // LEGO-жёлтый
+    { name: "btn-primary-shadow", hex: "#E6C200" }, // тень жёлтой кнопки
+    { name: "btn-primary-border", hex: "#C9A800" }, // обводка жёлтой кнопки
     { name: "btn-primary-text",   hex: "#0E0E0E" },
-    { name: "btn-primary-hover",  hex: "#ED9933" },
-    { name: "btn-secondary-main",   hex: "#F0F1EC" },
+    { name: "btn-primary-hover",  hex: "#FFE033" }, // hover чуть светлее
+    { name: "btn-secondary-main",   hex: "#EDECEA" },
     { name: "btn-secondary-shadow", hex: "#F39174" },
-    { name: "btn-secondary-border", hex: "#E15425" },
+    { name: "btn-secondary-border", hex: "#E60012" }, // Nintendo-красный
     { name: "btn-secondary-text",   hex: "#0E0E0E" },
-    { name: "btn-secondary-hover",  hex: "#EAEBE6" },
-    { name: "btn-danger-main",   hex: "#F0F1EC" },
-    { name: "btn-danger-shadow", hex: "#F39174" },
-    { name: "btn-danger-border", hex: "#E15425" },
-    { name: "btn-danger-text",   hex: "#EF3707" },
-    { name: "btn-danger-hover",  hex: "#F6C2B5" },
+    { name: "btn-secondary-hover",  hex: "#E8E9E4" },
+    { name: "btn-danger-main",   hex: "#EDECEA" },
+    { name: "btn-danger-shadow", hex: "#FF9999" },   // светлый красный
+    { name: "btn-danger-border", hex: "#E60012" },   // Nintendo-красный
+    { name: "btn-danger-text",   hex: "#E60012" },   // Nintendo-красный
+    { name: "btn-danger-hover",  hex: "#FFD0D0" },   // светло-розовый hover
   ],
 
   // Дополнительные одиночные цвета
   extra: [
-    { hex: "#1519FE", name: "bg-blue" },   // 21,41,254
-    { hex: "#EF3707", name: "bg-red" },    // 239,55,7
-    { hex: "#F6B021", name: "bg-yellow" }, // 246,176,33
-    { hex: "#000000", name: "bg-key" },    // 0,0,0
+    { hex: "#1B2EC9", name: "bg-blue" },   // Mario-синий ← был #1519FE
+    { hex: "#E60012", name: "bg-red" },    // Nintendo-красный ← был #EF3707
+    { hex: "#FFD600", name: "bg-yellow" }, // LEGO-жёлтый ← был #F6B021
+    { hex: "#000000", name: "bg-key" },
   ],
 
-  // Если у тебя уже есть группа data в проекте — оставляем её как раньше
-  // (пример; можно убрать/заменить своей текущей версией)
   data: [
-    { hex: "#1519FE", name: "data-color-1" },
-    { hex: "#4E0095", name: "data-color-2" },
-    { hex: "#356F6B", name: "data-color-3" },
-    { hex: "#C00060", name: "data-color-4" },
-    { hex: "#EB3646", name: "data-color-5" },
-    { hex: "#67340D", name: "data-color-6" },
-    { hex: "#448B0B", name: "data-color-7" },
-    { hex: "#FB578D", name: "data-color-8" },
-    { hex: "#283158", name: "data-color-9" },
-    { hex: "#39C1B7", name: "data-color-10" },
-    { hex: "#0C5BF9", name: "data-color-11" },
-    { hex: "#A53806", name: "data-color-12" },
-    { hex: "#DC970B", name: "data-color-13" },
-    { hex: "#934FFF", name: "data-color-14" },
-    { hex: "#2DCEBC", name: "data-color-15" },
+    { hex: "#1B2EC9", name: "data-color-1" },  // Mario-синий ← #1519FE
+    { hex: "#4E0095", name: "data-color-2" },  // тёмный фиолетовый (без изм.)
+    { hex: "#2D6B9F", name: "data-color-3" },  // стально-синий ← #356F6B (teal→blue)
+    { hex: "#C00060", name: "data-color-4" },  // малиновый (без изм.)
+    { hex: "#E52030", name: "data-color-5" },  // Nintendo-красный вариант ← #EB3646
+    { hex: "#67340D", name: "data-color-6" },  // тёмно-коричневый (без изм.)
+    { hex: "#1A9E3A", name: "data-color-7" },  // Mario-зелёный вариант ← #448B0B
+    { hex: "#FB578D", name: "data-color-8" },  // розовый (без изм.)
+    { hex: "#283158", name: "data-color-9" },  // тёмно-синий (без изм.)
+    { hex: "#42B8FF", name: "data-color-10" }, // небесно-голубой ← #39C1B7 (teal→sky)
+    { hex: "#2244CC", name: "data-color-11" }, // Mario-синий тёмный ← #0C5BF9
+    { hex: "#A53806", name: "data-color-12" }, // тёмно-оранжевый (без изм.)
+    { hex: "#DCA800", name: "data-color-13" }, // золотисто-жёлтый ← #DC970B
+    { hex: "#934FFF", name: "data-color-14" }, // яркий фиолет (без изм.)
+    { hex: "#5BCFFF", name: "data-color-15" }, // светло-голубой ← #2DCEBC (teal→sky)
   ],
 
   analytics: [
-    { hex: "#2949F6", name: "analytics-blue" },
-    { hex: "#D4DBFD", name: "analytics-blue-light" },
-    { hex: "#59229F", name: "analytics-purple" },
-    { hex: "#D1C1E4", name: "analytics-purple-light" },
-    { hex: "#4E8424", name: "analytics-green" },
-    { hex: "#D9EEDA", name: "analytics-green-light" },
-    { hex: "#CA4623", name: "analytics-red" },
-    { hex: "#F2D5D4", name: "analytics-red-light" },
-    { hex: "#F09137", name: "analytics-yellow" },
-    { hex: "#F6E1C7", name: "analytics-yellow-light" },
-    { hex: "#2CB7B0", name: "analytics-teal" },
-    { hex: "#CFEFED", name: "analytics-teal-light" },
-    { hex: "#283158", name: "analytics-navy" },
-    { hex: "#D7DCE8", name: "analytics-navy-light" },
+    { hex: "#1B2EC9", name: "analytics-blue" },        // Mario-синий ← #2949F6
+    { hex: "#C5CEFA", name: "analytics-blue-light" },  // светлый Mario-синий ← #D4DBFD
+    { hex: "#59229F", name: "analytics-purple" },       // (без изм.)
+    { hex: "#D1C1E4", name: "analytics-purple-light" }, // (без изм.)
+    { hex: "#1A9E3A", name: "analytics-green" },        // Mario-зелёный ← #4E8424
+    { hex: "#C5EDD0", name: "analytics-green-light" },  // светлый Mario-зелёный ← #D9EEDA
+    { hex: "#E60012", name: "analytics-red" },          // Nintendo-красный ← #CA4623
+    { hex: "#FFCCCC", name: "analytics-red-light" },    // светлый красный ← #F2D5D4
+    { hex: "#FFD600", name: "analytics-yellow" },       // LEGO-жёлтый ← #F09137
+    { hex: "#FFF5B0", name: "analytics-yellow-light" }, // светлый жёлтый ← #F6E1C7
+    { hex: "#3AAAEF", name: "analytics-teal" },         // небесно-голубой ← #2CB7B0 (teal→sky)
+    { hex: "#C5E8FF", name: "analytics-teal-light" },   // светло-голубой ← #CFEFED
+    { hex: "#283158", name: "analytics-navy" },          // (без изм.)
+    { hex: "#D7DCE8", name: "analytics-navy-light" },    // (без изм.)
   ],
 };
 
@@ -124,37 +122,37 @@ export const COLORS_HEX: Record<string, string[]> = {
 
   /* Buttons (tokens) */
   buttons: [
-    "#E58B21", // btn-primary-main
-    "#D69036", // btn-primary-shadow
-    "#A16413", // btn-primary-border
+    "#FFD600", // btn-primary-main
+    "#E6C200", // btn-primary-shadow
+    "#C9A800", // btn-primary-border
     "#0E0E0E", // btn-primary-text
-    "#ED9933", // btn-primary-hover
-    "#F0F1EC", // btn-secondary-main
+    "#FFE033", // btn-primary-hover
+    "#EDECEA", // btn-secondary-main
     "#F39174", // btn-secondary-shadow
-    "#E15425", // btn-secondary-border
+    "#E60012", // btn-secondary-border
     "#0E0E0E", // btn-secondary-text
-    "#EAEBE6", // btn-secondary-hover
-    "#F0F1EC", // btn-danger-main
-    "#F39174", // btn-danger-second
-    "#E15425", // btn-danger-border
-    "#EF3707", // btn-danger-text
-    "#F6C2B5", // btn-danger-hover
+    "#E8E9E4", // btn-secondary-hover
+    "#EDECEA", // btn-danger-main
+    "#FF9999", // btn-danger-second
+    "#E60012", // btn-danger-border
+    "#E60012", // btn-danger-text
+    "#FFD0D0", // btn-danger-hover
   ],
 
   analytics: [
-    "#2949F6",
-    "#D4DBFD",
-    "#59229F",
-    "#D1C1E4",
-    "#4E8424",
-    "#D9EEDA",
-    "#CA4623",
-    "#F2D5D4",
-    "#F09137",
-    "#F6E1C7",
-    "#2CB7B0",
-    "#CFEFED",
-    "#283158",
-    "#D7DCE8",
+    "#1B2EC9", // analytics-blue
+    "#C5CEFA", // analytics-blue-light
+    "#59229F", // analytics-purple
+    "#D1C1E4", // analytics-purple-light
+    "#1A9E3A", // analytics-green
+    "#C5EDD0", // analytics-green-light
+    "#E60012", // analytics-red
+    "#FFCCCC", // analytics-red-light
+    "#FFD600", // analytics-yellow
+    "#FFF5B0", // analytics-yellow-light
+    "#3AAAEF", // analytics-teal
+    "#C5E8FF", // analytics-teal-light
+    "#283158", // analytics-navy
+    "#D7DCE8", // analytics-navy-light
   ],
 };

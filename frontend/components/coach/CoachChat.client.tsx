@@ -296,7 +296,7 @@ export default function CoachChat(props: {
   }
 
   return (
-    <Card className="flex h-full min-h-0 flex-col overflow-hidden">
+    <Card className="flex h-full min-h-0 flex-col gap-0 py-0 overflow-hidden">
       <CardContent className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden p-4">
         <div className="relative min-h-0 flex-1 overflow-hidden rounded-md border bg-muted/10">
           <div ref={scrollRef} className="h-full overflow-y-auto p-3 space-y-3">
@@ -389,7 +389,12 @@ export default function CoachChat(props: {
             <div className="flex items-center gap-2">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button type="button" variant="secondary" size="sm" disabled={isSending}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={isSending}
+                    className="border-0 bg-[rgb(45,118,1)] px-3 text-white shadow-[inset_0_-2px_0_rgb(29,71,0)] hover:bg-[rgb(78,142,39)] active:translate-y-px active:shadow-[inset_0_-1px_0_rgb(29,71,0)] [&_span]:font-black"
+                  >
                     +
                   </Button>
                 </DropdownMenuTrigger>
