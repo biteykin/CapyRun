@@ -3,13 +3,20 @@
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
+import { RefreshCw } from "lucide-react";
 
-type Props = {
-  disabled?: boolean;
-  autoStart?: boolean;
+type StravaSyncApi = {
+  run: () => Promise<void>;
+  loading: boolean;
+  err: string | null;
+  result: { added: number; updated: number } | null;
+  disabled: boolean;
 };
 
-export default function StravaSyncButton({ disabled, autoStart }: Props) {
+const StravaSyncContext = React.createContext<StravaSyncApi | null>(null);
+
+function useStravaSyncWorkflow(opts: { disabled: boolean; autoStart: boolean }): StravaSyncApi {
+  const { disabled, autoStart } = opts;
   const router = useRouter();
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
@@ -25,7 +32,18 @@ export default function StravaSyncButton({ disabled, autoStart }: Props) {
       const json = await res.json().catch(() => ({}));
 
       if (!res.ok || !json?.ok) {
-        setErr(json?.detail || json?.reason || "Ошибка синхронизации");
+        const detail = String(json?.detail || json?.reason || "Ошибка синхронизации");
+        if (detail.includes("strava_app_athlete_limit_exceeded")) {
+          setErr("Strava отклонила запрос: приложение упёрлось в лимит подключённых аккаунтов.");
+          return;
+        }
+        if (detail.includes("strava_cloudfront_403")) {
+          setErr(
+            "Strava временно отклоняет запросы приложения (403 CloudFront). Проверьте лимиты и статус приложения Strava.",
+          );
+          return;
+        }
+        setErr(detail);
         return;
       }
 
@@ -33,38 +51,89 @@ export default function StravaSyncButton({ disabled, autoStart }: Props) {
       const updated = Number(json?.updated ?? 0);
       setResult({ added, updated });
 
-      // чтобы серверная страница (SettingsPage) перечитала last_synced_at и т.п.
       router.refresh();
-    } catch (e: any) {
-      setErr(e?.message ?? "Ошибка синхронизации");
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "Ошибка синхронизации");
     } finally {
       setLoading(false);
     }
   }, [disabled, loading, router]);
 
-  // автостарт после callback
   React.useEffect(() => {
     if (!autoStart) return;
     if (disabled) return;
-    // запускаем один раз
-    run();
+    void run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoStart]);
 
-  return (
-    <div className="space-y-2">
-      <Button type="button" onClick={run} disabled={disabled || loading}>
+  return { run, loading, err, result, disabled };
+}
+
+export function StravaSyncGroup({
+  disabled = false,
+  autoStart = false,
+  children,
+}: {
+  disabled?: boolean;
+  autoStart?: boolean;
+  children: React.ReactNode;
+}) {
+  const api = useStravaSyncWorkflow({ disabled, autoStart });
+  return <StravaSyncContext.Provider value={api}>{children}</StravaSyncContext.Provider>;
+}
+
+type Props = {
+  disabled?: boolean;
+  autoStart?: boolean;
+  compact?: boolean;
+  statusOnly?: boolean;
+};
+
+export default function StravaSyncButton({
+  disabled,
+  autoStart,
+  compact,
+  statusOnly,
+}: Props) {
+  const ctx = React.useContext(StravaSyncContext);
+  const own = useStravaSyncWorkflow({
+    disabled: ctx ? true : Boolean(disabled),
+    autoStart: ctx ? false : Boolean(autoStart),
+  });
+  const api = ctx ?? own;
+  const { run, loading, err, result } = api;
+
+  if (compact && statusOnly) {
+    return null;
+  }
+
+  if (compact) {
+    return (
+      <Button type="button" onClick={() => void run()} disabled={api.disabled || loading}>
+        <RefreshCw className={`mr-2 size-4 ${loading ? "animate-spin" : ""}`} />
         {loading ? "Синхронизация…" : "Синхронизировать"}
       </Button>
+    );
+  }
 
-      {result && (
-        <div className="text-sm text-muted-foreground">
-          Добавлено: <span className="font-medium">{result.added}</span>, обновлено:{" "}
-          <span className="font-medium">{result.updated}</span>
-        </div>
-      )}
+  if (statusOnly) {
+    return (
+      <>
+        {result ? (
+          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-sm text-muted-foreground">
+            Добавлено: <span className="font-medium">{result.added}</span>, обновлено:{" "}
+            <span className="font-medium">{result.updated}</span>
+          </div>
+        ) : null}
 
-      {err && <div className="text-sm text-destructive">{err}</div>}
-    </div>
-  );
+        {err ? (
+          <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+            {err}
+          </div>
+        ) : null}
+      </>
+    );
+  }
+
+  return null;
 }

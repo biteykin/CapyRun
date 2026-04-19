@@ -9,10 +9,6 @@ import ProfileContent from "@/components/profile/profile-content";
 import { differenceInYears } from "date-fns";
 import { Button } from "@/components/ui/button";
 
-// ВАЖНО: для server action нужны эти импорты
-import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
-
 export default async function Page() {
   const supabase = await createSupabaseServerClient();
   const {
@@ -51,8 +47,11 @@ export default async function Page() {
     "/avatars/default-1.svg";
 
   const age = prof?.birth_date ? differenceInYears(new Date(), new Date(prof.birth_date)) : null;
+  const workoutsCount = stats?.workouts_count ?? null;
   const profileData = {
+    userId: user.id,
     age,
+    workoutsCount,
     gender: prof?.sex ?? null,
     weight: prof?.weight_kg != null ? Number(prof.weight_kg) : null,
     height: prof?.height_cm != null ? Number(prof.height_cm) : null,
@@ -60,18 +59,22 @@ export default async function Page() {
     hr_zones: prof?.hr_zones ?? null,
   };
 
-  const workoutsCount = stats?.workouts_count ?? null;
   const totalHours = stats?.total_hours != null ? Number(stats.total_hours) : null;
   const totalKm = stats?.total_distance_km != null ? Number(stats.total_distance_km) : null;
   const lastWorkoutAt = stats?.last_workout_at ? new Date(stats.last_workout_at) : null;
   const primarySport = stats?.primary_sport ? String(stats.primary_sport) : null;
 
   return (
-    <main className="space-y-3">
-      {/* Действия: кнопка должна быть НАД плашкой профиля, справа */}
-      <div className="flex justify-end">
+    <main className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm text-muted-foreground">Профиль спортсмена</div>
+          <h1 className="text-2xl font-extrabold">Мой профиль</h1>
+        </div>
         <Link href="/profile/edit" className="inline-flex">
-          <Button variant="secondary" size="sm" type="button">Редактировать профиль</Button>
+          <Button variant="secondary" size="sm" type="button">
+            Редактировать профиль
+          </Button>
         </Link>
       </div>
 

@@ -27,6 +27,10 @@ type StravaActivity = {
   athlete?: { id: number };
 };
 
+type StravaDetailedActivity = StravaActivity & {
+  kilojoules?: number;
+};
+
 function mapSport(stravaType: string): string {
   const t = (stravaType || "").toLowerCase();
   if (t === "run" || t === "trailrun" || t === "treadmill") return "run";
@@ -69,9 +73,13 @@ async function readJsonOrText(resp: Response) {
 }
 
 async function refreshStravaToken(refresh_token: string) {
-  const resp = await fetch("https://www.strava.com/oauth/token", {
+  const resp = await fetch("https://www.strava.com/api/v3/oauth/token", {
     method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      accept: "application/json",
+      "user-agent": "CapyRun/1.0",
+    },
     body: new URLSearchParams({
       client_id: env("STRAVA_CLIENT_ID"),
       client_secret: env("STRAVA_CLIENT_SECRET"),
@@ -83,8 +91,25 @@ async function refreshStravaToken(refresh_token: string) {
   const { json, text } = await readJsonOrText(resp);
 
   if (!resp.ok) {
+    const body = text || "";
+    const lower = body.toLowerCase();
+
+    let inferredReason: string | null = null;
+    if (
+      lower.includes("logged-in athlete limit exceeded") ||
+      lower.includes("limit of connected athletes exceeded")
+    ) {
+      inferredReason = "strava_app_athlete_limit_exceeded";
+    } else if (
+      lower.includes("cloudfront") &&
+      lower.includes("403")
+    ) {
+      inferredReason = "strava_cloudfront_403";
+    }
+
     const msg =
       (json && (json.message || json.error_description || json.error)) ||
+      inferredReason ||
       `strava_refresh_failed: http_${resp.status}`;
     const snippet = text?.slice(0, 220);
     throw new Error(`${msg}. Body: ${snippet}`);
@@ -155,6 +180,25 @@ async function fetchStravaStreams(activityId: number, accessToken: string) {
   }
 
   return json;
+}
+
+async function fetchStravaActivityDetail(activityId: number, accessToken: string) {
+  const url = new URL(`https://www.strava.com/api/v3/activities/${activityId}`);
+
+  const resp = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  const { json, text } = await readJsonOrText(resp);
+
+  if (!resp.ok) {
+    const msg =
+      (json && (json.message || json.error)) || `strava_activity_detail_failed: http_${resp.status}`;
+    const snippet = text?.slice(0, 220);
+    throw new Error(`${msg}. Body: ${snippet}`);
+  }
+
+  return json as StravaDetailedActivity;
 }
 
 type GpsPayload = {
@@ -309,12 +353,29 @@ export async function POST() {
 
     let accessToken: string | null = acc.access_token ?? null;
     let refreshToken: string = acc.refresh_token;
-    let expiresAt: number | null = acc.expires_at ? Number(acc.expires_at) : null;
+    let expiresAt: number | null = null;
+    if (acc.expires_at) {
+      if (typeof acc.expires_at === "number") {
+        expiresAt = acc.expires_at;
+      } else {
+        const parsedMs = new Date(acc.expires_at).getTime();
+        expiresAt = Number.isFinite(parsedMs) ? Math.floor(parsedMs / 1000) : null;
+      }
+    }
     let tokenType: string | null = acc.token_type ?? null;
 
     // 3) refresh token if needed
     const nowSec = Math.floor(Date.now() / 1000);
     const shouldRefresh = !accessToken || !expiresAt || expiresAt <= nowSec + 60;
+
+    console.info("[strava] token state", {
+      hasAccessToken: !!accessToken,
+      expiresAt,
+      nowSec,
+      shouldRefresh,
+      scopes: acc.scopes ?? null,
+      accountId: acc.id,
+    });
 
     if (shouldRefresh) {
       const refreshed = await refreshStravaToken(refreshToken);
@@ -350,6 +411,12 @@ export async function POST() {
     try {
       all = await fetchStravaActivities(accessToken, after);
     } catch (e: any) {
+      console.error("[strava] fetch activities failed", {
+        accountId: acc.id,
+        userId: user.id,
+        detail: String(e?.message || e),
+      });
+
       await supabase
         .from("external_accounts")
         .update({
@@ -402,16 +469,42 @@ export async function POST() {
     const added = ids.filter((id) => !existingSet.has(id)).length;
     const updated = ids.length - added;
 
+    // 6.1) Для калорий добираем detailed activity
+    const detailById = new Map<string, StravaDetailedActivity>();
+    const MAX_DETAIL_FETCH = 100;
+
+    for (let i = 0; i < all.length && i < MAX_DETAIL_FETCH; i++) {
+      const a = all[i];
+      try {
+        const detail = await fetchStravaActivityDetail(a.id, accessToken);
+        detailById.set(String(a.id), detail);
+      } catch (e: unknown) {
+        console.warn("[strava] detail fetch failed", a.id, e instanceof Error ? e.message : e);
+      }
+    }
+
     // 7) upsert workouts
     const rows = all.map((a) => {
       const startTime = a.start_date || null;
       const localDate = startTime ? toLocalDate(startTime) : null;
       const avgSpeedKmh = typeof a.average_speed === "number" ? a.average_speed * 3.6 : null;
+      const detail = detailById.get(String(a.id));
+      const sport = mapSport(a.type);
+
+      let caloriesKcal: number | null = null;
+      if (typeof detail?.calories === "number") {
+        caloriesKcal = Math.round(detail.calories);
+      } else if (typeof a.calories === "number") {
+        caloriesKcal = Math.round(a.calories);
+      } else if (sport === "ride" && typeof detail?.kilojoules === "number") {
+        // Для вело это нормальный fallback
+        caloriesKcal = Math.round(detail.kilojoules);
+      }
 
       return {
         user_id: user.id,
         source: "strava",
-        sport: mapSport(a.type),
+        sport,
         name: a.name || null,
         start_time: startTime,
         local_date: localDate,
@@ -426,7 +519,7 @@ export async function POST() {
         max_hr: typeof a.max_heartrate === "number" ? Math.round(a.max_heartrate) : null,
 
         avg_speed_kmh: typeof avgSpeedKmh === "number" ? Number(avgSpeedKmh.toFixed(2)) : null,
-        calories_kcal: typeof a.calories === "number" ? Math.round(a.calories) : null,
+        calories_kcal: caloriesKcal,
 
         strava_activity_id: String(a.id),
         strava_activity_url: `https://www.strava.com/activities/${a.id}`,
