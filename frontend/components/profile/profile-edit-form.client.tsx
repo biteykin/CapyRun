@@ -1,12 +1,30 @@
 "use client";
 
 import * as React from "react";
+import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseBrowser";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  HeartPulse,
+  MapPin,
+  PersonStanding,
+  Ruler,
+  Save,
+  User,
+  Weight,
+} from "lucide-react";
 
 type InitialProfile = {
   user_id: string;
@@ -46,6 +64,11 @@ export default function ProfileEditForm({
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
 
+  const avatarSrc = avatarUrl.trim() || "/avatars/default-1.svg";
+  const displayNameFallback = (displayName.trim()[0] ?? "U").toUpperCase();
+  const sexSelectValue =
+    sex === "male" || sex === "female" || sex === "other" ? sex : "unspecified";
+
   const toNumOrNull = (v: string) => {
     const s = v.trim();
     if (!s) return null;
@@ -60,7 +83,7 @@ export default function ProfileEditForm({
     setSuccess(null);
 
     try {
-      const payload: any = {
+      const payload: Record<string, unknown> = {
         display_name: displayName.trim() || null,
         avatar_url: avatarUrl.trim() || null,
         sex: sex.trim() || null,
@@ -74,9 +97,9 @@ export default function ProfileEditForm({
         updated_at: new Date().toISOString(),
       };
 
-      // важное: убираем NaN, чтобы Postgres не ругался
       for (const k of Object.keys(payload)) {
-        if (typeof payload[k] === "number" && Number.isNaN(payload[k])) payload[k] = null;
+        const v = payload[k];
+        if (typeof v === "number" && Number.isNaN(v)) payload[k] = null;
       }
 
       const { error: upErr } = await supabase
@@ -87,150 +110,256 @@ export default function ProfileEditForm({
       if (upErr) throw upErr;
 
       setSuccess("Сохранено.");
-      // вернёмся на профиль и обновим серверные данные
       router.push("/profile");
       router.refresh();
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error("profile save error", e);
-      setError(e?.message ?? "Не удалось сохранить профиль.");
+      setError(e instanceof Error ? e.message : "Не удалось сохранить профиль.");
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <Card className="w-full">
-      <CardHeader>
-        <CardTitle>Редактирование профиля</CardTitle>
-        <CardDescription>
-          Обновите личные данные и базовые параметры. Email:{" "}
-          <span className="font-medium">{email ?? "—"}</span>
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <Label htmlFor="display_name">Имя</Label>
-            <Input
-              id="display_name"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="Например: Иван"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="avatar_url">Аватар (URL/путь)</Label>
-            <Input
-              id="avatar_url"
-              value={avatarUrl}
-              onChange={(e) => setAvatarUrl(e.target.value)}
-              placeholder="/avatars/male/male-01.svg"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="sex">Пол</Label>
-            <Input
-              id="sex"
-              value={sex}
-              onChange={(e) => setSex(e.target.value)}
-              placeholder="male / female / other"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="birth_date">Дата рождения</Label>
-            <Input
-              id="birth_date"
-              type="date"
-              value={birthDate}
-              onChange={(e) => setBirthDate(e.target.value)}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="height_cm">Рост (см)</Label>
-            <Input
-              id="height_cm"
-              type="number"
-              inputMode="numeric"
-              value={heightCm}
-              onChange={(e) => setHeightCm(e.target.value)}
-              placeholder="183"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="weight_kg">Вес (кг)</Label>
-            <Input
-              id="weight_kg"
-              type="number"
-              inputMode="numeric"
-              value={weightKg}
-              onChange={(e) => setWeightKg(e.target.value)}
-              placeholder="75"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="hr_rest">Пульс в покое</Label>
-            <Input
-              id="hr_rest"
-              type="number"
-              inputMode="numeric"
-              value={hrRest}
-              onChange={(e) => setHrRest(e.target.value)}
-              placeholder="50"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="hr_max">Макс. пульс</Label>
-            <Input
-              id="hr_max"
-              type="number"
-              inputMode="numeric"
-              value={hrMax}
-              onChange={(e) => setHrMax(e.target.value)}
-              placeholder="199"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="country_code">Страна (код)</Label>
-            <Input
-              id="country_code"
-              value={countryCode}
-              onChange={(e) => setCountryCode(e.target.value)}
-              placeholder="RU"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="city">Город</Label>
-            <Input
-              id="city"
-              value={city}
-              onChange={(e) => setCity(e.target.value)}
-              placeholder="Москва"
-            />
-          </div>
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm text-muted-foreground">Профиль спортсмена</div>
+          <h1 className="text-2xl font-extrabold">Редактировать профиль</h1>
         </div>
+        <Button type="button" variant="secondary" onClick={() => router.push("/profile")}>
+          Назад к профилю
+        </Button>
+      </div>
 
-        {error && <div className="text-sm text-destructive">{error}</div>}
-        {success && <div className="text-sm text-emerald-700">{success}</div>}
+      <Card className="w-full overflow-hidden">
+        <CardHeader className="pb-4">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center">
+            <Avatar className="h-20 w-20 ring-4 ring-background shadow-sm">
+              <AvatarImage src={avatarSrc} alt="Profile avatar" />
+              <AvatarFallback className="text-xl">{displayNameFallback}</AvatarFallback>
+            </Avatar>
 
-        <div className="flex items-center justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={() => router.push("/profile")}>
-            Отмена
-          </Button>
-          <Button type="button" onClick={onSave} disabled={saving}>
-            {saving ? "Сохраняем…" : "Сохранить"}
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+            <div className="space-y-1">
+              <CardTitle>Данные профиля</CardTitle>
+              <CardDescription>
+                Обновите личные данные и базовые параметры. Email:{" "}
+                <span className="font-medium">{email ?? "—"}</span>
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+
+        <CardContent className="space-y-6">
+          <FormSection
+            title="Основное"
+            description="Имя, аватар и базовая информация о пользователе"
+            icon={<User className="size-4" />}
+          >
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <FieldBlock label="Имя" htmlFor="display_name">
+                <Input
+                  id="display_name"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder="Например: Иван"
+                />
+              </FieldBlock>
+
+              <FieldBlock label="Аватар (URL/путь)" htmlFor="avatar_url">
+                <Input
+                  id="avatar_url"
+                  value={avatarUrl}
+                  onChange={(e) => setAvatarUrl(e.target.value)}
+                  placeholder="/avatars/male/male-01.svg"
+                />
+              </FieldBlock>
+
+              <FieldBlock label="Пол" htmlFor="sex">
+                <Select
+                  value={sexSelectValue}
+                  onValueChange={(v) => setSex(v === "unspecified" ? "" : v)}
+                >
+                  <SelectTrigger id="sex">
+                    <SelectValue placeholder="Выберите пол" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unspecified">Не указывать</SelectItem>
+                    <SelectItem value="male">Мужской</SelectItem>
+                    <SelectItem value="female">Женский</SelectItem>
+                    <SelectItem value="other">Другой</SelectItem>
+                  </SelectContent>
+                </Select>
+              </FieldBlock>
+
+              <FieldBlock label="Дата рождения" htmlFor="birth_date">
+                <Input
+                  id="birth_date"
+                  type="date"
+                  value={birthDate}
+                  onChange={(e) => setBirthDate(e.target.value)}
+                />
+              </FieldBlock>
+            </div>
+          </FormSection>
+
+          <FormSection
+            title="Параметры тела"
+            description="Эти значения помогают точнее считать показатели и строить рекомендации"
+            icon={<PersonStanding className="size-4" />}
+          >
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <FieldBlock label="Рост (см)" htmlFor="height_cm" icon={<Ruler className="size-4" />}>
+                <Input
+                  id="height_cm"
+                  type="number"
+                  inputMode="numeric"
+                  value={heightCm}
+                  onChange={(e) => setHeightCm(e.target.value)}
+                  placeholder="183"
+                />
+              </FieldBlock>
+
+              <FieldBlock label="Вес (кг)" htmlFor="weight_kg" icon={<Weight className="size-4" />}>
+                <Input
+                  id="weight_kg"
+                  type="number"
+                  inputMode="decimal"
+                  value={weightKg}
+                  onChange={(e) => setWeightKg(e.target.value)}
+                  placeholder="75"
+                />
+              </FieldBlock>
+            </div>
+          </FormSection>
+
+          <FormSection
+            title="Пульс"
+            description="Используется для зон, нагрузки и тренировочных рекомендаций"
+            icon={<HeartPulse className="size-4" />}
+          >
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <FieldBlock label="Пульс в покое" htmlFor="hr_rest">
+                <Input
+                  id="hr_rest"
+                  type="number"
+                  inputMode="numeric"
+                  value={hrRest}
+                  onChange={(e) => setHrRest(e.target.value)}
+                  placeholder="50"
+                />
+              </FieldBlock>
+
+              <FieldBlock label="Макс. пульс" htmlFor="hr_max">
+                <Input
+                  id="hr_max"
+                  type="number"
+                  inputMode="numeric"
+                  value={hrMax}
+                  onChange={(e) => setHrMax(e.target.value)}
+                  placeholder="199"
+                />
+              </FieldBlock>
+            </div>
+          </FormSection>
+
+          <FormSection
+            title="Локация"
+            description="Нужно для локального контекста и будущих сценариев по времени и региону"
+            icon={<MapPin className="size-4" />}
+          >
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <FieldBlock label="Страна (код)" htmlFor="country_code">
+                <Input
+                  id="country_code"
+                  value={countryCode}
+                  onChange={(e) => setCountryCode(e.target.value.toUpperCase())}
+                  placeholder="RU"
+                  maxLength={2}
+                />
+              </FieldBlock>
+
+              <FieldBlock label="Город" htmlFor="city">
+                <Input
+                  id="city"
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  placeholder="Москва"
+                />
+              </FieldBlock>
+            </div>
+          </FormSection>
+
+          {error ? (
+            <div className="rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+              {error}
+            </div>
+          ) : null}
+
+          {success ? (
+            <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-700">
+              {success}
+            </div>
+          ) : null}
+
+          <div className="flex items-center justify-end gap-2 border-t pt-4">
+            <Button type="button" variant="secondary" onClick={() => router.push("/profile")}>
+              Отмена
+            </Button>
+            <Button type="button" onClick={() => void onSave()} disabled={saving}>
+              <Save className="mr-2 size-4" />
+              {saving ? "Сохраняем…" : "Сохранить"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
+function FormSection({
+  title,
+  description,
+  icon,
+  children,
+}: {
+  title: string;
+  description: string;
+  icon?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="space-y-4">
+      <div className="space-y-1">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          {icon}
+          <span>{title}</span>
+        </div>
+        <div className="text-sm text-muted-foreground">{description}</div>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function FieldBlock({
+  label,
+  htmlFor,
+  icon,
+  children,
+}: {
+  label: string;
+  htmlFor: string;
+  icon?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="space-y-2 rounded-2xl border bg-muted/10 p-4">
+      <Label htmlFor={htmlFor} className="flex items-center gap-2 text-sm text-muted-foreground">
+        {icon}
+        <span>{label}</span>
+      </Label>
+      {children}
+    </div>
+  );
+}

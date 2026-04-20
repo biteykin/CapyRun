@@ -26,7 +26,7 @@ export default async function ProfileEditPage() {
   }
 
   return (
-    <main className="w-full space-y-6">
+    <main className="w-full space-y-4">
       <ProfileEditForm
         initial={{
           user_id: user.id,

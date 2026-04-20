@@ -57,6 +57,7 @@ type Workout = {
   weekday_iso?: number | null;  // 1..7 (ISO)
   distance_m?: number | null;
   duration_sec?: number | null;
+  moving_time_sec?: number | null;
   calories_kcal?: number | null;
 };
 
@@ -94,6 +95,24 @@ function fmtDurationMinSec(duration_sec?: number | null) {
   const h = Math.floor(totalMin / 60);
   const m = totalMin % 60;
   return h > 0 ? `${h} ч ${m} мин` : `${m} мин`;
+}
+function fmtPace(
+  distance_m?: number | null,
+  moving_time_sec?: number | null,
+  duration_sec?: number | null,
+  sport?: string | null,
+) {
+  const s = (sport || "").toLowerCase();
+  if (!["run", "walk", "hike"].includes(s)) return "—";
+
+  const dist = Number(distance_m || 0);
+  const sec = Number(moving_time_sec || duration_sec || 0);
+  if (dist <= 0 || sec <= 0) return "—";
+
+  const paceSec = sec / (dist / 1000);
+  const mm = Math.floor(paceSec / 60);
+  const ss = Math.round(paceSec % 60);
+  return `${mm}:${String(ss).padStart(2, "0")} /км`;
 }
 
 const PAGE_SIZES = [5, 10, 20, 50];
@@ -165,7 +184,7 @@ export default function WorkoutsTable({
           const { data: rows2, error: err2 } = await supabase
             .from("workouts")
             .select(
-              "id,start_time,local_date,uploaded_at,sport,sub_sport,duration_sec,distance_m,avg_hr,calories_kcal,name,visibility,weekday_iso,user_id"
+              "id,start_time,local_date,uploaded_at,sport,sub_sport,duration_sec,moving_time_sec,distance_m,avg_hr,calories_kcal,name,visibility,weekday_iso,user_id"
             )
             .eq("user_id", userId)  // ← ТОЛЬКО свои
             .order("start_time", { ascending: false, nullsFirst: false })
@@ -244,6 +263,26 @@ export default function WorkoutsTable({
       accessorKey: "distance_m",
       header: ({ column }) => <SortHeader column={column} label="Расстояние" />,
       cell: ({ row }) => fmtKm(row.original.distance_m),
+      sortingFn: "basic",
+    },
+    {
+      id: "pace",
+      accessorFn: (row) => {
+        const s = (row.sport || "").toLowerCase();
+        if (!["run", "walk", "hike"].includes(s)) return null;
+        const dist = Number(row.distance_m || 0);
+        const sec = Number(row.moving_time_sec || row.duration_sec || 0);
+        if (dist <= 0 || sec <= 0) return null;
+        return sec / (dist / 1000);
+      },
+      header: ({ column }) => <SortHeader column={column} label="Темп" />,
+      cell: ({ row }) =>
+        fmtPace(
+          row.original.distance_m,
+          row.original.moving_time_sec,
+          row.original.duration_sec,
+          row.original.sport,
+        ),
       sortingFn: "basic",
     },
     {
