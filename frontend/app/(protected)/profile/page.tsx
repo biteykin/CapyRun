@@ -22,7 +22,7 @@ export default async function Page() {
   // тянем профиль текущего пользователя
   const { data: prof } = await supabase
     .from("profiles")
-    .select("display_name, avatar_url, sex, birth_date, weight_kg, height_cm, hr_max, hr_zones")
+    .select("display_name, avatar_url, sex, birth_date, weight_kg, height_cm, hr_max, hr_zones, country_code, city")
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -57,6 +57,8 @@ export default async function Page() {
     height: prof?.height_cm != null ? Number(prof.height_cm) : null,
     max_hr: prof?.hr_max ?? null,
     hr_zones: prof?.hr_zones ?? null,
+    country_code: prof?.country_code ?? null,
+    city: prof?.city ?? null,
   };
 
   const totalHours = stats?.total_hours != null ? Number(stats.total_hours) : null;
@@ -68,7 +70,6 @@ export default async function Page() {
     <main className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-sm text-muted-foreground">Профиль спортсмена</div>
           <h1 className="text-2xl font-extrabold">Мой профиль</h1>
         </div>
         <Link href="/profile/edit" className="inline-flex">

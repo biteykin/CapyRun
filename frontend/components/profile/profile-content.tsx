@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import ProfileHrZones from "@/components/profile/profile-hr-zones";
-import { HeartPulse, PersonStanding, Ruler, Weight } from "lucide-react";
+import { Building2, MapPin, PersonStanding, Ruler, Weight } from "lucide-react";
 
 type ProfileData = {
   userId: string;
@@ -14,6 +14,8 @@ type ProfileData = {
   height?: number | null;
   max_hr?: number | null;
   hr_zones?: unknown | null;
+  country_code?: string | null;
+  city?: string | null;
 };
 
 export default function ProfileContent({ profile }: { profile: ProfileData }) {
@@ -40,7 +42,7 @@ export default function ProfileContent({ profile }: { profile: ProfileData }) {
               />
               <DataTile
                 label="Пол"
-                value={profile.gender ?? "—"}
+                value={formatGender(profile.gender)}
                 icon={<PersonStanding className="size-4" />}
               />
               <DataTile
@@ -54,9 +56,14 @@ export default function ProfileContent({ profile }: { profile: ProfileData }) {
                 icon={<Ruler className="size-4" />}
               />
               <DataTile
-                label="Макс. пульс"
-                value={profile.max_hr != null ? `${profile.max_hr} bpm` : "—"}
-                icon={<HeartPulse className="size-4" />}
+                label="Страна"
+                value={formatCountry(profile.country_code)}
+                icon={<Building2 className="size-4" />}
+              />
+              <DataTile
+                label="Город"
+                value={profile.city ?? "—"}
+                icon={<MapPin className="size-4" />}
               />
             </div>
           </CardContent>
@@ -74,6 +81,22 @@ export default function ProfileContent({ profile }: { profile: ProfileData }) {
       </TabsContent>
     </Tabs>
   );
+}
+
+function formatGender(value?: string | null) {
+  if (!value) return "—";
+  if (value === "male") return "Мужской";
+  if (value === "female") return "Женский";
+  return "—";
+}
+
+function formatCountry(value?: string | null) {
+  if (!value) return "—";
+  try {
+    return new Intl.DisplayNames(["ru"], { type: "region" }).of(value.toUpperCase()) ?? value;
+  } catch {
+    return value;
+  }
 }
 
 function DataTile({

@@ -4,11 +4,25 @@ import * as React from "react";
 import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseBrowser";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import Cropper from "react-easy-crop";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import {
   Select,
   SelectContent,
@@ -17,14 +31,29 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  HeartPulse,
+  Check,
+  ChevronsUpDown,
+  Minus,
   MapPin,
   PersonStanding,
+  Plus,
   Ruler,
   Save,
   User,
   Weight,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import {
+  findCountryCodeByLabel,
+  getCountryLabel,
+  getCountryOptions,
+} from "@/components/profile/country-options";
+import {
+  ALL_PRESET_AVATARS,
+  DEFAULT_AVATAR,
+  FEMALE_AVATARS,
+  MALE_AVATARS,
+} from "@/components/profile/avatar-presets";
 
 type InitialProfile = {
   user_id: string;
@@ -48,6 +77,9 @@ export default function ProfileEditForm({
   email: string | null;
 }) {
   const router = useRouter();
+  const countryOptions = React.useMemo(() => getCountryOptions(), []);
+  const [countryOpen, setCountryOpen] = React.useState(false);
+  const [avatarPanel, setAvatarPanel] = React.useState<"none" | "presets" | "upload">("none");
 
   const [displayName, setDisplayName] = React.useState(initial.display_name ?? "");
   const [avatarUrl, setAvatarUrl] = React.useState(initial.avatar_url ?? "");
@@ -55,19 +87,77 @@ export default function ProfileEditForm({
   const [birthDate, setBirthDate] = React.useState(initial.birth_date ?? "");
   const [heightCm, setHeightCm] = React.useState(initial.height_cm?.toString() ?? "");
   const [weightKg, setWeightKg] = React.useState(initial.weight_kg?.toString() ?? "");
-  const [hrRest, setHrRest] = React.useState(initial.hr_rest?.toString() ?? "");
-  const [hrMax, setHrMax] = React.useState(initial.hr_max?.toString() ?? "");
-  const [countryCode, setCountryCode] = React.useState(initial.country_code ?? "");
+  const [countryInput, setCountryInput] = React.useState(getCountryLabel(initial.country_code));
+  const [countryCode, setCountryCode] = React.useState(initial.country_code?.toUpperCase() ?? "");
   const [city, setCity] = React.useState(initial.city ?? "");
 
   const [saving, setSaving] = React.useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
+  const [cropOpen, setCropOpen] = React.useState(false);
+  const [cropImageSrc, setCropImageSrc] = React.useState<string | null>(null);
+  const [crop, setCrop] = React.useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = React.useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = React.useState<AreaPixels | null>(null);
 
-  const avatarSrc = avatarUrl.trim() || "/avatars/default-1.svg";
-  const displayNameFallback = (displayName.trim()[0] ?? "U").toUpperCase();
-  const sexSelectValue =
-    sex === "male" || sex === "female" || sex === "other" ? sex : "unspecified";
+  const avatarSrc = avatarUrl.trim() || DEFAULT_AVATAR;
+  const displayNameFallback = (displayName.trim()?.[0] ?? "U").toUpperCase();
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const normalizedInitialCountryCode = (initial.country_code ?? "").toUpperCase();
+  const normalizedCurrentCountryCode =
+    findCountryCodeByLabel(countryInput) ?? (countryCode ? countryCode.toUpperCase() : "");
+
+  const isDirty = React.useMemo(() => {
+    return (
+      (displayName.trim() || "") !== (initial.display_name ?? "") ||
+      (avatarUrl.trim() || "") !== (initial.avatar_url ?? "") ||
+      (sex.trim() || "") !== (initial.sex ?? "") ||
+      (birthDate.trim() || "") !== (initial.birth_date ?? "") ||
+      (heightCm.trim() || "") !==
+        (initial.height_cm != null ? String(initial.height_cm) : "") ||
+      (weightKg.trim() || "") !==
+        (initial.weight_kg != null ? String(initial.weight_kg) : "") ||
+      normalizedCurrentCountryCode !== normalizedInitialCountryCode ||
+      (city.trim() || "") !== (initial.city ?? "")
+    );
+  }, [
+    avatarUrl,
+    birthDate,
+    city,
+    displayName,
+    heightCm,
+    initial.avatar_url,
+    initial.birth_date,
+    initial.city,
+    initial.display_name,
+    initial.height_cm,
+    initial.sex,
+    initial.weight_kg,
+    normalizedCurrentCountryCode,
+    normalizedInitialCountryCode,
+    sex,
+    weightKg,
+  ]);
+
+  const presetAvatars = React.useMemo(() => {
+    if (sex === "female") {
+      return {
+        recommended: FEMALE_AVATARS,
+        others: MALE_AVATARS,
+      };
+    }
+    if (sex === "male") {
+      return {
+        recommended: MALE_AVATARS,
+        others: FEMALE_AVATARS,
+      };
+    }
+    return {
+      recommended: ALL_PRESET_AVATARS.filter((src) => src !== DEFAULT_AVATAR),
+      others: [] as string[],
+    };
+  }, [sex]);
 
   const toNumOrNull = (v: string) => {
     const s = v.trim();
@@ -76,13 +166,110 @@ export default function ProfileEditForm({
     return Number.isFinite(n) ? n : null;
   };
 
+  async function onUploadAvatar(file: File) {
+    if (!file) return;
+    const MAX_SIZE = 2 * 1024 * 1024; // 2MB
+    if (file.size > MAX_SIZE) {
+      setError("Файл слишком большой. Максимум 2 MB.");
+      return;
+    }
+
+    const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
+    if (!allowedTypes.includes(file.type)) {
+      setError("Поддерживаются только JPG, PNG и WEBP.");
+      return;
+    }
+
+    setError(null);
+    if (success) setSuccess(null);
+    setUploadingAvatar(true);
+
+    try {
+      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+      const safeExt = ["jpg", "jpeg", "png", "webp"].includes(ext) ? ext : "jpg";
+      const path = `${initial.user_id}/${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}.${safeExt}`;
+
+      const { error: uploadErr } = await supabase.storage
+        .from("avatars")
+        .upload(path, file, {
+          cacheControl: "3600",
+          upsert: false,
+        });
+
+      if (uploadErr) throw uploadErr;
+
+      const { data } = supabase.storage.from("avatars").getPublicUrl(path);
+      const publicUrl = data?.publicUrl;
+      if (!publicUrl) throw new Error("Не удалось получить ссылку на аватар.");
+
+      setAvatarUrl(publicUrl);
+      if (success) setSuccess(null);
+      setAvatarPanel("upload");
+      setSuccess("Новый аватар загружен. Не забудьте сохранить профиль.");
+    } catch (e: unknown) {
+      console.error("avatar upload error", e);
+      setError(
+        e instanceof Error
+          ? e.message
+          : "Не удалось загрузить аватар. Проверьте, что в Supabase Storage создан bucket avatars."
+      );
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }
+
+  async function openCropper(file: File) {
+    const MAX_SIZE = 2 * 1024 * 1024;
+    const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      setError("Поддерживаются только JPG, PNG и WEBP.");
+      return;
+    }
+    if (file.size > MAX_SIZE) {
+      setError("Файл слишком большой. Максимум 2 MB.");
+      return;
+    }
+
+    setError(null);
+    if (success) setSuccess(null);
+
+    const src = await readFileAsDataUrl(file);
+    setCropImageSrc(src);
+    setCrop({ x: 0, y: 0 });
+    setZoom(1);
+    setCroppedAreaPixels(null);
+    setCropOpen(true);
+  }
+
+  async function confirmCropAndUpload() {
+    if (!cropImageSrc || !croppedAreaPixels) return;
+    try {
+      setUploadingAvatar(true);
+      setError(null);
+      const croppedFile = await createCroppedAvatarFile(cropImageSrc, croppedAreaPixels);
+      setCropOpen(false);
+      await onUploadAvatar(croppedFile);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Не удалось обработать изображение.");
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }
+
   async function onSave() {
-    if (saving) return;
+    if (saving || !isDirty) return;
     setSaving(true);
     setError(null);
     setSuccess(null);
 
     try {
+      const normalizedCountryCode =
+        findCountryCodeByLabel(countryInput) ??
+        (countryCode ? countryCode.toUpperCase() : null);
+
       const payload: Record<string, unknown> = {
         display_name: displayName.trim() || null,
         avatar_url: avatarUrl.trim() || null,
@@ -90,9 +277,7 @@ export default function ProfileEditForm({
         birth_date: birthDate.trim() || null,
         height_cm: toNumOrNull(heightCm),
         weight_kg: toNumOrNull(weightKg),
-        hr_rest: toNumOrNull(hrRest),
-        hr_max: toNumOrNull(hrMax),
-        country_code: countryCode.trim() || null,
+        country_code: normalizedCountryCode,
         city: city.trim() || null,
         updated_at: new Date().toISOString(),
       };
@@ -124,36 +309,153 @@ export default function ProfileEditForm({
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-sm text-muted-foreground">Профиль спортсмена</div>
           <h1 className="text-2xl font-extrabold">Редактировать профиль</h1>
         </div>
-        <Button type="button" variant="secondary" onClick={() => router.push("/profile")}>
-          Назад к профилю
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="secondary" onClick={() => router.push("/profile")}>
+            Назад к профилю
+          </Button>
+          <Button
+            type="button"
+            onClick={() => void onSave()}
+            disabled={saving || !isDirty}
+          >
+            <Save className="mr-2 size-4" />
+            {saving ? "Сохраняем…" : "Сохранить"}
+          </Button>
+        </div>
       </div>
 
       <Card className="w-full overflow-hidden">
-        <CardHeader className="pb-4">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center">
-            <Avatar className="h-20 w-20 ring-4 ring-background shadow-sm">
-              <AvatarImage src={avatarSrc} alt="Profile avatar" />
-              <AvatarFallback className="text-xl">{displayNameFallback}</AvatarFallback>
-            </Avatar>
-
-            <div className="space-y-1">
-              <CardTitle>Данные профиля</CardTitle>
-              <CardDescription>
-                Обновите личные данные и базовые параметры. Email:{" "}
-                <span className="font-medium">{email ?? "—"}</span>
-              </CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-
         <CardContent className="space-y-6">
+          <section className="space-y-4">
+            <div className="rounded-2xl border bg-muted/10 p-4 md:p-5">
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div className="flex min-w-0 items-center gap-4">
+                  <Avatar className="h-16 w-16 shrink-0 ring-2 ring-background shadow-sm">
+                    <AvatarImage src={avatarSrc} alt="Profile avatar preview" />
+                    <AvatarFallback className="text-lg">{displayNameFallback}</AvatarFallback>
+                  </Avatar>
+
+                  <div className="min-w-0">
+                    <div className="truncate text-base font-semibold">
+                      {displayName.trim() || "Без имени"}
+                    </div>
+                    <div className="truncate text-sm text-muted-foreground">
+                      {email ?? "—"}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant={avatarPanel === "presets" ? "primary" : "secondary"}
+                    size="sm"
+                    onClick={() =>
+                      setAvatarPanel((prev) => (prev === "presets" ? "none" : "presets"))
+                    }
+                  >
+                    Готовые аватары
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={avatarPanel === "upload" ? "primary" : "secondary"}
+                    size="sm"
+                    onClick={() => {
+                      setAvatarPanel("upload");
+                      fileInputRef.current?.click();
+                    }}
+                  >
+                    Загрузить свой
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {avatarPanel === "presets" ? (
+              <div className="rounded-2xl border bg-background p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold">Выбор аватара</div>
+                    <div className="text-sm text-muted-foreground">
+                      Можно выбрать один из стандартных аватаров CapyRun
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setAvatarPanel("none")}
+                  >
+                    Скрыть
+                  </Button>
+                </div>
+
+                <div className="mb-4">
+                  <div className="mb-2 text-xs font-medium text-muted-foreground">Базовый</div>
+                  <div className="grid grid-cols-4 gap-3 sm:grid-cols-5 md:grid-cols-6 xl:grid-cols-8">
+                    <AvatarPresetItem
+                      src={DEFAULT_AVATAR}
+                      selected={avatarUrl === DEFAULT_AVATAR || !avatarUrl}
+                      onSelect={setAvatarUrl}
+                      fallback={displayNameFallback}
+                    />
+                  </div>
+                </div>
+
+                {presetAvatars.recommended.length > 0 ? (
+                  <div className="mb-4">
+                    <div className="mb-2 text-xs font-medium text-muted-foreground">Рекомендуемые</div>
+                    <div className="grid grid-cols-4 gap-3 sm:grid-cols-5 md:grid-cols-6 xl:grid-cols-8">
+                      {presetAvatars.recommended.map((src) => (
+                        <AvatarPresetItem
+                          key={src}
+                          src={src}
+                          selected={avatarUrl === src}
+                          onSelect={setAvatarUrl}
+                          fallback={displayNameFallback}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {presetAvatars.others.length > 0 ? (
+                  <div>
+                    <div className="mb-2 text-xs font-medium text-muted-foreground">Другие</div>
+                    <div className="grid grid-cols-4 gap-3 sm:grid-cols-5 md:grid-cols-6 xl:grid-cols-8">
+                      {presetAvatars.others.map((src) => (
+                        <AvatarPresetItem
+                          key={src}
+                          src={src}
+                          selected={avatarUrl === src}
+                          onSelect={setAvatarUrl}
+                          fallback={displayNameFallback}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void openCropper(file);
+                e.currentTarget.value = "";
+              }}
+            />
+          </section>
+
           <FormSection
             title="Основное"
-            description="Имя, аватар и базовая информация о пользователе"
+            description="Базовая информация о пользователе"
             icon={<User className="size-4" />}
           >
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -161,24 +463,31 @@ export default function ProfileEditForm({
                 <Input
                   id="display_name"
                   value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
+                  onChange={(e) => {
+                    if (success) setSuccess(null);
+                    setDisplayName(e.target.value);
+                  }}
                   placeholder="Например: Иван"
                 />
               </FieldBlock>
 
-              <FieldBlock label="Аватар (URL/путь)" htmlFor="avatar_url">
+              <FieldBlock label="Email" htmlFor="email">
                 <Input
-                  id="avatar_url"
-                  value={avatarUrl}
-                  onChange={(e) => setAvatarUrl(e.target.value)}
-                  placeholder="/avatars/male/male-01.svg"
+                  id="email"
+                  value={email ?? ""}
+                  readOnly
+                  disabled
+                  placeholder="Email не указан"
                 />
               </FieldBlock>
 
               <FieldBlock label="Пол" htmlFor="sex">
                 <Select
-                  value={sexSelectValue}
-                  onValueChange={(v) => setSex(v === "unspecified" ? "" : v)}
+                  value={sex || "unspecified"}
+                  onValueChange={(v) => {
+                    if (success) setSuccess(null);
+                    setSex(v === "unspecified" ? "" : v);
+                  }}
                 >
                   <SelectTrigger id="sex">
                     <SelectValue placeholder="Выберите пол" />
@@ -187,7 +496,6 @@ export default function ProfileEditForm({
                     <SelectItem value="unspecified">Не указывать</SelectItem>
                     <SelectItem value="male">Мужской</SelectItem>
                     <SelectItem value="female">Женский</SelectItem>
-                    <SelectItem value="other">Другой</SelectItem>
                   </SelectContent>
                 </Select>
               </FieldBlock>
@@ -197,7 +505,10 @@ export default function ProfileEditForm({
                   id="birth_date"
                   type="date"
                   value={birthDate}
-                  onChange={(e) => setBirthDate(e.target.value)}
+                  onChange={(e) => {
+                    if (success) setSuccess(null);
+                    setBirthDate(e.target.value);
+                  }}
                 />
               </FieldBlock>
             </div>
@@ -215,7 +526,10 @@ export default function ProfileEditForm({
                   type="number"
                   inputMode="numeric"
                   value={heightCm}
-                  onChange={(e) => setHeightCm(e.target.value)}
+                  onChange={(e) => {
+                    if (success) setSuccess(null);
+                    setHeightCm(e.target.value);
+                  }}
                   placeholder="183"
                 />
               </FieldBlock>
@@ -226,7 +540,10 @@ export default function ProfileEditForm({
                   type="number"
                   inputMode="decimal"
                   value={weightKg}
-                  onChange={(e) => setWeightKg(e.target.value)}
+                  onChange={(e) => {
+                    if (success) setSuccess(null);
+                    setWeightKg(e.target.value);
+                  }}
                   placeholder="75"
                 />
               </FieldBlock>
@@ -234,58 +551,81 @@ export default function ProfileEditForm({
           </FormSection>
 
           <FormSection
-            title="Пульс"
-            description="Используется для зон, нагрузки и тренировочных рекомендаций"
-            icon={<HeartPulse className="size-4" />}
-          >
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <FieldBlock label="Пульс в покое" htmlFor="hr_rest">
-                <Input
-                  id="hr_rest"
-                  type="number"
-                  inputMode="numeric"
-                  value={hrRest}
-                  onChange={(e) => setHrRest(e.target.value)}
-                  placeholder="50"
-                />
-              </FieldBlock>
-
-              <FieldBlock label="Макс. пульс" htmlFor="hr_max">
-                <Input
-                  id="hr_max"
-                  type="number"
-                  inputMode="numeric"
-                  value={hrMax}
-                  onChange={(e) => setHrMax(e.target.value)}
-                  placeholder="199"
-                />
-              </FieldBlock>
-            </div>
-          </FormSection>
-
-          <FormSection
             title="Локация"
-            description="Нужно для локального контекста и будущих сценариев по времени и региону"
+            description="Часовой пояс точнее определяется по городу, а страна помогает с локализацией"
             icon={<MapPin className="size-4" />}
           >
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <FieldBlock label="Страна (код)" htmlFor="country_code">
-                <Input
-                  id="country_code"
-                  value={countryCode}
-                  onChange={(e) => setCountryCode(e.target.value.toUpperCase())}
-                  placeholder="RU"
-                  maxLength={2}
-                />
+              <FieldBlock label="Страна" htmlFor="country_code">
+                <div className="space-y-2">
+                  <Popover open={countryOpen} onOpenChange={setCountryOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        id="country_code"
+                        type="button"
+                        variant="secondary"
+                        role="combobox"
+                        aria-expanded={countryOpen}
+                        className="w-full justify-between"
+                      >
+                        <span className="truncate">
+                          {countryInput || "Выберите страну"}
+                        </span>
+                        <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                      <Command>
+                        <CommandInput placeholder="Введите страну..." />
+                        <CommandList>
+                          <CommandEmpty>Страна не найдена</CommandEmpty>
+                          <CommandGroup>
+                            {countryOptions.map((country) => (
+                              <CommandItem
+                                key={country.code}
+                                value={`${country.name} ${country.code}`}
+                                onSelect={() => {
+                                  if (success) setSuccess(null);
+                                  setCountryInput(country.name);
+                                  setCountryCode(country.code);
+                                  setCountryOpen(false);
+                                }}
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 size-4",
+                                    countryCode === country.code ? "opacity-100" : "opacity-0"
+                                  )}
+                                />
+                                <span className="truncate">{country.name}</span>
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                  <div className="text-xs text-muted-foreground">
+                    Сохраним как код страны{countryCode ? `: ${countryCode}` : ""}
+                  </div>
+                </div>
               </FieldBlock>
 
               <FieldBlock label="Город" htmlFor="city">
-                <Input
-                  id="city"
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
-                  placeholder="Москва"
-                />
+                <div className="space-y-2">
+                  <Input
+                    id="city"
+                    value={city}
+                    onChange={(e) => {
+                      if (success) setSuccess(null);
+                      setCity(e.target.value);
+                    }}
+                    placeholder="Москва"
+                  />
+                  <div className="text-xs text-muted-foreground">
+                    Для определения локального времени город полезнее, чем одна только страна
+                  </div>
+                </div>
               </FieldBlock>
             </div>
           </FormSection>
@@ -302,19 +642,151 @@ export default function ProfileEditForm({
             </div>
           ) : null}
 
-          <div className="flex items-center justify-end gap-2 border-t pt-4">
+          <div className="flex items-center justify-end gap-2 pt-4">
             <Button type="button" variant="secondary" onClick={() => router.push("/profile")}>
               Отмена
             </Button>
-            <Button type="button" onClick={() => void onSave()} disabled={saving}>
+            <Button
+              type="button"
+              onClick={() => void onSave()}
+              disabled={saving || !isDirty}
+            >
               <Save className="mr-2 size-4" />
               {saving ? "Сохраняем…" : "Сохранить"}
             </Button>
           </div>
         </CardContent>
       </Card>
+
+      {cropOpen && cropImageSrc ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-3xl rounded-2xl border bg-background shadow-2xl">
+            <div className="flex items-center justify-between border-b px-5 py-4">
+              <div>
+                <div className="text-base font-semibold">Обрезать аватар</div>
+                <div className="text-sm text-muted-foreground">
+                  Выберите квадратную область. В профиль загрузится уже готовый аватар.
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setCropOpen(false);
+                  setCropImageSrc(null);
+                }}
+              >
+                Закрыть
+              </Button>
+            </div>
+
+            <div className="space-y-4 p-5">
+              <div className="relative h-[420px] overflow-hidden rounded-2xl bg-black">
+                <Cropper
+                  image={cropImageSrc}
+                  crop={crop}
+                  zoom={zoom}
+                  aspect={1}
+                  cropShape="round"
+                  showGrid={true}
+                  onCropChange={setCrop}
+                  onZoomChange={setZoom}
+                  onCropComplete={(_, pixels) => setCroppedAreaPixels(pixels)}
+                />
+              </div>
+
+              <div className="flex items-center gap-3">
+                <Minus className="size-4 text-muted-foreground" />
+                <input
+                  type="range"
+                  min={1}
+                  max={3}
+                  step={0.1}
+                  value={zoom}
+                  onChange={(e) => setZoom(Number(e.target.value))}
+                  className="w-full"
+                />
+                <Plus className="size-4 text-muted-foreground" />
+              </div>
+
+              <div className="flex items-center justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setCropOpen(false);
+                    setCropImageSrc(null);
+                  }}
+                >
+                  Отмена
+                </Button>
+                <Button type="button" onClick={() => void confirmCropAndUpload()} disabled={uploadingAvatar}>
+                  {uploadingAvatar ? "Сохраняем…" : "Обрезать и загрузить"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
+}
+
+type AreaPixels = {
+  width: number;
+  height: number;
+  x: number;
+  y: number;
+};
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(String(reader.result)));
+    reader.addEventListener("error", () => reject(new Error("Не удалось прочитать файл.")));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Не удалось загрузить изображение."));
+    image.src = src;
+  });
+}
+
+async function createCroppedAvatarFile(imageSrc: string, crop: AreaPixels) {
+  const image = await loadImage(imageSrc);
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas не поддерживается.");
+
+  const OUTPUT_SIZE = 512;
+  canvas.width = OUTPUT_SIZE;
+  canvas.height = OUTPUT_SIZE;
+
+  ctx.drawImage(
+    image,
+    crop.x,
+    crop.y,
+    crop.width,
+    crop.height,
+    0,
+    0,
+    OUTPUT_SIZE,
+    OUTPUT_SIZE
+  );
+
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve, "image/jpeg", 0.9)
+  );
+
+  if (!blob) throw new Error("Не удалось подготовить аватар.");
+
+  return new File([blob], "avatar.jpg", { type: "image/jpeg" });
 }
 
 function FormSection({
@@ -361,5 +833,35 @@ function FieldBlock({
       </Label>
       {children}
     </div>
+  );
+}
+
+function AvatarPresetItem({
+  src,
+  selected,
+  onSelect,
+  fallback,
+}: {
+  src: string;
+  selected: boolean;
+  onSelect: (src: string) => void;
+  fallback: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(src)}
+      className={cn(
+        "group rounded-2xl border p-2 transition",
+        selected
+          ? "border-primary bg-primary/5 ring-2 ring-primary/20"
+          : "border-border bg-background hover:bg-muted/20"
+      )}
+    >
+      <Avatar className="mx-auto h-14 w-14">
+        <AvatarImage src={src} alt="Preset avatar" />
+        <AvatarFallback>{fallback}</AvatarFallback>
+      </Avatar>
+    </button>
   );
 }

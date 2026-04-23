@@ -88,6 +88,28 @@ const PRESETS: {
   },
 ];
 
+function resolveGoalType(presets: PresetId[]): string {
+  if (presets.includes("race-10k")) return "10k";
+  if (presets.includes("race-hm")) return "HM";
+  if (presets.includes("race-marathon")) return "M";
+  if (presets.includes("weight")) return "weight";
+  return "custom";
+}
+
+function resolveSport(presets: PresetId[]): string | null {
+  if (
+    presets.includes("race-5k") ||
+    presets.includes("race-10k") ||
+    presets.includes("race-hm") ||
+    presets.includes("race-marathon") ||
+    presets.includes("start") ||
+    presets.includes("regular")
+  ) {
+    return "run";
+  }
+  return null;
+}
+
 export default function GoalsOnboardingFlow({
   mode = "initial",
   onFinished,
@@ -149,7 +171,20 @@ export default function GoalsOnboardingFlow({
       to.setMonth(to.getMonth() + 3);
       const toStr = to.toISOString().slice(0, 10);
 
-      const title = primaryGoal.trim() || "Мои цели на ближайшие 3 месяца";
+      const goalType = resolveGoalType(selectedPresets);
+      const sport = resolveSport(selectedPresets);
+
+      const title =
+        primaryGoal.trim() ||
+        (goalType === "10k"
+          ? "Подготовка к 10 км"
+          : goalType === "HM"
+          ? "Подготовка к полумарафону"
+          : goalType === "M"
+          ? "Подготовка к марафону"
+          : goalType === "weight"
+          ? "Снижение веса"
+          : "Мои цели на ближайшие 3 месяца");
 
       const targetJson = {
         primary: primaryGoal.trim() || null,
@@ -167,8 +202,8 @@ export default function GoalsOnboardingFlow({
       const { error: insertErr } = await supabase.from("goals").insert({
         user_id: user.id,
         title,
-        type: "custom", // из enum plan_goal_type
-        sport: null, // пока не фиксируем конкретный спорт
+        type: goalType,
+        sport,
         date_from: fromStr,
         date_to: toStr,
         status: "active", // из enum plan_status

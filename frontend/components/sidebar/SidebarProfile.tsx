@@ -183,7 +183,7 @@ export default function SidebarProfile() {
           <User className="mr-2 h-4 w-4" />
           <span>Профиль</span>
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => (window.location.href = "/settings")}>
+        <DropdownMenuItem onClick={() => (window.location.href = "/integrations")}>
           <Settings className="mr-2 h-4 w-4" />
           <span>Интеграции</span>
         </DropdownMenuItem>

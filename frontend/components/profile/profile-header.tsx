@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Activity, Clock3, Mail, MapPin, Route } from "lucide-react";
-import { humanSport, sportColor } from "@/components/ui/sport-theme";
 
 type Props = {
   avatarUrl?: string | null;
@@ -21,8 +20,6 @@ type Props = {
 export default function ProfileHeader({ avatarUrl, displayName, email, stats }: Props) {
   const fallbackAvatar = "/avatars/default-1.svg";
   const src = avatarUrl || fallbackAvatar;
-  const primarySportLabel = stats?.primarySport ? humanSport(stats.primarySport) : null;
-  const primarySportDot = stats?.primarySport ? sportColor(stats.primarySport) : null;
 
   return (
     <Card className="overflow-hidden">
@@ -50,30 +47,6 @@ export default function ProfileHeader({ avatarUrl, displayName, email, stats }: 
                 )}
               </div>
             </div>
-
-            <div className="flex flex-wrap gap-2">
-              {primarySportLabel ? (
-                <span className="inline-flex items-center gap-2 rounded-full border bg-muted/20 px-3 py-1.5 text-sm font-medium">
-                  <span
-                    className="h-2.5 w-2.5 rounded-full"
-                    style={{ background: primarySportDot ?? "currentColor" }}
-                    aria-hidden
-                  />
-                  {primarySportLabel}
-                </span>
-              ) : null}
-              {stats?.updatedAt ? (
-                <span className="inline-flex items-center gap-2 rounded-full border bg-muted/20 px-3 py-1.5 text-sm text-muted-foreground">
-                  <Clock3 className="size-4" />
-                  Обновлено{" "}
-                  {stats.updatedAt.toLocaleDateString(undefined, {
-                    year: "numeric",
-                    month: "2-digit",
-                    day: "2-digit",
-                  })}
-                </span>
-              ) : null}
-            </div>
           </div>
         </div>
 
@@ -98,12 +71,13 @@ export default function ProfileHeader({ avatarUrl, displayName, email, stats }: 
               label="Последняя тренировка"
               value={
                 stats.lastWorkoutAt
-                  ? stats.lastWorkoutAt.toLocaleString(undefined, {
+                  ? stats.lastWorkoutAt.toLocaleString("ru-RU", {
                       year: "numeric",
                       month: "2-digit",
                       day: "2-digit",
                       hour: "2-digit",
                       minute: "2-digit",
+                      hour12: false,
                     })
                   : "—"
               }

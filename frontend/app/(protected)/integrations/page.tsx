@@ -182,6 +182,50 @@ export default async function SettingsPage({
               )}
             </div>
           </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card className="border-dashed opacity-70">
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center justify-between text-base">
+                  Apple Watch
+                  <span className="text-xs text-muted-foreground">В работе</span>
+                </CardTitle>
+                <CardDescription>
+                  Импорт тренировок напрямую с Apple Watch.
+                </CardDescription>
+              </CardHeader>
+
+              <CardContent>
+                <button
+                  type="button"
+                  className={buttonVariants({ variant: "secondary" }) + " pointer-events-none opacity-50"}
+                >
+                  Скоро будет доступно
+                </button>
+              </CardContent>
+            </Card>
+
+            <Card className="border-dashed opacity-70">
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center justify-between text-base">
+                  Garmin
+                  <span className="text-xs text-muted-foreground">В работе</span>
+                </CardTitle>
+                <CardDescription>
+                  Синхронизация с Garmin Connect.
+                </CardDescription>
+              </CardHeader>
+
+              <CardContent>
+                <button
+                  type="button"
+                  className={buttonVariants({ variant: "secondary" }) + " pointer-events-none opacity-50"}
+                >
+                  Скоро будет доступно
+                </button>
+              </CardContent>
+            </Card>
+          </div>
         </CardContent>
       </Card>
     </main>

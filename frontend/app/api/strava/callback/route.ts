@@ -32,9 +32,9 @@ export async function GET(req: Request) {
   const state = url.searchParams.get("state");
   const error = url.searchParams.get("error");
 
-  const redirectOk = new URL("/settings?strava=connected&autosync=1", base);
+  const redirectOk = new URL("/integrations?strava=connected&autosync=1", base);
   const redirectErr = (reason: string, detail?: string) => {
-    const u = new URL("/settings", base);
+    const u = new URL("/integrations", base);
     u.searchParams.set("strava", "error");
     u.searchParams.set("reason", reason);
     if (detail) u.searchParams.set("detail", detail);

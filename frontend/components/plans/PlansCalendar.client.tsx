@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { Trophy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -38,6 +39,10 @@ export type PlansCalendarProps = {
   onDayClick?: (isoDate: string) => void;
   onEventClick?: (evt: PlanEvent) => void;
   className?: string;
+  activeGoal?: {
+    date_to?: string | null;
+    type?: string | null;
+  } | null;
 };
 
 const RU = new Intl.DateTimeFormat("ru-RU", {
@@ -100,6 +105,7 @@ export default function PlansCalendar({
   onDayClick,
   onEventClick,
   className,
+  activeGoal = null,
 }: PlansCalendarProps) {
   const [month, setMonth] = React.useState<Date>(() => {
     const now = new Date();
@@ -123,18 +129,19 @@ export default function PlansCalendar({
   return (
     <div
       className={cn(
-        "w-full rounded-xl border bg-card text-card-foreground shadow-sm",
+        "w-full overflow-hidden rounded-2xl border bg-card text-card-foreground shadow-sm",
         className
       )}
     >
       {/* Header */}
-      <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
-        <div className="text-base font-semibold capitalize">{monthLabel}</div>
-        <div className="flex gap-2">
+      <div className="flex flex-col gap-3 border-b bg-muted/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-lg font-semibold capitalize leading-none">{monthLabel}</div>
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="secondary"
             size="sm"
             onClick={() => setMonth(addMonths(month, -1))}
+            className="rounded-xl"
           >
             ← Пред
           </Button>
@@ -142,6 +149,7 @@ export default function PlansCalendar({
             variant="secondary"
             size="sm"
             onClick={() => setMonth(new Date())}
+            className="rounded-xl"
           >
             Сегодня
           </Button>
@@ -149,14 +157,21 @@ export default function PlansCalendar({
             variant="secondary"
             size="sm"
             onClick={() => setMonth(addMonths(month, 1))}
+            className="rounded-xl"
           >
             След →
           </Button>
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 border-b bg-background px-4 py-3">
+        <LegendPill label="Запланировано" color="#0C5BF9" />
+        <LegendPill label="Выполнено" color="#2D7601" />
+        <LegendPill label="Пропущено" color="#F6B021" />
+      </div>
+
       {/* Week header */}
-      <div className="grid grid-cols-7 gap-px border-b bg-border/50 px-2 py-1 text-center text-xs font-medium text-muted-foreground">
+      <div className="grid grid-cols-7 gap-px border-b bg-muted/20 px-2 py-2 text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
         {RU_SHORT_WEEK.map((w) => (
           <div key={w} className="py-1">
             {w}
@@ -165,38 +180,61 @@ export default function PlansCalendar({
       </div>
 
       {/* Grid 6x7 */}
-      <div className="grid grid-cols-7 gap-px bg-border/50 p-px">
+      <div className="grid grid-cols-7 gap-px bg-border/40 p-1">
         {days.map((d) => {
           const inMonth = d.getMonth() === month.getMonth();
           const k = iso(d);
           const dayEvents = eventsByDate.get(k) || [];
           const isToday = iso(d) === iso(new Date());
+          const isGoalDay =
+            activeGoal?.date_to &&
+            activeGoal.date_to === k;
+
+          const isRaceGoal =
+            isGoalDay &&
+            (activeGoal?.type === "race" || activeGoal?.type === "event");
+          const isWeekend = d.getDay() === 0 || d.getDay() === 6;
 
           return (
             <div
               key={k}
               className={cn(
-                "min-h-28 bg-background p-2",
-                !inMonth && "bg-muted/40 text-muted-foreground"
+                "min-h-[132px] p-2 transition-colors",
+                isGoalDay
+                  ? "border border-yellow bg-yellow/20"
+                  : "bg-background",
+                "hover:bg-muted/10",
+                !inMonth &&
+                  (isGoalDay
+                    ? "opacity-70"
+                    : "bg-muted/40 text-muted-foreground"),
+                isWeekend && inMonth && "bg-muted/[0.06]"
               )}
             >
-              <div className="mb-1 flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={() => onDayClick?.(k)}
-                  className={cn(
-                    "h-6 w-6 rounded-md text-xs font-medium leading-6 transition-colors",
-                    isToday
-                      ? "bg-primary text-primary-foreground"
-                      : "hover:bg-muted"
-                  )}
-                  aria-label={k}
-                  title={k}
-                >
-                  {d.getDate()}
-                </button>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => onDayClick?.(k)}
+                    className={cn(
+                      "inline-flex h-7 min-w-7 items-center justify-center rounded-lg px-2 text-xs font-semibold leading-none transition-colors",
+                      isToday
+                        ? "bg-primary text-primary-foreground shadow-sm"
+                        : inMonth
+                        ? "text-foreground hover:bg-muted"
+                        : "text-muted-foreground hover:bg-muted"
+                    )}
+                    aria-label={k}
+                    title={k}
+                  >
+                    {d.getDate()}
+                  </button>
+                  {isRaceGoal ? (
+                    <Trophy className="h-3.5 w-3.5 text-yellow-500" />
+                  ) : null}
+                </div>
                 {dayEvents.length > 0 && (
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                     {dayEvents.length}
                   </span>
                 )}
@@ -222,17 +260,18 @@ export default function PlansCalendar({
                       type="button"
                       onClick={() => onEventClick?.(e)}
                       className={cn(
-                        "block w-full rounded-md border px-2 py-1 text-left text-xs",
-                        !e.isCompleted && "hover:bg-muted"
+                        "block w-full rounded-lg border px-2.5 py-2 text-left text-xs shadow-[0_1px_0_rgba(0,0,0,0.02)] transition-colors",
+                        !e.isCompleted && "hover:bg-muted/60",
+                        !inMonth && "opacity-75"
                       )}
                       style={style}
                       title={e.title}
                     >
-                      <div className="truncate font-medium">{e.title}</div>
+                      <div className="truncate font-medium leading-tight">{e.title}</div>
                       {getEventMetaLine(e) ? (
                         <div
                           className={cn(
-                            "mt-0.5 truncate text-[10px] opacity-80",
+                            "mt-1 truncate text-[10px] opacity-80",
                             e.isCompleted ? "text-white/90" : "text-muted-foreground"
                           )}
                         >
@@ -244,7 +283,7 @@ export default function PlansCalendar({
                 })}
 
                 {dayEvents.length > 3 && (
-                  <div className="text-[10px] text-muted-foreground">
+                  <div className="pl-1 text-[10px] font-medium text-muted-foreground">
                     + ещё {dayEvents.length - 3}
                   </div>
                 )}
@@ -253,6 +292,19 @@ export default function PlansCalendar({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function LegendPill({ label, color }: { label: string; color: string }) {
+  return (
+    <div className="inline-flex items-center gap-2 rounded-full border bg-muted/20 px-2.5 py-1 text-xs font-medium text-foreground">
+      <span
+        className="h-2.5 w-2.5 rounded-full"
+        style={{ backgroundColor: color }}
+        aria-hidden
+      />
+      <span>{label}</span>
     </div>
   );
 }

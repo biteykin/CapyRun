@@ -72,7 +72,7 @@ export async function GET() {
     console.error("strava/connect fatal:", e?.message ?? e);
 
     const base = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-    const url = new URL("/settings", base);
+    const url = new URL("/integrations", base);
     url.searchParams.set("strava", "error");
     url.searchParams.set("reason", "connect");
     url.searchParams.set("detail", String(e?.message ?? "unknown"));

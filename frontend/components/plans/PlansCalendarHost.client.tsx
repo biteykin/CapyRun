@@ -453,6 +453,49 @@ export default function PlansCalendarHost({
     });
   }, [calendarEventsState]);
 
+  const orderedEvents = React.useMemo<ExtendedEvent[]>(() => {
+    return [...calendarEvents]
+      .sort((a, b) => {
+        const byDate = String(a.date).localeCompare(String(b.date));
+        if (byDate !== 0) return byDate;
+        return String(a.title ?? "").localeCompare(String(b.title ?? ""));
+      })
+      .map((e) => e as ExtendedEvent);
+  }, [calendarEvents]);
+
+  const selectedIndex = React.useMemo(() => {
+    if (!selected) return -1;
+    return orderedEvents.findIndex((evt) => String(evt.id) === String(selected.id));
+  }, [orderedEvents, selected]);
+
+  const prevEvent = selectedIndex > 0 ? orderedEvents[selectedIndex - 1] : null;
+  const nextEvent =
+    selectedIndex >= 0 && selectedIndex < orderedEvents.length - 1
+      ? orderedEvents[selectedIndex + 1]
+      : null;
+
+  React.useEffect(() => {
+    if (!selected) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      // не мешаем подтверждению удаления
+      if (confirmDeleteOpen) return;
+
+      if (e.key === "ArrowLeft" && prevEvent) {
+        e.preventDefault();
+        setSelected(prevEvent);
+      }
+
+      if (e.key === "ArrowRight" && nextEvent) {
+        e.preventDefault();
+        setSelected(nextEvent);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selected, prevEvent, nextEvent, confirmDeleteOpen]);
+
   React.useEffect(() => {
     setCalendarEventsState(events);
   }, [events]);
@@ -553,9 +596,41 @@ export default function PlansCalendarHost({
             }}
           >
           <div className="shrink-0">
-            <DialogTitle className="px-6 pt-6">
-              {selected?.title || "Тренировка"}
-            </DialogTitle>
+            <div className="flex items-center justify-between gap-3 px-6 pt-6">
+              <DialogTitle>
+                {selected?.title || "Тренировка"}
+              </DialogTitle>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={!prevEvent}
+                  onClick={() => {
+                    if (prevEvent) {
+                      setSelected(prevEvent);
+                      setConfirmDeleteOpen(false);
+                    }
+                  }}
+                >
+                  ← Предыдущая
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={!nextEvent}
+                  onClick={() => {
+                    if (nextEvent) {
+                      setSelected(nextEvent);
+                      setConfirmDeleteOpen(false);
+                    }
+                  }}
+                >
+                  Следующая →
+                </Button>
+              </div>
+            </div>
           </div>
 
           {/* Тело модалки со скроллом */}
