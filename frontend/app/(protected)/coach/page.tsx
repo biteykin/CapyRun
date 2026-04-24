@@ -79,13 +79,6 @@ export default async function CoachPage() {
 
   return (
     <main className="flex h-[calc(100svh-4rem-2rem)] min-h-0 flex-col overflow-hidden">
-      <div className="shrink-0 space-y-1 pb-4">
-        <h1 className="text-2xl font-extrabold">Тренер</h1>
-        <p className="text-sm text-muted-foreground">
-          Здесь можно задавать вопросы Капи, разбирать тренировки и получать рекомендации по плану.
-        </p>
-      </div>
-
       <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <CoachChat
           threadId={thread.id}
