@@ -1,33 +1,60 @@
 // frontend/app/(protected)/coach/loading.tsx
 export default function LoadingCoachPage() {
-    return (
-      <main className="w-full space-y-5">
-        <div className="space-y-2">
-          <div className="h-7 w-40 rounded bg-muted" />
-          <div className="h-4 w-[520px] max-w-full rounded bg-muted" />
-        </div>
-  
-        <div className="rounded-xl border bg-background p-4 space-y-3">
-          <div className="h-5 w-44 rounded bg-muted" />
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="rounded-lg border p-3 space-y-2">
-                <div className="h-3 w-24 rounded bg-muted" />
-                <div className="h-5 w-16 rounded bg-muted" />
+  return (
+    <main className="w-full space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="h-6 w-40 rounded bg-muted animate-pulse" />
+        <div className="h-8 w-24 rounded-md bg-muted animate-pulse" />
+      </div>
+
+      {/* Chat container */}
+      <div className="flex h-[70vh] flex-col rounded-2xl border bg-background overflow-hidden">
+        {/* Messages */}
+        <div className="flex-1 space-y-3 overflow-hidden p-4">
+          {Array.from({ length: 6 }).map((_, i) => {
+            const isUser = i % 2 === 1;
+
+            return (
+              <div
+                key={i}
+                className={`flex ${isUser ? "justify-end" : "justify-start"}`}
+              >
+                <div
+                  className={`
+                    max-w-[75%] space-y-2 rounded-2xl px-4 py-3
+                    ${isUser
+                      ? "bg-muted/60"
+                      : "bg-muted/40"}
+                  `}
+                >
+                  <div className="h-3 w-24 rounded bg-muted animate-pulse" />
+                  <div className="h-3 w-40 rounded bg-muted animate-pulse" />
+                  <div className="h-3 w-32 rounded bg-muted animate-pulse" />
+                </div>
               </div>
-            ))}
-          </div>
-          <div className="h-28 w-full rounded bg-muted" />
+            );
+          })}
         </div>
-  
-        <div className="rounded-xl border bg-background p-4 space-y-3">
-          <div className="h-5 w-36 rounded bg-muted" />
-          <div className="space-y-2">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="h-4 w-full rounded bg-muted" />
-            ))}
+
+        {/* Quick actions (имитация кнопок подсказок) */}
+        <div className="border-t bg-background p-3 flex flex-wrap gap-2">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div
+              key={i}
+              className="h-8 w-32 rounded-full bg-muted animate-pulse"
+            />
+          ))}
+        </div>
+
+        {/* Input area */}
+        <div className="border-t bg-background p-3">
+          <div className="flex items-center gap-2">
+            <div className="h-10 flex-1 rounded-md bg-muted animate-pulse" />
+            <div className="h-10 w-10 rounded-md bg-muted animate-pulse" />
           </div>
         </div>
-      </main>
-    );
-  }
+      </div>
+    </main>
+  );
+}

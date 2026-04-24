@@ -33,9 +33,9 @@ type Item = {
 // ----- НОВОЕ МЕНЮ -----
 const TOP: Item[] = [
   { href: "/home",     label: "Главная",    icon: Home },
+  { href: "/coach",    label: "Тренер",     icon: User },
   { href: "/plan",     label: "Календарь",  icon: Calendar },
   { href: "/workouts", label: "Тренировки", icon: Activity },
-  { href: "/coach",    label: "Тренер",     icon: User },
   { href: "/goals",    label: "Цели",       icon: Target },
 ];
 
