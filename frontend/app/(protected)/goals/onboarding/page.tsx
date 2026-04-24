@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabaseServerApp";
 import GoalsOnboardingFlow from "@/components/goals/GoalsOnboardingFlow.client";
+import { differenceInYears } from "date-fns";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -24,10 +25,31 @@ export default async function GoalsOnboardingPage() {
     redirect("/login");
   }
 
+  const { data: prof, error: profErr } = await supabase
+    .from("profiles")
+    .select("sex, birth_date, height_cm, weight_kg")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (profErr) {
+    console.error("goals onboarding profile fetch error", profErr);
+  }
+
+  const initialProfile = {
+    sex: prof?.sex ?? null,
+    age:
+      prof?.birth_date
+        ? differenceInYears(new Date(), new Date(prof.birth_date))
+        : null,
+    birth_date: prof?.birth_date ?? null,
+    height_cm: prof?.height_cm != null ? Number(prof.height_cm) : null,
+    weight_kg: prof?.weight_kg != null ? Number(prof.weight_kg) : null,
+  };
+
   return (
     <main className="w-full space-y-6">
       <section className="w-full">
-        <GoalsOnboardingFlow />
+        <GoalsOnboardingFlow initialProfile={initialProfile} />
       </section>
     </main>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseBrowser";
 
@@ -16,6 +17,15 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { CheckCircle2, ChevronRight } from "lucide-react";
 
 export type GoalsOnboardingFlowProps = {
   /** Режим использования:
@@ -25,18 +35,26 @@ export type GoalsOnboardingFlowProps = {
   mode?: "initial" | "add-more";
   /** Колбэк после успешного сохранения целей */
   onFinished?: () => void;
+  initialProfile?: {
+    sex?: "male" | "female" | null;
+    age?: number | null;
+    birth_date?: string | null;
+    height_cm?: number | null;
+    weight_kg?: number | null;
+  };
 };
 
 type PresetId =
+  | "start"
   | "regular"
   | "weight"
+  | "vo2max"
   | "race-5k"
   | "race-10k"
   | "race-hm"
-  | "race-marathon"
-  | "start";
+  | "race-marathon";
 
-type Step = 1 | 2 | 3;
+type Step = 1 | 2;
 
 const PRESETS: {
   id: PresetId;
@@ -45,16 +63,22 @@ const PRESETS: {
   description: string;
 }[] = [
   {
+    id: "start",
+    title: "Просто начать",
+    emoji: "✨",
+    description: "Хочу сдвинуться с мёртвой точки и понять, с чего начать.",
+  },
+  {
     id: "regular",
     title: "Регулярные тренировки",
     emoji: "📆",
     description: "Хочу стабильно заниматься 3–4 раза в неделю и не бросать.",
   },
   {
-    id: "weight",
-    title: "Снижение веса",
-    emoji: "⚖️",
-    description: "Минус лишние килограммы без жёстких диет и перегрузок.",
+    id: "vo2max",
+    title: "Улучшить выносливость",
+    emoji: "🫁",
+    description: "Хочу легче держать темп, меньше уставать и увереннее переносить нагрузку.",
   },
   {
     id: "race-5k",
@@ -81,10 +105,10 @@ const PRESETS: {
     description: "Большая цель — марафон. Готов работать системно.",
   },
   {
-    id: "start",
-    title: "Просто начать",
-    emoji: "✨",
-    description: "Хочу сдвинуться с мёртвой точки и понять, с чего начать.",
+    id: "weight",
+    title: "Снижение веса",
+    emoji: "⚖️",
+    description: "Минус лишние килограммы без жёстких диет и перегрузок.",
   },
 ];
 
@@ -113,37 +137,296 @@ function resolveSport(presets: PresetId[]): string | null {
 export default function GoalsOnboardingFlow({
   mode = "initial",
   onFinished,
+  initialProfile,
 }: GoalsOnboardingFlowProps) {
+  const router = useRouter();
   const [step, setStep] = React.useState<Step>(1);
 
-  const [selectedPresets, setSelectedPresets] = React.useState<PresetId[]>([]);
-  const [primaryGoal, setPrimaryGoal] = React.useState("");
+  const [selectedPreset, setSelectedPreset] = React.useState<PresetId | null>(
+    null
+  );
+  const [goalTitle, setGoalTitle] = React.useState("");
+  const [goalDate, setGoalDate] = React.useState("");
+  const [targetFinishTime, setTargetFinishTime] = React.useState("");
+  const [targetPace, setTargetPace] = React.useState("");
   const [secondaryGoals, setSecondaryGoals] = React.useState("");
 
-  const [gender, setGender] = React.useState<"male" | "female" | "other" | "">(
-    ""
+  const [gender, setGender] = React.useState<"male" | "female" | "">(
+    (initialProfile?.sex as "male" | "female" | null) ?? ""
   );
-  const [age, setAge] = React.useState<string>("");
-  const [heightCm, setHeightCm] = React.useState<string>("");
-  const [weightKg, setWeightKg] = React.useState<string>("");
-  const [experience, setExperience] = React.useState<string>("");
+  const [age, setAge] = React.useState<string>(
+    initialProfile?.age != null ? String(initialProfile.age) : ""
+  );
+  const [heightCm, setHeightCm] = React.useState<string>(
+    initialProfile?.height_cm != null ? String(initialProfile.height_cm) : ""
+  );
+  const [weightKg, setWeightKg] = React.useState<string>(
+    initialProfile?.weight_kg != null ? String(initialProfile.weight_kg) : ""
+  );
 
   const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const isInitial = mode === "initial";
+  const stepHint =
+    step === 1
+      ? "Сейчас можно выбрать только одну цель"
+      : "Данные нужны для более точного плана и рекомендаций";
+  const isRaceGoal =
+    selectedPreset === "race-5k" ||
+    selectedPreset === "race-10k" ||
+    selectedPreset === "race-hm" ||
+    selectedPreset === "race-marathon";
 
-  const togglePreset = (id: PresetId) => {
-    setSelectedPresets((prev) =>
-      prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]
-    );
+  const selectedPresetObj = PRESETS.find((p) => p.id === selectedPreset);
+
+  // Явно определяем дистанцию для беговых целей
+  const raceDistanceKm = React.useMemo(() => {
+    if (!selectedPresetObj) return null;
+
+    switch (selectedPresetObj.id) {
+      case "race-5k":
+        return 5;
+      case "race-10k":
+        return 10;
+      case "race-hm":
+        return 21.1;
+      case "race-marathon":
+        return 42.2;
+      default:
+        return null;
+    }
+  }, [selectedPresetObj]);
+
+  const distanceType =
+    selectedPreset === "race-5k"
+      ? "5k"
+      : selectedPreset === "race-10k"
+      ? "10k"
+      : selectedPreset === "race-hm"
+      ? "HM"
+      : selectedPreset === "race-marathon"
+      ? "M"
+      : null;
+
+  const selectPreset = (id: PresetId) => {
+    setSelectedPreset((prev) => (prev === id ? null : id));
+    setError(null);
   };
 
-  const canGoNextFromStep1 =
-    selectedPresets.length > 0 || primaryGoal.trim().length > 5;
+  function deriveBirthDateFromAge(ageValue: string, prevBirthDate?: string | null) {
+    const ageNum = Number(ageValue);
+    if (!Number.isFinite(ageNum) || ageNum <= 0) return null;
+
+    const now = new Date();
+    const year = now.getFullYear() - ageNum;
+
+    let month = 1;
+    let day = 1;
+
+    if (prevBirthDate) {
+      const prev = new Date(prevBirthDate);
+      if (!Number.isNaN(prev.getTime())) {
+        month = prev.getMonth() + 1;
+        day = prev.getDate();
+      }
+    }
+
+    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+
+  function clampSegment(value: string, max = 59): string {
+    if (value.length < 2) return value;
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "";
+    return String(Math.min(max, n)).padStart(2, "0");
+  }
+
+  function formatHhMmSsFromDigits(digits: string): string {
+    const d = digits.replace(/\D/g, "").slice(0, 6);
+
+    const h = d.slice(0, 2);
+    const m = d.slice(2, 4);
+    const s = d.slice(4, 6);
+
+    const safeM = clampSegment(m, 59);
+    const safeS = clampSegment(s, 59);
+
+    return [h, safeM, safeS].filter(Boolean).join(":");
+  }
+
+  function formatMmSsFromDigits(digits: string): string {
+    const d = digits.replace(/\D/g, "").slice(0, 4);
+
+    const m = d.slice(0, 2);
+    const s = d.slice(2, 4);
+
+    const safeM = clampSegment(m, 59);
+    const safeS = clampSegment(s, 59);
+
+    return [safeM, safeS].filter(Boolean).join(":");
+  }
+
+  function allowOnlyTimeInput(e: React.KeyboardEvent<HTMLInputElement>) {
+    const allowed = [
+      "Backspace",
+      "Delete",
+      "Tab",
+      "ArrowLeft",
+      "ArrowRight",
+      "Home",
+      "End",
+    ];
+
+    if (allowed.includes(e.key)) return;
+    if (
+      (e.metaKey || e.ctrlKey) &&
+      ["a", "c", "v", "x"].includes(e.key.toLowerCase())
+    )
+      return;
+    if (/^\d$/.test(e.key)) return;
+
+    e.preventDefault();
+  }
+
+  function parseHhMmSsToSeconds(value: string): number | null {
+    const raw = value.trim();
+    if (!raw) return null;
+
+    const parts = raw.split(":").map((x) => Number(x));
+    if (parts.some((x) => !Number.isFinite(x) || x < 0)) return null;
+
+    if (parts.length === 3) {
+      const [h, m, s] = parts;
+      return h * 3600 + m * 60 + s;
+    }
+
+    if (parts.length === 2) {
+      const [m, s] = parts;
+      return m * 60 + s;
+    }
+
+    return null;
+  }
+
+  function parseMmSsToSeconds(value: string): number | null {
+    const raw = value.trim();
+    if (!raw) return null;
+    const parts = raw.split(":").map((x) => Number(x));
+    if (parts.length !== 2) return null;
+    if (parts.some((x) => !Number.isFinite(x) || x < 0)) return null;
+    const [m, s] = parts;
+    return m * 60 + s;
+  }
+
+  function formatHhMmSs(totalSec: number): string {
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+
+  function formatMmSs(secPerKm: number | null): string | null {
+    if (!secPerKm || secPerKm <= 0) return null;
+    const m = Math.floor(secPerKm / 60);
+    const s = Math.round(secPerKm % 60);
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+
+  function onFinishTimeChange(value: string) {
+    const digits = value.replace(/\D/g, "");
+    const formatted = formatHhMmSsFromDigits(digits);
+
+    setTargetFinishTime(formatted);
+
+    const sec = parseHhMmSsToSeconds(formatted);
+    if (sec && raceDistanceKm) {
+      setTargetPace(formatMmSs(Math.round(sec / raceDistanceKm)) ?? "");
+    } else if (!formatted) {
+      setTargetPace("");
+    }
+  }
+
+  function onPaceChange(value: string) {
+    const digits = value.replace(/\D/g, "");
+    const formatted = formatMmSsFromDigits(digits);
+
+    setTargetPace(formatted);
+
+    const secPerKm = parseMmSsToSeconds(formatted);
+    if (secPerKm && raceDistanceKm) {
+      setTargetFinishTime(formatHhMmSs(Math.round(secPerKm * raceDistanceKm)));
+    } else if (!formatted) {
+      setTargetFinishTime("");
+    }
+  }
+
+  function onPaceKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") {
+      allowOnlyTimeInput(e);
+      return;
+    }
+
+    e.preventDefault();
+
+    const input = e.currentTarget;
+    const pos = input.selectionStart ?? targetPace.length;
+    const isSeconds = targetPace.includes(":") && pos > targetPace.indexOf(":");
+
+    const [mRaw = "0", sRaw = "0"] = targetPace.split(":");
+    let m = Number(mRaw || 0);
+    let s = Number(sRaw || 0);
+    const delta = e.key === "ArrowUp" ? 1 : -1;
+
+    if (isSeconds) s = Math.max(0, Math.min(59, s + delta));
+    else m = Math.max(0, Math.min(59, m + delta));
+
+    onPaceChange(`${String(m).padStart(2, "0")}${String(s).padStart(2, "0")}`);
+  }
+
+  function onFinishTimeKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") {
+      allowOnlyTimeInput(e);
+      return;
+    }
+
+    e.preventDefault();
+
+    const input = e.currentTarget;
+    const pos = input.selectionStart ?? targetFinishTime.length;
+    const firstColon = targetFinishTime.indexOf(":");
+    const secondColon = targetFinishTime.indexOf(":", firstColon + 1);
+
+    const isMinutes =
+      firstColon >= 0 &&
+      pos > firstColon &&
+      (secondColon < 0 || pos <= secondColon);
+    const isSeconds = secondColon >= 0 && pos > secondColon;
+
+    const [hRaw = "0", mRaw = "0", sRaw = "0"] = targetFinishTime.split(":");
+    let h = Number(hRaw || 0);
+    let m = Number(mRaw || 0);
+    let s = Number(sRaw || 0);
+    const delta = e.key === "ArrowUp" ? 1 : -1;
+
+    if (isSeconds) s = Math.max(0, Math.min(59, s + delta));
+    else if (isMinutes) m = Math.max(0, Math.min(59, m + delta));
+    else h = Math.max(0, Math.min(99, h + delta));
+
+    onFinishTimeChange(
+      `${String(h).padStart(2, "0")}${String(m).padStart(2, "0")}${String(s).padStart(2, "0")}`
+    );
+  }
+
+  const targetTimeSec = parseHhMmSsToSeconds(targetFinishTime);
+  const targetPaceSecPerKm = parseMmSsToSeconds(targetPace);
+
+  const canGoNextFromStep1 = !!selectedPreset;
 
   const canSaveFromStep2 =
     canGoNextFromStep1 &&
+    goalTitle.trim().length >= 3 &&
+    goalDate.trim() !== "" &&
     gender &&
     age.trim() !== "" &&
     heightCm.trim() !== "" &&
@@ -167,35 +450,48 @@ export default function GoalsOnboardingFlow({
 
       const today = new Date();
       const fromStr = today.toISOString().slice(0, 10);
-      const to = new Date(today);
-      to.setMonth(to.getMonth() + 3);
-      const toStr = to.toISOString().slice(0, 10);
+      const toStr = goalDate;
 
+      const selectedPresets = selectedPreset ? [selectedPreset] : [];
       const goalType = resolveGoalType(selectedPresets);
       const sport = resolveSport(selectedPresets);
 
-      const title =
-        primaryGoal.trim() ||
-        (goalType === "10k"
-          ? "Подготовка к 10 км"
-          : goalType === "HM"
-          ? "Подготовка к полумарафону"
-          : goalType === "M"
-          ? "Подготовка к марафону"
-          : goalType === "weight"
-          ? "Снижение веса"
-          : "Мои цели на ближайшие 3 месяца");
+      const birthDate = deriveBirthDateFromAge(age, initialProfile?.birth_date ?? null);
+
+      const { error: profileErr } = await supabase.from("profiles").upsert(
+        {
+          user_id: user.id,
+          sex: gender || null,
+          birth_date: birthDate,
+          height_cm: heightCm ? Number(heightCm) : null,
+          weight_kg: weightKg ? Number(weightKg) : null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id" }
+      );
+
+      if (profileErr) throw profileErr;
+
+      const title = goalTitle.trim();
 
       const targetJson = {
-        primary: primaryGoal.trim() || null,
+        primary: goalTitle.trim() || null,
         secondary: secondaryGoals.trim() || null,
         presets: selectedPresets,
+        ...(isRaceGoal
+          ? {
+              race_date: goalDate || null,
+              target_time_s: targetTimeSec,
+              pace_s_per_km: targetPaceSecPerKm,
+              distance_type: distanceType,
+              distance_km: raceDistanceKm,
+            }
+          : {}),
         profile: {
           gender: gender || null,
           age: age ? Number(age) : null,
           height_cm: heightCm ? Number(heightCm) : null,
           weight_kg: weightKg ? Number(weightKg) : null,
-          experience: experience.trim() || null,
         },
       };
 
@@ -212,8 +508,9 @@ export default function GoalsOnboardingFlow({
 
       if (insertErr) throw insertErr;
 
-      setStep(3);
       onFinished?.();
+      router.push("/goals?created=1");
+      router.refresh();
     } catch (e: any) {
       console.error("goals onboarding save error", e);
       setError(
@@ -232,17 +529,16 @@ export default function GoalsOnboardingFlow({
       <div className="space-y-6">
         <div className="space-y-1">
           <CardTitle>
-            {isInitial ? "Какие цели тебе ближе всего?" : "Добавим новые цели"}
+            {isInitial ? "Какая цель сейчас главная?" : "Выберите новую цель"}
           </CardTitle>
           <CardDescription>
-            Выбери одну или несколько целей — или напиши свою. На основе
-            этого тренер будет строить план.
+            Выберите один сценарий. На его основе тренер будет строить план и расставлять акценты.
           </CardDescription>
         </div>
 
         <div className="grid gap-3 md:grid-cols-2">
           {PRESETS.map((p) => {
-            const active = selectedPresets.includes(p.id);
+            const active = selectedPreset === p.id;
 
             return (
               <Card
@@ -250,19 +546,28 @@ export default function GoalsOnboardingFlow({
                 className={cn(
                   "cursor-pointer transition-all",
                   active
-                    ? "border-primary shadow-md bg-card"
-                    : "hover:border-muted-foreground/40 bg-card"
+                    ? "border-[rgb(26,158,58)] bg-[rgba(197,237,208,0.35)] shadow-md ring-2 ring-[rgba(26,158,58,0.18)]"
+                    : "bg-card hover:border-muted-foreground/40"
                 )}
-                onClick={() => togglePreset(p.id)}
+                onClick={() => selectPreset(p.id)}
               >
                 <CardHeader className="pb-2">
-                  <div className="flex items-start gap-2">
-                    <div className="mt-0.5 text-xl">{p.emoji}</div>
-                    <div>
-                      <CardTitle className="text-sm">{p.title}</CardTitle>
-                      <CardDescription className="text-xs">
-                        {p.description}
-                      </CardDescription>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-2">
+                      <div className="mt-0.5 text-xl">{p.emoji}</div>
+                      <div>
+                        <CardTitle className="text-sm">{p.title}</CardTitle>
+                        <CardDescription className="text-xs">
+                          {p.description}
+                        </CardDescription>
+                      </div>
+                    </div>
+                    <div className="pt-0.5">
+                      {active ? (
+                        <CheckCircle2 className="size-5 text-[rgb(26,158,58)]" />
+                      ) : (
+                        <div className="size-5 rounded-full border border-muted-foreground/30" />
+                      )}
                     </div>
                   </div>
                 </CardHeader>
@@ -271,18 +576,14 @@ export default function GoalsOnboardingFlow({
           })}
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="primaryGoal">Своя формулировка цели (опционально)</Label>
-          <Textarea
-            id="primaryGoal"
-            value={primaryGoal}
-            onChange={(e) => setPrimaryGoal(e.target.value)}
-            rows={3}
-            placeholder="Например: «Хочу к маю спокойно пробегать 10 км и чувствовать себя бодро»"
-          />
-        </div>
-
-        <div className="flex justify-end gap-2 pt-2">
+        <div className="flex justify-between gap-2 pt-2">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => router.push("/goals")}
+          >
+            Назад
+          </Button>
           <Button
             type="button"
             variant="primary"
@@ -290,6 +591,7 @@ export default function GoalsOnboardingFlow({
             onClick={() => setStep(2)}
           >
             Далее
+            <ChevronRight className="ml-2 size-4" />
           </Button>
         </div>
       </div>
@@ -302,40 +604,89 @@ export default function GoalsOnboardingFlow({
         <div className="space-y-1">
           <CardTitle>Параметры о тебе</CardTitle>
           <CardDescription>
-            Эти данные нужны, чтобы тренер подбирал адекватную нагрузку и
-            темпы.
+            Мы предзаполнили данные из профиля. Если что-то измените здесь, обновим и профиль тоже.
           </CardDescription>
         </div>
 
         <div className="grid w-full gap-4 md:grid-cols-2">
           <div className="space-y-2">
-            <Label>Пол</Label>
-            <div className="grid grid-cols-3 gap-2">
-              <Button
-                type="button"
-                variant={gender === "male" ? "primary" : "outline"}
-                size="sm"
-                onClick={() => setGender("male")}
-              >
-                Мужской
-              </Button>
-              <Button
-                type="button"
-                variant={gender === "female" ? "primary" : "outline"}
-                size="sm"
-                onClick={() => setGender("female")}
-              >
-                Женский
-              </Button>
-              <Button
-                type="button"
-                variant={gender === "other" ? "primary" : "outline"}
-                size="sm"
-                onClick={() => setGender("other")}
-              >
-                Другое
-              </Button>
+            <Label htmlFor="goalTitle">Название цели</Label>
+            <Input
+              id="goalTitle"
+              value={goalTitle}
+              onChange={(e) => setGoalTitle(e.target.value)}
+              placeholder="Например: Полумарафон в Казани"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="goalDate">Дата цели</Label>
+            <Input
+              id="goalDate"
+              type="date"
+              value={goalDate}
+              onChange={(e) => setGoalDate(e.target.value)}
+            />
+            <div className="text-xs text-muted-foreground">
+              Это может быть дата старта или дата, к которой цель должна быть выполнена
             </div>
+          </div>
+        </div>
+
+        {raceDistanceKm !== null ? (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="targetFinishTime">Желаемое время финиша</Label>
+              <Input
+                id="targetFinishTime"
+                value={targetFinishTime}
+                onChange={(e) => onFinishTimeChange(e.target.value)}
+              onKeyDown={onFinishTimeKeyDown}
+                inputMode="numeric"
+                maxLength={8}
+                placeholder="01:45:00"
+              />
+              <div className="text-xs text-muted-foreground">
+                Формат: чч:мм:сс
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="targetPace">Целевой темп, мин/км</Label>
+              <Input
+                id="targetPace"
+                value={targetPace}
+                onChange={(e) => onPaceChange(e.target.value)}
+              onKeyDown={onPaceKeyDown}
+                inputMode="numeric"
+                maxLength={5}
+                placeholder="05:00"
+              />
+              <div className="text-xs text-muted-foreground">
+                Темп и время связаны между собой
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="grid w-full gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="gender">Пол</Label>
+            <Select
+              value={gender || "unset"}
+              onValueChange={(v) =>
+                setGender(v === "unset" ? "" : (v as "male" | "female"))
+              }
+            >
+              <SelectTrigger id="gender">
+                <SelectValue placeholder="Выберите пол" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="unset">Не выбрано</SelectItem>
+                <SelectItem value="male">Мужской</SelectItem>
+                <SelectItem value="female">Женский</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="space-y-2">
@@ -380,28 +731,19 @@ export default function GoalsOnboardingFlow({
 
         <div className="space-y-2">
           <Label htmlFor="secondary">
-            Есть ли уже опыт тренировок / стартов?
+            Опыт, ограничения и важные детали
           </Label>
           <Textarea
             id="secondary"
             value={secondaryGoals}
             onChange={(e) => setSecondaryGoals(e.target.value)}
             rows={3}
-            placeholder="Например: «Раньше бегал 5 км по выходным, сейчас выпал из режима на пару месяцев»"
+            placeholder="Например: «Раньше бегал 5 км по выходным, сейчас был перерыв 2 месяца. Колено иногда побаливает после долгих пробежек, могу тренироваться 3 раза в неделю»"
           />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="experience">
-            Что важно учесть (график работы, здоровье, ограничения)?
-          </Label>
-          <Textarea
-            id="experience"
-            value={experience}
-            onChange={(e) => setExperience(e.target.value)}
-            rows={3}
-            placeholder="Например: «Сидячая работа, 2 маленьких ребёнка, колено иногда побаливает после долгих пробежек»"
-          />
+          <div className="text-xs text-muted-foreground">
+            Напишите свободно: текущий уровень, прошлые старты, травмы,
+            ограничения по времени и все, что тренеру важно учитывать
+          </div>
         </div>
 
         {error && (
@@ -409,11 +751,10 @@ export default function GoalsOnboardingFlow({
             {error}
           </p>
         )}
-
         <div className="flex justify-between gap-2 pt-2">
           <Button
             type="button"
-            variant="ghost"
+            variant="secondary"
             onClick={() => setStep(1)}
           >
             Назад
@@ -431,35 +772,6 @@ export default function GoalsOnboardingFlow({
     );
   }
 
-  function renderStep3() {
-    return (
-      <div className="space-y-4 text-center">
-        <CardTitle>Готово 🎯</CardTitle>
-        <CardDescription>
-          Мы зафиксировали твои цели и базовые параметры. Теперь тренер
-          сможет строить план и давать комментарии с учётом именно тебя.
-        </CardDescription>
-
-        <div className="mt-4 space-y-2 text-sm text-muted-foreground">
-          <p>
-            Дальше ты можешь перейти к <strong>календарю тренировок</strong> или
-            сразу написать <strong>тренеру</strong>.
-          </p>
-        </div>
-
-        <div className="mt-4 flex justify-center gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => onFinished?.()}
-          >
-            Продолжить
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <section className="w-full">
       <Card
@@ -469,16 +781,14 @@ export default function GoalsOnboardingFlow({
       >
         <CardHeader>
           <div className="flex items-center justify-between gap-2">
-            <div className="space-y-1">
-              <CardTitle>
-                {isInitial ? "Поможем настроить цели" : "Обновление целей"}
-              </CardTitle>
-              <CardDescription>
-                2 коротких шага — и тренер будет лучше понимать, куда ты хочешь прийти.
-              </CardDescription>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary">Шаг {step} из 2</Badge>
+              <span className="text-xs text-muted-foreground">
+                {stepHint}
+              </span>
             </div>
             <div className="flex items-center gap-2">
-              {[1, 2, 3].map((i) => (
+              {[1, 2].map((i) => (
                 <div
                   key={i}
                   className={cn(
@@ -496,12 +806,9 @@ export default function GoalsOnboardingFlow({
         <CardContent className="w-full">
           {step === 1 && renderStep1()}
           {step === 2 && renderStep2()}
-          {step === 3 && renderStep3()}
         </CardContent>
 
-        <CardFooter className="justify-end text-[11px] text-muted-foreground">
-          Цели всегда можно будет скорректировать позже.
-        </CardFooter>
+        
       </Card>
     </section>
   );

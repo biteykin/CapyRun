@@ -63,6 +63,7 @@ type GoalTarget = {
 
 type GoalsListProps = {
   goals: GoalRow[];
+  created?: boolean;
   /** Нажатие на "Добавить цель" — страница сама решает, как открыть онбординг */
   onAddGoal?: () => void;
 };
@@ -344,7 +345,11 @@ function statusBadge(status: string) {
   }
 }
 
-export default function GoalsList({ goals, onAddGoal }: GoalsListProps) {
+export default function GoalsList({
+  goals,
+  created = false,
+  onAddGoal,
+}: GoalsListProps) {
   const [items, setItems] = React.useState<GoalRow[]>(goals ?? []);
   const [editMode, setEditMode] = React.useState(false);
   const [deletingId, setDeletingId] = React.useState<string | null>(null);
@@ -355,21 +360,7 @@ export default function GoalsList({ goals, onAddGoal }: GoalsListProps) {
   React.useEffect(() => {
     setItems(goals ?? []);
   }, [goals]);
-
-  if (!items || items.length === 0) return null;
-  const sorted = React.useMemo(() => {
-    return [...items].sort((a, b) => {
-      // 1. primary first
-      if (a.is_primary && !b.is_primary) return -1;
-      if (!a.is_primary && b.is_primary) return 1;
-
-      // 2. active next
-      if (a.status === "active" && b.status !== "active") return -1;
-      if (a.status !== "active" && b.status === "active") return 1;
-
-      return new Date(a.date_to).getTime() - new Date(b.date_to).getTime();
-    });
-  }, [items]);
+  const sorted = [...items].sort((a, b) => getGoalPriorityScore(b) - getGoalPriorityScore(a));
   const activeGoals = sorted.filter((g) => g.status === "active");
   const primaryGoal = activeGoals[0] ?? sorted[0] ?? null;
   const otherGoals = sorted.filter((g) => g.id !== primaryGoal?.id);
@@ -439,48 +430,81 @@ export default function GoalsList({ goals, onAddGoal }: GoalsListProps) {
 
   return (
     <section className="space-y-4">
-      <Card className="overflow-hidden border bg-gradient-to-br from-[rgba(255,214,0,0.10)] via-background to-[rgba(27,46,201,0.05)]">
-        <CardContent className="p-5">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div className="space-y-2">
-              <div className="inline-flex items-center gap-2 rounded-full border bg-background/70 px-3 py-1 text-xs font-medium text-muted-foreground">
-                <Sparkles className="size-3.5" />
-                Сезон и фокус
-              </div>
-              <div className="text-2xl font-extrabold leading-tight">
-                {activeGoals.length > 0
-                  ? `${activeGoals.length} активн${activeGoals.length === 1 ? "ая цель" : activeGoals.length < 5 ? "ые цели" : "ых целей"}`
-                  : "Поставьте первую цель"}
-              </div>
-              <div className="text-sm text-muted-foreground">
-                {nearestGoal
-                  ? `Ближайшая цель — ${nearestGoal.title || TYPE_META[nearestGoal.type]?.label || "цель"} · ${daysLeftLabel(nearestGoal.date_to)}`
-                  : "Цели помогают связать план, календарь и реальные тренировки в один сезон"}
-              </div>
-            </div>
+      {created ? (
+        <div className="rounded-2xl border border-[rgba(26,158,58,0.22)] bg-[rgba(197,237,208,0.55)] px-4 py-3 text-sm font-medium text-[rgb(26,158,58)]">
+          Цель создана — теперь она будет учитываться в плане и календаре
+        </div>
+      ) : null}
 
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => setEditMode((v) => !v)}
-              >
-                {editMode ? "Готово" : "Редактировать"}
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => onAddGoal?.()}
-              >
-                <Plus className="mr-2 size-4" />
-                Добавить цель
-              </Button>
+      {items.length > 0 ? (
+        <Card className="overflow-hidden border bg-gradient-to-br from-[rgba(255,214,0,0.06)] via-background to-[rgba(27,46,201,0.035)]">
+          <CardContent className="px-4 py-3">
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="text-sm font-extrabold leading-tight">
+                    {activeGoals.length > 0
+                      ? `${activeGoals.length} активн${activeGoals.length === 1 ? "ая цель" : activeGoals.length < 5 ? "ые цели" : "ых целей"}`
+                      : "Поставьте первую цель"}
+                  </div>
+                  <span className="inline-flex items-center gap-1 rounded-full border bg-background/70 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                    <Sparkles className="size-3" />
+                    Сезон
+                  </span>
+                </div>
+                <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                  {nearestGoal
+                    ? `Ближайшая цель — ${nearestGoal.title || TYPE_META[nearestGoal.type]?.label || "цель"} · ${daysLeftLabel(nearestGoal.date_to)}`
+                    : "Цели помогают связать план, календарь и реальные тренировки в один сезон"}
+                </div>
+              </div>
+
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setEditMode((v) => !v)}
+                >
+                  {editMode ? "Готово" : "Редактировать"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={() => onAddGoal?.()}
+                >
+                  <Plus className="mr-1.5 size-4" />
+                  Добавить цель
+                </Button>
+              </div>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {items.length === 0 ? (
+        <Card className="overflow-hidden border border-dashed bg-card/95">
+          <CardContent className="flex flex-col items-center justify-center px-6 py-12 text-center">
+            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[rgba(197,237,208,0.65)] text-2xl">
+              🎯
+            </div>
+            <div className="text-xl font-extrabold">Создайте первую цель</div>
+            <div className="mt-2 max-w-md text-sm text-muted-foreground">
+              Выберите спортивный фокус: просто начать, улучшить выносливость, подготовиться к забегу или описать свою цель.
+            </div>
+            <Button
+              type="button"
+              variant="primary"
+              className="mt-5"
+              onClick={() => onAddGoal?.()}
+            >
+              <Plus className="mr-2 size-4" />
+              Создать цель
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {error && <p className="text-xs text-red-600">{error}</p>}
 
@@ -579,169 +603,101 @@ export default function GoalsList({ goals, onAddGoal }: GoalsListProps) {
         <div className="space-y-2">
           <div className="text-sm font-semibold">Остальные цели</div>
           <div
-            className="grid w-full gap-4"
+            className="grid w-full gap-3"
             style={{
-              gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+              gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
             }}
           >
             {otherGoals.map((g) => {
-          const meta = TYPE_META[g.type] ?? TYPE_META["custom"];
-          const target = (g.target_json ?? {}) as GoalTarget;
-          const primary: string | null =
-            target.primary && typeof target.primary === "string"
-              ? target.primary
-              : null;
-          const secondary: string | null =
-            target.secondary && typeof target.secondary === "string"
-              ? target.secondary
-              : null;
+              const meta = TYPE_META[g.type] ?? TYPE_META["custom"];
+              const target = (g.target_json ?? {}) as GoalTarget;
+              const primary: string | null =
+                target.primary && typeof target.primary === "string"
+                  ? target.primary
+                  : null;
+              const secondary: string | null =
+                target.secondary && typeof target.secondary === "string"
+                  ? target.secondary
+                  : null;
+              const profile = target.profile ?? {};
+              const profileLineParts: string[] = [];
+              if (profile.gender === "male") profileLineParts.push("мужчина");
+              if (profile.gender === "female") profileLineParts.push("женщина");
+              if (profile.age) profileLineParts.push(`${profile.age} лет`);
+              if (profile.height_cm)
+                profileLineParts.push(`${profile.height_cm} см`);
+              if (profile.weight_kg)
+                profileLineParts.push(`${profile.weight_kg} кг`);
+              const profileLine =
+                profileLineParts.length > 0
+                  ? profileLineParts.join(", ")
+                  : null;
 
-          const profile = target.profile ?? {};
-          const profileLineParts: string[] = [];
-          if (profile.gender === "male") profileLineParts.push("мужчина");
-          if (profile.gender === "female") profileLineParts.push("женщина");
-          if (profile.age) profileLineParts.push(`${profile.age} лет`);
-          if (profile.height_cm)
-            profileLineParts.push(`${profile.height_cm} см`);
-          if (profile.weight_kg)
-            profileLineParts.push(`${profile.weight_kg} кг`);
-
-          const profileLine =
-            profileLineParts.length > 0
-              ? profileLineParts.join(", ")
-              : null;
-
-          return (
-            <Card
-              key={g.id}
-              className={cn(
-                "flex h-full flex-col border bg-card/95 text-card-foreground shadow-sm transition-all",
-                "hover:-translate-y-0.5",
-                g.is_primary && "ring-2 ring-primary/30",
-                g.status === "active" && "shadow-[0_0_0_1px_rgba(27,46,201,0.15)]",
-                daysLeft(g.date_to) !== null &&
-                  daysLeft(g.date_to)! <= 7 &&
-                  "animate-pulse"
-              )}
-            >
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-start gap-2">
-                    <div className="mt-0.5 text-2xl">{meta.emoji}</div>
-                    <div>
-                      <CardTitle className="text-sm">
-                        {g.title || meta.label}
-                      </CardTitle>
-                      <CardDescription className="text-[11px]">
-                        {getGoalSummary(g)}
-                      </CardDescription>
+              return (
+                <Card
+                  key={g.id}
+                  className="flex h-full flex-col border bg-card/95 text-card-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+                >
+                  <CardHeader className="px-4 pb-2 pt-4">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start gap-2">
+                        <div className="mt-0.5 text-xl">{meta.emoji}</div>
+                        <div>
+                          <CardTitle className="text-sm">
+                            {g.title || meta.label}
+                          </CardTitle>
+                          <CardDescription className="text-[11px]">
+                            {meta.description}
+                          </CardDescription>
+                        </div>
+                      </div>
+                      {statusBadge(g.status)}
                     </div>
-                  </div>
-                  <div className="flex flex-col items-end gap-1">
-                    {statusBadge(g.status)}
-                    {g.is_primary ? (
-                      <Badge className="bg-primary text-primary-foreground">
-                        Главная
-                      </Badge>
-                    ) : null}
-                    <span className="text-[10px] font-medium text-muted-foreground">
-                      {daysLeftLabel(g.date_to)}
-                    </span>
-                  </div>
-                </div>
-              </CardHeader>
+                  </CardHeader>
 
-              <CardContent className="space-y-3 pb-4 text-xs">
-                <div className="flex flex-wrap gap-2">
-                  <MetaPill icon={<CalendarDays className="size-3.5" />}>
-                    {formatDateShort(g.date_from)} — {formatDateShort(g.date_to)}
-                  </MetaPill>
-                  <MetaPill icon={<Gauge className="size-3.5" />}>
-                    {getGoalHealthTone(g).label}
-                  </MetaPill>
-                </div>
-
-                {getGoalProgress(g).pct != null ? (
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-muted-foreground">
-                        {getGoalProgress(g).label}
-                      </span>
-                      <span className="font-medium">{getGoalProgress(g).pct}%</span>
+                  <CardContent className="space-y-3 px-4 pb-4 text-xs">
+                    <div className="flex flex-wrap gap-2">
+                      <MetaPill icon={<CalendarDays className="size-3.5" />}>
+                        {formatDateShort(g.date_from)} — {formatDateShort(g.date_to)}
+                      </MetaPill>
+                      <MetaPill icon={<Gauge className="size-3.5" />}>
+                        {getGoalHealthTone(g).label}
+                      </MetaPill>
                     </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-muted">
-                      <div
-                        className="h-full rounded-full bg-[rgb(27,46,201)] transition-all"
-                        style={{ width: `${getGoalProgress(g).pct}%` }}
-                      />
-                    </div>
-                  </div>
-                ) : null}
 
-                {primary && (
-                  <p className="text-foreground">
-                    <span className="font-medium">Формулировка:</span>{" "}
-                    {primary}
-                  </p>
-                )}
-                {secondary && (
-                  <p className="text-muted-foreground">
-                    <span className="font-medium text-xs">
-                      Доп. цели:&nbsp;
-                    </span>
-                    <span className="text-[11px]">{secondary}</span>
-                  </p>
-                )}
-                {profileLine && (
-                  <p className="text-[11px] text-muted-foreground">
-                    <span className="font-medium">Профиль:</span>{" "}
-                    {profileLine}
-                  </p>
-                )}
-                {!primary && !secondary && !profileLine && (
-                  <p className="text-[11px] text-muted-foreground">
-                    Детали цели можно будет уточнить позже.
-                  </p>
-                )}
-              </CardContent>
-
-              {!editMode ? (
-                <CardFooter className="mt-auto border-t bg-muted/10 px-4 py-3">
-                  <div className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground">
-                    Смотреть подробнее
-                    <ChevronRight className="size-3.5" />
-                  </div>
-                </CardFooter>
-              ) : null}
-
-              {editMode && (
-                <CardFooter className="mt-auto flex justify-between gap-2 border-t bg-muted/20 px-4 py-2">
-                  {g.status === "active" && !g.is_primary ? (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => void handleMakePrimary(g)}
-                    >
-                      Сделать главной
-                    </Button>
-                  ) : <div />}
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className={cn(
-                      "border-destructive/70 text-destructive hover:bg-destructive/10"
+                    {secondary && (
+                      <p className="line-clamp-2 text-[11px] text-muted-foreground">
+                        {secondary}
+                      </p>
                     )}
-                    disabled={deletingId === g.id || !!pendingDeleteGoal}
-                    onClick={() => setPendingDeleteGoal(g)}
-                  >
-                    {deletingId === g.id ? "Удаляем…" : "Удалить"}
-                  </Button>
-                </CardFooter>
-              )}
-            </Card>
-          );
+                    {primary && (
+                      <p className="text-[11px] text-muted-foreground">
+                        {primary}
+                      </p>
+                    )}
+                    {profileLine && (
+                      <p className="text-[11px] text-muted-foreground">
+                        <span className="font-medium">Профиль:</span> {profileLine}
+                      </p>
+                    )}
+                  </CardContent>
+
+                  {editMode ? (
+                    <CardFooter className="mt-auto flex justify-end border-t bg-muted/20 px-4 py-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive"
+                        disabled={deletingId === g.id || !!pendingDeleteGoal}
+                        onClick={() => setPendingDeleteGoal(g)}
+                      >
+                        Удалить
+                      </Button>
+                    </CardFooter>
+                  ) : null}
+                </Card>
+              );
             })}
           </div>
         </div>
