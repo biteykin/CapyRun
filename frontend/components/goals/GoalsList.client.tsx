@@ -1,31 +1,30 @@
-// components/goals/GoalsList.client.tsx
+// frontend/components/goals/GoalsList.client.tsx
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseBrowser";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-  CardFooter,
-} from "@/components/ui/card";
+import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import ConfirmActionDialog from "@/components/ui/confirm-action-dialog";
 import {
   CalendarDays,
-  ChevronRight,
   Flag,
-  Gauge,
+  Pencil,
   Plus,
-  Sparkles,
   Target,
   Timer,
   Trophy,
 } from "lucide-react";
+
+type GoalTarget = {
+  primary?: string;
+  secondary?: string;
+  race_name?: string;
+  target_time_s?: number;
+};
 
 type GoalRow = {
   id: string;
@@ -46,163 +45,93 @@ type GoalRow = {
   is_primary?: boolean | null;
 };
 
-type GoalTargetProfile = {
-  gender?: string;
-  age?: number;
-  height_cm?: number;
-  weight_kg?: number;
-};
-
-type GoalTarget = {
-  primary?: string;
-  secondary?: string;
-  race_name?: string;
-  target_time_s?: number;
-  profile?: GoalTargetProfile;
-};
-
 type GoalsListProps = {
   goals: GoalRow[];
   created?: boolean;
-  /** Нажатие на "Добавить цель" — страница сама решает, как открыть онбординг */
+  updated?: boolean;
   onAddGoal?: () => void;
 };
 
-const TYPE_META: Record<
-  string,
-  { emoji: string; label: string; description: string }
-> = {
-  "10k": {
-    emoji: "💨",
-    label: "Забег 10 км",
-    description: "Тренировки под десятку — скорость и устойчивость.",
-  },
-  HM: {
-    emoji: "🏁",
-    label: "Полумарафон",
-    description: "Подготовка к 21.1 км с контролем нагрузки.",
-  },
-  M: {
-    emoji: "🧱",
-    label: "Марафон",
-    description: "Долгосрочная цель, требующая системности.",
-  },
-  trail: {
-    emoji: "⛰️",
-    label: "Трейл",
-    description: "Набор высоты, техника и терпение.",
-  },
-  ride: {
-    emoji: "🚴‍♂️",
-    label: "Вело",
-    description: "Сила ног и выносливость для велосипеда.",
-  },
-  swim: {
-    emoji: "🏊‍♂️",
-    label: "Плавание",
-    description: "Техника, дыхание, работа на воде.",
-  },
-  strength: {
-    emoji: "🏋️‍♂️",
-    label: "Силовая подготовка",
-    description: "Мышцы, стабильность, защита от травм.",
-  },
-  weight: {
-    emoji: "⚖️",
-    label: "Снижение веса",
-    description: "Комфортное снижение веса и улучшение самочувствия.",
-  },
-  vo2max: {
-    emoji: "🫁",
-    label: "VO₂max / выносливость",
-    description: "Работа на повышение аэробной мощности.",
-  },
-  custom: {
-    emoji: "🎯",
-    label: "Индивидуальная цель",
-    description: "Пользовательская формулировка, завязанная под тебя.",
-  },
+const TYPE_META: Record<string, { emoji: string; label: string; description: string }> = {
+  "10k": { emoji: "💨", label: "Забег 10 км", description: "Скорость и устойчивость на десятке." },
+  HM: { emoji: "🏁", label: "Полумарафон", description: "21,1 км с контролем нагрузки." },
+  M: { emoji: "🧱", label: "Марафон", description: "Большая цель сезона." },
+  trail: { emoji: "⛰️", label: "Трейл", description: "Набор высоты, техника и терпение." },
+  ride: { emoji: "🚴‍♂️", label: "Вело", description: "Выносливость и сила ног." },
+  swim: { emoji: "🏊‍♂️", label: "Плавание", description: "Техника, дыхание и работа на воде." },
+  strength: { emoji: "🏋️‍♂️", label: "Силовая", description: "Мышцы, стабильность и профилактика травм." },
+  weight: { emoji: "⚖️", label: "Снижение веса", description: "Комфортное снижение веса." },
+  vo2max: { emoji: "🫁", label: "Выносливость", description: "Повышение аэробной мощности." },
+  custom: { emoji: "🎯", label: "Индивидуальная цель", description: "Цель своими словами." },
 };
 
-function formatDateRange(from: string, to: string): string {
-  const f = new Date(from);
-  const t = new Date(to);
-  if (Number.isNaN(f.getTime()) || Number.isNaN(t.getTime())) return "—";
-  const opts: Intl.DateTimeFormatOptions = {
-    day: "2-digit",
-    month: "2-digit",
-    year: "2-digit",
-  };
-  return `${f.toLocaleDateString("ru-RU", opts)} — ${t.toLocaleDateString(
-    "ru-RU",
-    opts
-  )}`;
-}
-
-function formatDateShort(value?: string | null): string {
+function formatDate(value?: string | null) {
   if (!value) return "—";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("ru-RU", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
+  return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
-function daysLeft(dateTo?: string | null): number | null {
+function daysLeft(dateTo?: string | null) {
   if (!dateTo) return null;
   const end = new Date(dateTo);
   if (Number.isNaN(end.getTime())) return null;
+
   const now = new Date();
-  const a = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const b = new Date(end.getFullYear(), end.getMonth(), end.getDate()).getTime();
-  return Math.round((b - a) / 86400000);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const target = new Date(end.getFullYear(), end.getMonth(), end.getDate()).getTime();
+
+  return Math.round((target - today) / 86400000);
 }
 
-function daysLeftLabel(dateTo?: string | null): string {
-  const diffDays = daysLeft(dateTo);
-  if (diffDays == null) return "Без даты";
-  if (diffDays < 0) return "Срок прошёл";
-  if (diffDays === 0) return "Сегодня";
-  if (diffDays === 1) return "1 день";
-  if (diffDays >= 2 && diffDays <= 4) return `${diffDays} дня`;
-  return `${diffDays} дней`;
+function daysLeftLabel(dateTo?: string | null) {
+  const d = daysLeft(dateTo);
+  if (d == null) return "Без даты";
+  if (d < 0) return "Срок прошёл";
+  if (d === 0) return "Сегодня";
+  if (d === 1) return "1 день";
+  if (d >= 2 && d <= 4) return `${d} дня`;
+  return `${d} дней`;
 }
 
-function formatSport(value?: string | null): string {
+function deadlineLabel(dateTo?: string | null) {
+  const d = daysLeft(dateTo);
+  if (d == null) return "Без даты";
+  if (d < 0) return "Завершена";
+  if (d === 0) return "Сегодня";
+  if (d <= 7) return "Финиш близко";
+  if (d <= 30) return "Фокус месяца";
+  return "В работе";
+}
+
+function deadlineBadgeClass(dateTo?: string | null) {
+  const d = daysLeft(dateTo);
+  if (d == null) return "border-border bg-muted/30 text-muted-foreground";
+  if (d < 0) return "border-border bg-muted/30 text-muted-foreground";
+  if (d <= 7) {
+    return "border-[rgba(41,73,246,0.22)] bg-[rgba(212,219,253,0.72)] text-[rgb(41,73,246)]";
+  }
+  if (d <= 30) {
+    return "border-[rgba(229,139,33,0.25)] bg-[rgba(255,246,232,0.85)] text-[rgb(229,139,33)]";
+  }
+  return "border-[rgba(27,46,201,0.20)] bg-[rgba(197,206,250,0.45)] text-[rgb(27,46,201)]";
+}
+
+function formatSport(value?: string | null) {
   const map: Record<string, string> = {
     run: "Бег",
     ride: "Вело",
     swim: "Плавание",
     walk: "Ходьба",
     hike: "Хайк",
-    row: "Гребля",
     strength: "Силовая",
-    yoga: "Йога",
-    aerobics: "Аэробика",
-    crossfit: "Кроссфит",
-    pilates: "Пилатес",
-    other: "Другая",
+    other: "Другое",
   };
-  if (!value) return "—";
-  return map[value] ?? value;
+  return value ? map[value] ?? value : "—";
 }
 
-function getGoalPriorityScore(goal: GoalRow): number {
-  const statusBoost =
-    goal.status === "active" ? 1000 :
-    goal.status === "draft" ? 200 :
-    goal.status === "paused" ? 100 :
-    0;
-
-  const dateBoost = goal.date_to ? -new Date(goal.date_to).getTime() / 1e11 : 0;
-  const raceBoost = ["10k", "HM", "M", "trail"].includes(goal.type) ? 100 : 0;
-
-  return statusBoost + raceBoost + dateBoost;
-}
-
-function formatTargetTime(totalSec: number): string {
+function formatTargetTime(totalSec?: number | null) {
+  if (!totalSec || totalSec <= 0) return null;
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
   const s = totalSec % 60;
@@ -210,134 +139,61 @@ function formatTargetTime(totalSec: number): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 }
 
-function getGoalSummary(goal: GoalRow): string {
-  const t = goal.target_json ?? {};
-  const days = daysLeft(goal.date_to);
+function getGoalSummary(goal: GoalRow) {
+  const target = goal.target_json ?? {};
+  const time = formatTargetTime(target.target_time_s);
 
-  if (t?.race_name) {
-    const targetTime =
-      typeof t.target_time_s === "number" && t.target_time_s > 0
-        ? formatTargetTime(t.target_time_s)
-        : null;
-    return targetTime
-      ? `${t.race_name} · цель ${targetTime}`
-      : String(t.race_name);
-  }
+  if (target.race_name && time) return `${target.race_name} · цель ${time}`;
+  if (target.race_name) return target.race_name;
+  if (target.secondary?.trim()) return target.secondary.trim();
+  if (goal.notes?.trim()) return goal.notes.trim();
 
-  if (days !== null && days <= 7) {
-    return "Финальный этап подготовки. Снижаем нагрузку и готовимся к цели.";
-  }
-
-  if (days !== null && days <= 30) {
-    return "Ключевой период подготовки. Важно держать стабильность.";
-  }
-
-  if (typeof t?.primary === "string" && t.primary.trim()) {
-    return t.primary.trim();
-  }
-
-  if (typeof t?.secondary === "string" && t.secondary.trim()) {
-    return t.secondary.trim();
-  }
-
-  if (typeof goal.notes === "string" && goal.notes.trim()) {
-    return goal.notes.trim();
-  }
-
-  return TYPE_META[goal.type]?.description ?? "Цель помогает держать фокус в тренировках";
+  return TYPE_META[goal.type]?.description ?? "Цель помогает держать фокус.";
 }
 
-function getGoalProgress(goal: GoalRow): { pct: number | null; label: string | null } {
+function getGoalProgress(goal: GoalRow) {
   const p = goal.progress_cache ?? {};
-  const candidates = [p.completion_pct, p.progress_pct, p.progress];
-  const raw = candidates.find((v) => typeof v === "number" && Number.isFinite(v));
-  const pct =
-    typeof raw === "number" ? Math.max(0, Math.min(100, Math.round(raw))) : null;
+  const raw = [p.completion_pct, p.progress_pct, p.progress].find(
+    (v) => typeof v === "number" && Number.isFinite(v)
+  );
 
-  if (pct != null) return { pct, label: `${pct}% выполнено` };
+  if (typeof raw === "number") {
+    const pct = Math.max(0, Math.min(100, Math.round(raw)));
+    return { pct, label: `${pct}% выполнено` };
+  }
 
-  // fallback: считаем прогресс по времени
   if (goal.date_from && goal.date_to) {
     const start = new Date(goal.date_from).getTime();
     const end = new Date(goal.date_to).getTime();
     const now = Date.now();
 
     if (!Number.isNaN(start) && !Number.isNaN(end) && end > start) {
-      const timePct = ((now - start) / (end - start)) * 100;
-      const clamped = Math.max(0, Math.min(100, timePct));
-      return {
-        pct: Math.round(clamped),
-        label: "Прогресс по плану",
-      };
+      const pct = Math.max(0, Math.min(100, Math.round(((now - start) / (end - start)) * 100)));
+      return { pct, label: "Прогресс по сроку" };
     }
   }
 
-  if (typeof p.fitness_score === "number" && Number.isFinite(p.fitness_score)) {
-    return {
-      pct: Math.max(0, Math.min(100, Math.round(p.fitness_score))),
-      label: `Форма ${Math.round(p.fitness_score)}/100`,
-    };
-  }
-
   return { pct: null, label: null };
-}
-
-function getGoalHealthTone(goal: GoalRow): { label: string; className: string } {
-  const d = daysLeft(goal.date_to);
-  if (goal.status !== "active") {
-    return {
-      label: "Не активна",
-      className: "border-border bg-muted/30 text-muted-foreground",
-    };
-  }
-  if (d == null) {
-    return {
-      label: "В работе",
-      className: "border-[rgba(27,46,201,0.18)] bg-[rgba(197,206,250,0.35)] text-[rgb(27,46,201)]",
-    };
-  }
-  if (d <= 7) {
-    return {
-      label: "Скоро цель",
-      className: "border-[rgba(230,0,18,0.18)] bg-[rgba(255,204,204,0.55)] text-[rgb(230,0,18)]",
-    };
-  }
-  if (d <= 30) {
-    return {
-      label: "Фокус месяца",
-      className: "border-[rgba(255,214,0,0.25)] bg-[rgba(255,245,176,0.75)] text-[rgb(201,168,0)]",
-    };
-  }
-  return {
-    label: "Идём по плану",
-    className: "border-[rgba(26,158,58,0.18)] bg-[rgba(197,237,208,0.65)] text-[rgb(26,158,58)]",
-  };
 }
 
 function statusBadge(status: string) {
   switch (status) {
     case "active":
       return (
-        <Badge
-          variant="outline"
-          className="border-emerald-500/70 bg-emerald-500/5 text-emerald-700"
-        >
+        <Badge variant="outline" className="border-[rgba(26,158,58,0.35)] bg-[rgba(197,237,208,0.55)] text-[rgb(26,158,58)]">
           Активна
         </Badge>
       );
-    case "draft":
-      return <Badge variant="secondary">Черновик</Badge>;
-    case "paused":
-      return <Badge variant="secondary">Пауза</Badge>;
     case "completed":
       return (
-        <Badge
-          variant="outline"
-          className="border-[color:var(--btn-primary-main,#E58B21)] bg-[color:var(--btn-primary-bg,#FFF6E8)] text-[color:var(--btn-primary-main,#E58B21)]"
-        >
+        <Badge variant="outline" className="border-[rgba(26,158,58,0.35)] bg-[rgba(197,237,208,0.55)] text-[rgb(26,158,58)]">
           Завершена
         </Badge>
       );
+    case "paused":
+      return <Badge variant="secondary">Пауза</Badge>;
+    case "draft":
+      return <Badge variant="secondary">Черновик</Badge>;
     case "canceled":
       return <Badge variant="outline">Отменена</Badge>;
     default:
@@ -345,50 +201,87 @@ function statusBadge(status: string) {
   }
 }
 
+function ProgressBar({ value }: { value: number }) {
+  const pct = Math.max(0, Math.min(100, value));
+
+  return (
+    <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+      <div
+        className={cn(
+          "h-full rounded-full transition-all",
+          pct >= 100 ? "bg-[rgb(26,158,58)]" : "bg-[rgb(27,46,201)]"
+        )}
+        style={{ width: `${pct}%` }}
+      />
+    </div>
+  );
+}
+
+function MetaPill({
+  icon,
+  children,
+}: {
+  icon?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="inline-flex items-center gap-1.5 rounded-full border bg-muted/20 px-2.5 py-1 text-[11px] font-medium text-foreground">
+      {icon}
+      <span>{children}</span>
+    </div>
+  );
+}
+
+function getPriorityScore(goal: GoalRow) {
+  const primary = goal.is_primary ? 10_000 : 0;
+  const active = goal.status === "active" ? 1_000 : 0;
+  const race = ["10k", "HM", "M", "trail"].includes(goal.type) ? 100 : 0;
+  const date = goal.date_to ? -new Date(goal.date_to).getTime() / 1e11 : 0;
+  return primary + active + race + date;
+}
+
 export default function GoalsList({
   goals,
   created = false,
+  updated = false,
   onAddGoal,
 }: GoalsListProps) {
+  const router = useRouter();
+
   const [items, setItems] = React.useState<GoalRow[]>(goals ?? []);
   const [editMode, setEditMode] = React.useState(false);
   const [deletingId, setDeletingId] = React.useState<string | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
   const [pendingDeleteGoal, setPendingDeleteGoal] = React.useState<GoalRow | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
 
-  // синхронизация при обновлении пропсов
   React.useEffect(() => {
     setItems(goals ?? []);
   }, [goals]);
-  const sorted = [...items].sort((a, b) => getGoalPriorityScore(b) - getGoalPriorityScore(a));
+
+  const sorted = React.useMemo(
+    () => [...items].sort((a, b) => getPriorityScore(b) - getPriorityScore(a)),
+    [items]
+  );
+
   const activeGoals = sorted.filter((g) => g.status === "active");
-  const primaryGoal = activeGoals[0] ?? sorted[0] ?? null;
+  const primaryGoal = sorted.find((g) => g.is_primary) ?? activeGoals[0] ?? sorted[0] ?? null;
   const otherGoals = sorted.filter((g) => g.id !== primaryGoal?.id);
   const nearestGoal =
-    [...activeGoals]
-      .filter((g) => g.date_to)
-      .sort((a, b) => new Date(a.date_to).getTime() - new Date(b.date_to).getTime())[0] ?? null;
+    [...activeGoals].sort((a, b) => new Date(a.date_to).getTime() - new Date(b.date_to).getTime())[0] ?? null;
 
   async function handleDelete(goalId?: string) {
-    if (!goalId) return;
-
-    if (deletingId) return;
+    if (!goalId || deletingId) return;
 
     setDeletingId(goalId);
     setError(null);
 
     try {
-      const { error } = await supabase
-        .from("goals")
-        .delete()
-        .eq("id", goalId);
+      const { error: deleteErr } = await supabase.from("goals").delete().eq("id", goalId);
+      if (deleteErr) throw deleteErr;
 
-      if (error) throw error;
-
-      // локально убираем цель из списка
       setItems((prev) => prev.filter((g) => g.id !== goalId));
       setPendingDeleteGoal(null);
-    } catch (e: unknown) {
+    } catch (e) {
       console.error("goal delete error", e);
       setError("Не удалось удалить цель. Попробуй ещё раз.");
     } finally {
@@ -400,31 +293,21 @@ export default function GoalsList({
     if (goal.is_primary) return;
 
     try {
-      const { data: userData } = await supabase.auth.getUser();
-      const userId = userData?.user?.id;
-      if (!userId) throw new Error("no user");
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-      await supabase
-        .from("goals")
-        .update({ is_primary: false })
-        .eq("user_id", userId)
-        .eq("is_primary", true);
+      if (!user) throw new Error("no user");
 
-      const { error } = await supabase
-        .from("goals")
-        .update({ is_primary: true })
-        .eq("id", goal.id);
+      await supabase.from("goals").update({ is_primary: false }).eq("user_id", user.id).eq("is_primary", true);
 
-      if (error) throw error;
+      const { error: updateErr } = await supabase.from("goals").update({ is_primary: true }).eq("id", goal.id);
+      if (updateErr) throw updateErr;
 
-      setItems((prev) =>
-        prev.map((g) => ({
-          ...g,
-          is_primary: g.id === goal.id,
-        }))
-      );
+      setItems((prev) => prev.map((g) => ({ ...g, is_primary: g.id === goal.id })));
     } catch (e) {
       console.error("make primary failed", e);
+      setError("Не удалось сделать цель главной.");
     }
   }
 
@@ -436,48 +319,34 @@ export default function GoalsList({
         </div>
       ) : null}
 
-      {items.length > 0 ? (
-        <Card className="overflow-hidden border bg-gradient-to-br from-[rgba(255,214,0,0.06)] via-background to-[rgba(27,46,201,0.035)]">
-          <CardContent className="px-4 py-3">
-            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="text-sm font-extrabold leading-tight">
-                    {activeGoals.length > 0
-                      ? `${activeGoals.length} активн${activeGoals.length === 1 ? "ая цель" : activeGoals.length < 5 ? "ые цели" : "ых целей"}`
-                      : "Поставьте первую цель"}
-                  </div>
-                  <span className="inline-flex items-center gap-1 rounded-full border bg-background/70 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                    <Sparkles className="size-3" />
-                    Сезон
-                  </span>
-                </div>
-                <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                  {nearestGoal
-                    ? `Ближайшая цель — ${nearestGoal.title || TYPE_META[nearestGoal.type]?.label || "цель"} · ${daysLeftLabel(nearestGoal.date_to)}`
-                    : "Цели помогают связать план, календарь и реальные тренировки в один сезон"}
-                </div>
-              </div>
+      {updated ? (
+        <div className="rounded-2xl border border-[rgba(27,46,201,0.22)] bg-[rgba(197,206,250,0.45)] px-4 py-3 text-sm font-medium text-[rgb(27,46,201)]">
+          Цель обновлена — изменения уже учитываются в плане и календаре
+        </div>
+      ) : null}
 
-              <div className="flex shrink-0 flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setEditMode((v) => !v)}
-                >
-                  {editMode ? "Готово" : "Редактировать"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="primary"
-                  size="sm"
-                  onClick={() => onAddGoal?.()}
-                >
-                  <Plus className="mr-1.5 size-4" />
-                  Добавить цель
-                </Button>
+      {items.length > 0 ? (
+        <Card className="overflow-hidden border bg-gradient-to-br from-[rgba(212,219,253,0.55)] via-card to-[rgba(209,193,228,0.28)] shadow-sm">
+          <CardContent className="flex flex-col gap-3 px-4 py-3 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0">
+              <div className="text-sm font-semibold">
+                {activeGoals.length} активн{activeGoals.length === 1 ? "ая цель" : activeGoals.length < 5 ? "ые цели" : "ых целей"}
               </div>
+              <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                {nearestGoal
+                  ? `Ближайшая — ${nearestGoal.title || TYPE_META[nearestGoal.type]?.label || "цель"} · ${daysLeftLabel(nearestGoal.date_to)}`
+                  : "Цели помогают связать план, календарь и тренировки"}
+              </div>
+            </div>
+
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <Button type="button" variant="secondary" size="sm" onClick={() => setEditMode((v) => !v)}>
+                {editMode ? "Готово" : "Редактировать"}
+              </Button>
+              <Button type="button" variant="primary" size="sm" onClick={() => onAddGoal?.()}>
+                <Plus className="mr-1.5 size-4" />
+                Добавить цель
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -493,12 +362,7 @@ export default function GoalsList({
             <div className="mt-2 max-w-md text-sm text-muted-foreground">
               Выберите спортивный фокус: просто начать, улучшить выносливость, подготовиться к забегу или описать свою цель.
             </div>
-            <Button
-              type="button"
-              variant="primary"
-              className="mt-5"
-              onClick={() => onAddGoal?.()}
-            >
+            <Button type="button" variant="primary" className="mt-5" onClick={() => onAddGoal?.()}>
               <Plus className="mr-2 size-4" />
               Создать цель
             </Button>
@@ -506,199 +370,40 @@ export default function GoalsList({
         </Card>
       ) : null}
 
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error ? <p className="text-xs text-red-600">{error}</p> : null}
 
-      {primaryGoal && (
-        <Card className="overflow-hidden border bg-card/95 shadow-sm">
-          <CardContent className="p-5">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div className="space-y-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="inline-flex items-center gap-2 rounded-full border bg-muted/30 px-3 py-1 text-xs font-semibold">
-                    <Trophy className="size-3.5" />
-                    Главный фокус
-                  </span>
-                  {statusBadge(primaryGoal.status)}
-                  <span
-                    className={cn(
-                      "inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium",
-                      getGoalHealthTone(primaryGoal).className
-                    )}
-                  >
-                    {getGoalHealthTone(primaryGoal).label}
-                  </span>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <div className="mt-0.5 text-3xl">
-                    {(TYPE_META[primaryGoal.type] ?? TYPE_META.custom).emoji}
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-xl font-bold leading-tight">
-                      {primaryGoal.title || (TYPE_META[primaryGoal.type] ?? TYPE_META.custom).label}
-                    </div>
-                    <div className="text-sm text-muted-foreground">
-                      {getGoalSummary(primaryGoal)}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <MetaPill icon={<CalendarDays className="size-3.5" />}>
-                    {formatDateRange(primaryGoal.date_from, primaryGoal.date_to)}
-                  </MetaPill>
-                  <MetaPill icon={<Timer className="size-3.5" />}>
-                    {daysLeftLabel(primaryGoal.date_to)}
-                  </MetaPill>
-                  <MetaPill icon={<Target className="size-3.5" />}>
-                    {(TYPE_META[primaryGoal.type] ?? TYPE_META.custom).label}
-                  </MetaPill>
-                  {primaryGoal.sport ? (
-                    <MetaPill icon={<Flag className="size-3.5" />}>
-                      {formatSport(primaryGoal.sport)}
-                    </MetaPill>
-                  ) : null}
-                </div>
-
-                {getGoalProgress(primaryGoal).pct != null ? (
-                  <div className="max-w-xl space-y-2 pt-1">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-medium text-foreground">
-                        {getGoalProgress(primaryGoal).label}
-                      </span>
-                      <span className="text-muted-foreground">
-                        {getGoalProgress(primaryGoal).pct}%
-                      </span>
-                    </div>
-                    <div className="h-2.5 overflow-hidden rounded-full bg-muted">
-                      <div
-                        className="h-full rounded-full bg-[rgb(27,46,201)] transition-all"
-                        style={{ width: `${getGoalProgress(primaryGoal).pct}%` }}
-                      />
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-
-              {editMode ? (
-                <div className="flex shrink-0 items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="border-destructive/70 text-destructive hover:bg-destructive/10"
-                    disabled={deletingId === primaryGoal.id || !!pendingDeleteGoal}
-                    onClick={() => setPendingDeleteGoal(primaryGoal)}
-                  >
-                    {deletingId === primaryGoal.id ? "Удаляем…" : "Удалить"}
-                  </Button>
-                </div>
-              ) : null}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {primaryGoal ? (
+        <GoalCard
+          goal={primaryGoal}
+          primary
+          editMode={editMode}
+          deleting={deletingId === primaryGoal.id}
+          onDelete={() => setPendingDeleteGoal(primaryGoal)}
+          onEdit={() => router.push(`/goals/onboarding?id=${primaryGoal.id}`)}
+          onMakePrimary={() => handleMakePrimary(primaryGoal)}
+        />
+      ) : null}
 
       {otherGoals.length > 0 ? (
         <div className="space-y-2">
           <div className="text-sm font-semibold">Остальные цели</div>
           <div
-            className="grid w-full gap-3"
-            style={{
-              gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-            }}
+            className={cn(
+              "grid gap-3",
+              otherGoals.length === 1 ? "grid-cols-1" : "md:grid-cols-2 xl:grid-cols-3"
+            )}
           >
-            {otherGoals.map((g) => {
-              const meta = TYPE_META[g.type] ?? TYPE_META["custom"];
-              const target = (g.target_json ?? {}) as GoalTarget;
-              const primary: string | null =
-                target.primary && typeof target.primary === "string"
-                  ? target.primary
-                  : null;
-              const secondary: string | null =
-                target.secondary && typeof target.secondary === "string"
-                  ? target.secondary
-                  : null;
-              const profile = target.profile ?? {};
-              const profileLineParts: string[] = [];
-              if (profile.gender === "male") profileLineParts.push("мужчина");
-              if (profile.gender === "female") profileLineParts.push("женщина");
-              if (profile.age) profileLineParts.push(`${profile.age} лет`);
-              if (profile.height_cm)
-                profileLineParts.push(`${profile.height_cm} см`);
-              if (profile.weight_kg)
-                profileLineParts.push(`${profile.weight_kg} кг`);
-              const profileLine =
-                profileLineParts.length > 0
-                  ? profileLineParts.join(", ")
-                  : null;
-
-              return (
-                <Card
-                  key={g.id}
-                  className="flex h-full flex-col border bg-card/95 text-card-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
-                >
-                  <CardHeader className="px-4 pb-2 pt-4">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-start gap-2">
-                        <div className="mt-0.5 text-xl">{meta.emoji}</div>
-                        <div>
-                          <CardTitle className="text-sm">
-                            {g.title || meta.label}
-                          </CardTitle>
-                          <CardDescription className="text-[11px]">
-                            {meta.description}
-                          </CardDescription>
-                        </div>
-                      </div>
-                      {statusBadge(g.status)}
-                    </div>
-                  </CardHeader>
-
-                  <CardContent className="space-y-3 px-4 pb-4 text-xs">
-                    <div className="flex flex-wrap gap-2">
-                      <MetaPill icon={<CalendarDays className="size-3.5" />}>
-                        {formatDateShort(g.date_from)} — {formatDateShort(g.date_to)}
-                      </MetaPill>
-                      <MetaPill icon={<Gauge className="size-3.5" />}>
-                        {getGoalHealthTone(g).label}
-                      </MetaPill>
-                    </div>
-
-                    {secondary && (
-                      <p className="line-clamp-2 text-[11px] text-muted-foreground">
-                        {secondary}
-                      </p>
-                    )}
-                    {primary && (
-                      <p className="text-[11px] text-muted-foreground">
-                        {primary}
-                      </p>
-                    )}
-                    {profileLine && (
-                      <p className="text-[11px] text-muted-foreground">
-                        <span className="font-medium">Профиль:</span> {profileLine}
-                      </p>
-                    )}
-                  </CardContent>
-
-                  {editMode ? (
-                    <CardFooter className="mt-auto flex justify-end border-t bg-muted/20 px-4 py-2">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="text-destructive"
-                        disabled={deletingId === g.id || !!pendingDeleteGoal}
-                        onClick={() => setPendingDeleteGoal(g)}
-                      >
-                        Удалить
-                      </Button>
-                    </CardFooter>
-                  ) : null}
-                </Card>
-              );
-            })}
+            {otherGoals.map((goal) => (
+              <GoalCard
+                key={goal.id}
+                goal={goal}
+                editMode={editMode}
+                deleting={deletingId === goal.id}
+                onDelete={() => setPendingDeleteGoal(goal)}
+                onEdit={() => router.push(`/goals/onboarding?id=${goal.id}`)}
+                onMakePrimary={() => handleMakePrimary(goal)}
+              />
+            ))}
           </div>
         </div>
       ) : null}
@@ -720,14 +425,120 @@ export default function GoalsList({
   );
 }
 
-function MetaPill(props: {
-  icon?: React.ReactNode;
-  children: React.ReactNode;
+function GoalCard({
+  goal,
+  primary = false,
+  editMode,
+  deleting,
+  onDelete,
+  onEdit,
+  onMakePrimary,
+}: {
+  goal: GoalRow;
+  primary?: boolean;
+  editMode: boolean;
+  deleting: boolean;
+  onDelete: () => void;
+  onEdit: () => void;
+  onMakePrimary: () => void;
 }) {
+  const meta = TYPE_META[goal.type] ?? TYPE_META.custom;
+  const progress = getGoalProgress(goal);
+  const summary = getGoalSummary(goal);
+
   return (
-    <div className="inline-flex items-center gap-1.5 rounded-full border bg-muted/20 px-2.5 py-1 text-[11px] font-medium text-foreground">
-      {props.icon}
-      <span>{props.children}</span>
-    </div>
+    <Card
+      className={cn(
+        "flex h-full flex-col border bg-card text-card-foreground shadow-sm transition-all",
+        !primary && "hover:-translate-y-0.5 hover:shadow-md",
+        primary && "overflow-hidden"
+      )}
+    >
+      <CardContent className={cn("flex-1 space-y-3", primary ? "p-4" : "px-4 py-3.5")}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-3">
+            <div
+              className={cn(
+                "flex shrink-0 items-center justify-center rounded-2xl bg-muted/30",
+                primary ? "size-12 text-2xl" : "size-9 text-lg"
+              )}
+            >
+              {meta.emoji}
+            </div>
+
+            <div className="min-w-0">
+              <div className={cn("truncate font-semibold leading-tight", primary ? "text-lg" : "text-sm")}>
+                {goal.title || meta.label}
+              </div>
+              <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{meta.label}</div>
+            </div>
+          </div>
+
+          <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+            {primary || goal.is_primary ? (
+              <Badge variant="outline" className="border-[rgba(27,46,201,0.25)] bg-[rgba(197,206,250,0.45)] text-[rgb(27,46,201)]">
+                Главная
+              </Badge>
+            ) : null}
+            {statusBadge(goal.status)}
+          </div>
+        </div>
+
+        {primary ? (
+          <div className="line-clamp-2 text-sm text-muted-foreground">{summary}</div>
+        ) : summary ? (
+          <div className="line-clamp-2 text-[11px] text-muted-foreground">{summary}</div>
+        ) : null}
+
+        <div className="flex flex-wrap gap-2">
+          <MetaPill icon={<CalendarDays className="size-3.5" />}>
+            {formatDate(goal.date_from)} — {formatDate(goal.date_to)}
+          </MetaPill>
+          <MetaPill icon={<Timer className="size-3.5" />}>{daysLeftLabel(goal.date_to)}</MetaPill>
+          <div
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium",
+              deadlineBadgeClass(goal.date_to)
+            )}
+          >
+            <Target className="size-3.5" />
+            <span>{deadlineLabel(goal.date_to)}</span>
+          </div>
+          {goal.sport ? <MetaPill icon={<Flag className="size-3.5" />}>{formatSport(goal.sport)}</MetaPill> : null}
+        </div>
+
+        {progress.pct != null ? (
+          <div className={cn("space-y-1.5", primary && "max-w-none")}>
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+              <span>{progress.label ?? "Прогресс"}</span>
+              <span>{progress.pct}%</span>
+            </div>
+            <ProgressBar value={progress.pct} />
+          </div>
+        ) : null}
+      </CardContent>
+
+      {editMode ? (
+        <CardFooter className="mt-auto flex flex-wrap justify-between gap-2 border-t bg-muted/10 px-4 py-3">
+          <div className="flex flex-wrap gap-2">
+            {!goal.is_primary ? (
+              <Button type="button" variant="secondary" size="sm" onClick={onMakePrimary}>
+                <Trophy className="mr-1.5 size-4" />
+                Сделать главной
+              </Button>
+            ) : null}
+
+            <Button type="button" variant="secondary" size="sm" onClick={onEdit}>
+              <Pencil className="mr-1.5 size-4" />
+              Редактировать
+            </Button>
+          </div>
+
+          <Button type="button" variant="danger" size="sm" disabled={deleting} onClick={onDelete}>
+            {deleting ? "Удаляем…" : "Удалить"}
+          </Button>
+        </CardFooter>
+      ) : null}
+    </Card>
   );
 }

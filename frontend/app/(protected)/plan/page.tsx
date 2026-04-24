@@ -55,6 +55,16 @@ type WorkoutRow = {
   duration_sec: number | null;
 };
 
+type GoalRow = {
+  id: string;
+  title: string | null;
+  type: string | null;
+  sport: string | null;
+  date_to: string | null;
+  status: string | null;
+  target_json: any;
+};
+
 function buildWorkoutTitle(w: WorkoutRow): string {
   if (w.name) return w.name;
 
@@ -126,6 +136,7 @@ export default async function PlansPage() {
       "id, user_plan_id, user_id, planned_date, sport, status, title, notes, structure, link_workout_id"
     )
     .eq("user_id", user.id)
+    .neq("status", "canceled")
     .gte("planned_date", fromISO)
     .lte("planned_date", toISO);
 
@@ -166,8 +177,47 @@ export default async function PlansPage() {
 
   const activeGoal: ActiveGoal = (activeGoalRaw as any) ?? null;
 
+  const { data: goalsRaw, error: goalsErr } = await supabase
+    .from("goals")
+    .select("id, title, type, sport, date_to, status, target_json")
+    .eq("user_id", user.id)
+    .eq("status", "active")
+    .not("date_to", "is", null)
+    .gte("date_to", fromISO)
+    .lte("date_to", toISO);
+
+  if (goalsErr) {
+    console.error("goals calendar fetch error", goalsErr);
+  }
+
+  const goals: GoalRow[] = (goalsRaw ?? []) as any;
+
+  const raceGoalTypes = new Set(["5k", "10k", "HM", "M"]);
+
   // Нормализованный список событий для календаря
   const events = [
+    ...goals.map((g) => {
+      const isRace =
+        raceGoalTypes.has(String(g.type)) ||
+        raceGoalTypes.has(String(g.target_json?.distance_type ?? ""));
+
+      return {
+        id: `goal-${g.id}`,
+        date: g.date_to as string,
+        title: g.title || "Цель",
+        kind: "goal" as const,
+        status: "goal" as const,
+        sport: g.sport,
+        source: "goal" as const,
+        goal_id: g.id,
+        goal_type: g.type,
+        goal_icon: isRace ? "🏆" : "🎯",
+        description: isRace
+          ? "Финал беговой цели"
+          : "Дата завершения цели",
+        target_json: g.target_json ?? null,
+      };
+    }),
     // Плановые сессии
     ...planSessions.map((s) => ({
       id: s.id,
@@ -220,7 +270,6 @@ export default async function PlansPage() {
 
   return (
     <main className="w-full space-y-5">
-      <h1 className="text-2xl font-extrabold">План тренировок</h1>
       <PlansCalendarHost
         events={events}
         initialMonthISO={initialMonthISO}

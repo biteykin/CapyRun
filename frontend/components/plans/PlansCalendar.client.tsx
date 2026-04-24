@@ -12,7 +12,7 @@ export type PlanEvent = {
   title: string;
   colorHex?: string;      // цвет рамки / заливки
   description?: string | null;
-  kind?: "planned" | "workout";
+  kind?: "planned" | "workout" | "goal";
   status?: string | null;
   sport?: string | null;
   duration_sec?: number | null;
@@ -68,21 +68,45 @@ function addMonths(d: Date, delta: number) {
   return new Date(d.getFullYear(), d.getMonth() + delta, 1);
 }
 function getDaysGrid(viewDate: Date): Date[] {
-  // сетка 6x7 начиная с понедельника
+  // сетка начиная с понедельника.
+  // Не рисуем верхнюю/нижнюю неделю, если она полностью относится
+  // к соседнему месяцу.
   const first = startOfMonth(viewDate);
   const weekday = (first.getDay() + 6) % 7; // 0..6, где 0=Пн
   const gridStart = new Date(first);
   gridStart.setDate(first.getDate() - weekday);
+
+  const last = endOfMonth(viewDate);
+  const daysCount = weekday + last.getDate();
+  const weeksCount = Math.ceil(daysCount / 7);
+  const totalCells = weeksCount * 7;
+
   const days: Date[] = [];
-  for (let i = 0; i < 42; i++) {
+  for (let i = 0; i < totalCells; i++) {
     const d = new Date(gridStart);
     d.setDate(gridStart.getDate() + i);
     days.push(d);
   }
+
+  const month = viewDate.getMonth();
+  const firstWeek = days.slice(0, 7);
+  if (firstWeek.length === 7 && firstWeek.every((d) => d.getMonth() !== month)) {
+    days.splice(0, 7);
+  }
+
+  const lastWeek = days.slice(-7);
+  if (lastWeek.length === 7 && lastWeek.every((d) => d.getMonth() !== month)) {
+    days.splice(-7, 7);
+  }
+
   return days;
 }
 
 function getEventMetaLine(e: PlanEvent): string | null {
+  if (e.kind === "goal") {
+    return e.description ?? "Цель";
+  }
+
   if (e.kind === "workout") {
     if (e.distance_m && e.distance_m > 0) return `${(e.distance_m / 1000).toFixed(1)} км`;
     if (e.duration_sec && e.duration_sec > 0) return `${Math.round(e.duration_sec / 60)} мин`;
@@ -124,7 +148,9 @@ export default function PlansCalendar({
   }, [events]);
 
   const days = React.useMemo(() => getDaysGrid(month), [month]);
-  const monthLabel = RU.format(month);
+  let monthLabel = RU.format(month);
+  // убираем "г." в конце (например "апрель 2026 г." → "апрель 2026")
+  monthLabel = monthLabel.replace(/\s?г\.?$/, "");
 
   return (
     <div
@@ -164,11 +190,7 @@ export default function PlansCalendar({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 border-b bg-background px-4 py-3">
-        <LegendPill label="Запланировано" color="#0C5BF9" />
-        <LegendPill label="Выполнено" color="#2D7601" />
-        <LegendPill label="Пропущено" color="#F6B021" />
-      </div>
+      {/* legend removed */}
 
       {/* Week header */}
       <div className="grid grid-cols-7 gap-px border-b bg-muted/20 px-2 py-2 text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -198,8 +220,10 @@ export default function PlansCalendar({
           return (
             <div
               key={k}
+              onClick={() => onDayClick?.(k)}
               className={cn(
                 "min-h-[132px] p-2 transition-colors",
+                onDayClick && "cursor-pointer",
                 isGoalDay
                   ? "border border-yellow bg-yellow/20"
                   : "bg-background",
@@ -213,9 +237,7 @@ export default function PlansCalendar({
             >
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => onDayClick?.(k)}
+                  <span
                     className={cn(
                       "inline-flex h-7 min-w-7 items-center justify-center rounded-lg px-2 text-xs font-semibold leading-none transition-colors",
                       isToday
@@ -228,7 +250,7 @@ export default function PlansCalendar({
                     title={k}
                   >
                     {d.getDate()}
-                  </button>
+                  </span>
                   {isRaceGoal ? (
                     <Trophy className="h-3.5 w-3.5 text-yellow-500" />
                   ) : null}
@@ -244,7 +266,11 @@ export default function PlansCalendar({
                 {dayEvents.slice(0, 3).map((e) => {
                   const style: React.CSSProperties = {};
 
-                  if (e.isCompleted && e.colorHex) {
+                  if (e.kind === "goal") {
+                    style.backgroundColor = "rgba(255, 214, 0, 0.18)";
+                    style.borderColor = "rgba(229, 139, 33, 0.45)";
+                    style.color = "inherit";
+                  } else if (e.isCompleted && e.colorHex) {
                     // Выполненная: заливка + белый текст
                     style.backgroundColor = e.colorHex;
                     style.borderColor = e.colorHex;
@@ -258,7 +284,10 @@ export default function PlansCalendar({
                     <button
                       key={e.id}
                       type="button"
-                      onClick={() => onEventClick?.(e)}
+                      onClick={(ev) => {
+                        ev.stopPropagation();
+                        onEventClick?.(e);
+                      }}
                       className={cn(
                         "block w-full rounded-lg border px-2.5 py-2 text-left text-xs shadow-[0_1px_0_rgba(0,0,0,0.02)] transition-colors",
                         !e.isCompleted && "hover:bg-muted/60",
@@ -267,7 +296,9 @@ export default function PlansCalendar({
                       style={style}
                       title={e.title}
                     >
-                      <div className="truncate font-medium leading-tight">{e.title}</div>
+                      <div className="truncate font-medium leading-tight">
+                        {e.kind === "goal" ? `${e.goal_icon ?? "🎯"} ${e.title}` : e.title}
+                      </div>
                       {getEventMetaLine(e) ? (
                         <div
                           className={cn(
@@ -292,19 +323,6 @@ export default function PlansCalendar({
           );
         })}
       </div>
-    </div>
-  );
-}
-
-function LegendPill({ label, color }: { label: string; color: string }) {
-  return (
-    <div className="inline-flex items-center gap-2 rounded-full border bg-muted/20 px-2.5 py-1 text-xs font-medium text-foreground">
-      <span
-        className="h-2.5 w-2.5 rounded-full"
-        style={{ backgroundColor: color }}
-        aria-hidden
-      />
-      <span>{label}</span>
     </div>
   );
 }

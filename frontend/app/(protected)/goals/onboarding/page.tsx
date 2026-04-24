@@ -8,7 +8,11 @@ import { differenceInYears } from "date-fns";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export default async function GoalsOnboardingPage() {
+export default async function GoalsOnboardingPage({
+  searchParams,
+}: {
+  searchParams?: Record<string, string | string[] | undefined>;
+}) {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -46,10 +50,29 @@ export default async function GoalsOnboardingPage() {
     weight_kg: prof?.weight_kg != null ? Number(prof.weight_kg) : null,
   };
 
+  const goalId =
+    typeof searchParams?.id === "string" ? searchParams.id : null;
+
+  const { data: editGoal, error: editGoalErr } = goalId
+    ? await supabase
+        .from("goals")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("id", goalId)
+        .maybeSingle()
+    : { data: null, error: null };
+
+  if (editGoalErr) {
+    console.error("goal edit fetch error", editGoalErr);
+  }
+
   return (
     <main className="w-full space-y-6">
       <section className="w-full">
-        <GoalsOnboardingFlow initialProfile={initialProfile} />
+        <GoalsOnboardingFlow
+          initialProfile={initialProfile}
+          editGoal={editGoal ?? null}
+        />
       </section>
     </main>
   );

@@ -44,6 +44,7 @@ export default async function GoalsPage({
         <GoalsListWithAdd
           goals={goals ?? []}
           created={searchParams?.created === "1"}
+          updated={searchParams?.updated === "1"}
         />
       </section>
     </main>

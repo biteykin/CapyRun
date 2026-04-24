@@ -1,16 +1,19 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import {
+  Activity,
+  CalendarDays,
+  Check,
+  CheckCircle2,
+  ChevronsUpDown,
   Dumbbell,
   Flag,
   Gauge,
-  CalendarDays,
   Route,
-  Timer,
-  Activity,
   Sparkles,
-  CheckCircle2,
+  Timer,
 } from "lucide-react";
 import PlansCalendar, { type PlanEvent } from "./PlansCalendar.client";
 import { cn } from "@/lib/utils";
@@ -29,6 +32,28 @@ import {
 } from "@/components/ui/dialog";
 import * as RD from "@radix-ui/react-dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import ConfirmActionDialog from "@/components/ui/confirm-action-dialog";
 
 type ActiveGoal = {
@@ -46,7 +71,7 @@ export type PlansCalendarHostProps = {
 };
 
 type ExtendedEvent = PlanEvent & {
-  kind?: "planned" | "workout";
+  kind?: "planned" | "workout" | "goal";
   isCompleted?: boolean;
   structure?: {
     goal?: string | null;
@@ -65,11 +90,26 @@ type ExtendedEvent = PlanEvent & {
   } | null;
 };
 
+type PlannedHrZoneChip = {
+  value?: string;
+  label?: string;
+  range?: string | null;
+  color?: string | null;
+};
+
 // Цвета из Colors (Storybook):
 // bg-success, bg-yellow, data-color-11
 const COLOR_COMPLETED = "#2D7601"; // выполнена
 const COLOR_MISSED = "#F6B021";    // пропущена
 const COLOR_PLANNED = "#0C5BF9";   // запланирована (data-color-11)
+
+const HR_ZONE_OPTIONS = [
+  { value: "Z1", label: "Z1 · восстановление" },
+  { value: "Z2", label: "Z2 · лёгкая аэробная" },
+  { value: "Z3", label: "Z3 · умеренная" },
+  { value: "Z4", label: "Z4 · пороговая" },
+  { value: "Z5", label: "Z5 · максимальная" },
+];
 
 function formatDateRu(isoDate: string) {
   const d = new Date(isoDate);
@@ -118,16 +158,6 @@ function formatStep(step: any): string {
   if (step.target) parts.push(String(step.target));
 
   return parts.join(" · ") || "—";
-}
-
-function DetailRow(props: { label: string; value?: React.ReactNode }) {
-  const { label, value } = props;
-  return (
-    <div>
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div>{value ?? "—"}</div>
-    </div>
-  );
 }
 
 function SportBadge({ sport }: { sport?: string | null }) {
@@ -414,6 +444,8 @@ export default function PlansCalendarHost({
   initialMonthISO,
   activeGoal = null,
 }: PlansCalendarHostProps) {
+  const router = useRouter();
+
   const initialMonth = React.useMemo(
     () => new Date(initialMonthISO),
     [initialMonthISO]
@@ -423,6 +455,18 @@ export default function PlansCalendarHost({
   const [calendarEventsState, setCalendarEventsState] = React.useState<PlanEvent[]>(events);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
+  const [createOpen, setCreateOpen] = React.useState(false);
+  const [createDate, setCreateDate] = React.useState<string>("");
+  const [createTitle, setCreateTitle] = React.useState("");
+  const [createSport, setCreateSport] = React.useState("run");
+  const [createDurationMin, setCreateDurationMin] = React.useState("");
+  const [createDistanceKm, setCreateDistanceKm] = React.useState("");
+  const [createEffort, setCreateEffort] = React.useState("");
+  const [createHrZones, setCreateHrZones] = React.useState<string[]>([]);
+  const [hrZonesOpen, setHrZonesOpen] = React.useState(false);
+  const [createNotes, setCreateNotes] = React.useState("");
+  const [isCreating, setIsCreating] = React.useState(false);
+  const [createError, setCreateError] = React.useState<string | null>(null);
 
   // Маппим статусы в цвета и флаг isCompleted
   const calendarEvents = React.useMemo<PlanEvent[]>(() => {
@@ -480,6 +524,7 @@ export default function PlansCalendarHost({
     const onKeyDown = (e: KeyboardEvent) => {
       // не мешаем подтверждению удаления
       if (confirmDeleteOpen) return;
+      if (createOpen) return;
 
       if (e.key === "ArrowLeft" && prevEvent) {
         e.preventDefault();
@@ -494,7 +539,7 @@ export default function PlansCalendarHost({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selected, prevEvent, nextEvent, confirmDeleteOpen]);
+  }, [selected, prevEvent, nextEvent, confirmDeleteOpen, createOpen]);
 
   React.useEffect(() => {
     setCalendarEventsState(events);
@@ -503,6 +548,167 @@ export default function PlansCalendarHost({
   const handleEventClick = (evt: PlanEvent) => {
     setSelected(evt as ExtendedEvent);
   };
+
+  const handleDayClick = (isoDate: string) => {
+    setCreateDate(isoDate);
+    setCreateTitle("");
+    setCreateSport("run");
+    setCreateDurationMin("");
+    setCreateDistanceKm("");
+    setCreateEffort("");
+    setCreateHrZones([]);
+    setCreateNotes("");
+    setCreateError(null);
+    setCreateOpen(true);
+  };
+
+  // 👉 теперь кликаем по ЛЮБОЙ части дня (даже если есть карточки)
+  // это важно: прокидываем хендлер вниз и используем stopPropagation в карточках
+
+  const handleCreatePlannedWorkout = React.useCallback(async () => {
+    if (isCreating) return;
+
+    const title = createTitle.trim();
+    const durationMin = createDurationMin.trim() ? Number(createDurationMin) : null;
+    const distanceVisible = createSport !== "strength" && createSport !== "other";
+    const distanceKm =
+      distanceVisible && createDistanceKm.trim() ? Number(createDistanceKm) : null;
+
+    if (!createDate) {
+      setCreateError("Не выбрана дата.");
+      return;
+    }
+
+    if (!title) {
+      setCreateError("Укажите название тренировки.");
+      return;
+    }
+
+    if (!createSport) {
+      setCreateError("Выберите тип тренировки.");
+      return;
+    }
+
+    if (
+      durationMin != null &&
+      (!Number.isFinite(durationMin) || durationMin <= 0)
+    ) {
+      setCreateError("Длительность должна быть больше 0.");
+      return;
+    }
+
+    if (distanceKm != null && (!Number.isFinite(distanceKm) || distanceKm <= 0)) {
+      setCreateError("Некорректная дистанция.");
+      return;
+    }
+
+    try {
+      setIsCreating(true);
+      setCreateError(null);
+
+      const {
+        data: { user },
+        error: userErr,
+      } = await supabase.auth.getUser();
+
+      if (userErr) throw userErr;
+      if (!user) throw new Error("Пользователь не авторизован.");
+
+      const structure = {
+        source: "manual",
+        goal: title,
+        main: createNotes.trim() || null,
+        notes: createNotes.trim() || null,
+        effort: createEffort.trim() || null,
+        hr_target: createHrZones.length ? createHrZones.join(", ") : null,
+        hr_zones: createHrZones,
+        duration_min: durationMin,
+        distance_km: distanceKm,
+      };
+
+      const { data, error } = await supabase
+        .from("user_plan_sessions")
+        .insert({
+          user_id: user.id,
+          user_plan_id: null, // 👈 FIX: убираем NOT NULL проблему
+          planned_date: createDate,
+          sport: createSport as any,
+          status: "planned",
+          title,
+          notes: createNotes.trim() || null,
+          structure,
+          updated_at: new Date().toISOString(),
+        } as any)
+        .select("id, user_plan_id, planned_date, sport, status, title, notes, structure, link_workout_id")
+        .single();
+
+      if (error) {
+        console.error(
+          "create planned workout failed",
+          JSON.stringify(error, null, 2)
+        );
+        if (error.message?.includes("user_plan_id")) {
+          throw new Error("Не удалось создать тренировку. План ещё не инициализирован.");
+        }
+        throw new Error("Ошибка сохранения тренировки. Попробуйте ещё раз.");
+      }
+
+      const createdEvent: PlanEvent = {
+        id: data.id,
+        date: data.planned_date,
+        title: data.title || title,
+        kind: "planned",
+        status: data.status,
+        sport: createSport,
+        description: data.structure?.notes ?? data.notes ?? data.structure?.main ?? null,
+        user_plan_id: data.user_plan_id,
+        link_workout_id: data.link_workout_id,
+        structure: data.structure ?? null,
+        notes: data.notes ?? data.structure?.notes ?? null,
+        goal: data.structure?.goal ?? null,
+        main: data.structure?.main ?? null,
+        effort: data.structure?.effort ?? null,
+        hr_target: createHrZones.length ? createHrZones.join(", ") : null,
+        planned_distance_km: data.structure?.distance_km ?? null,
+        planned_duration_min: data.structure?.duration_min ?? null,
+        planned_date: data.planned_date,
+        source: "manual",
+      };
+
+      setCalendarEventsState((prev) => [...prev, createdEvent]);
+      setCreateOpen(false);
+    } catch (e: any) {
+      console.error("create planned workout failed", e);
+      setCreateError(e?.message ?? "Не удалось создать плановую тренировку.");
+    } finally {
+      setIsCreating(false);
+    }
+  }, [
+    createDate,
+    createDistanceKm,
+    createDurationMin,
+    createEffort,
+    createHrZones,
+    createNotes,
+    createSport,
+    createTitle,
+    isCreating,
+  ]);
+
+  const isDistanceVisible =
+    createSport !== "strength" && createSport !== "other";
+
+  const isCreateValid =
+    !!createDate &&
+    !!createSport &&
+    createTitle.trim().length > 0 &&
+    (createDurationMin === "" || Number(createDurationMin) > 0);
+
+  function toggleHrZone(zone: string) {
+    setCreateHrZones((prev) =>
+      prev.includes(zone) ? prev.filter((z) => z !== zone) : [...prev, zone]
+    );
+  }
 
   const dateStr = selected ? formatDateRu(selected.date) : "—";
   const description = (selected?.description as string | null | undefined) ?? null;
@@ -513,6 +719,25 @@ export default function PlansCalendarHost({
   const plannedMain = structure?.main ?? (selected as any)?.main ?? null;
   const plannedEffort = structure?.effort ?? (selected as any)?.effort ?? null;
   const plannedHrTarget = structure?.hr_target ?? (selected as any)?.hr_target ?? null;
+  const plannedHrZones: PlannedHrZoneChip[] = (() => {
+    const raw = (structure as any)?.hr_zones;
+    if (!Array.isArray(raw) || raw.length === 0) return [];
+    return raw.map((z: unknown, i: number) => {
+      if (typeof z === "string") {
+        return { value: z, label: z };
+      }
+      if (z && typeof z === "object") {
+        const o = z as PlannedHrZoneChip;
+        return {
+          value: o.value,
+          label: o.label,
+          range: o.range,
+          color: o.color,
+        };
+      }
+      return { value: String(z ?? i) };
+    });
+  })();
   const plannedStrengthBlock =
     structure?.strength_block ?? (selected as any)?.strength_block ?? null;
   const plannedNotes = structure?.notes ?? (selected as any)?.notes ?? null;
@@ -526,6 +751,8 @@ export default function PlansCalendarHost({
     (selected as any)?.planned_duration_min ?? structure?.duration_min ?? null
   );
   const isPlanned = selected?.kind === "planned";
+  const isGoal = selected?.kind === "goal";
+  const isWorkout = selected?.kind === "workout";
 
   const purposeLabel = getTrainingPurposeLabel(selected);
   const executionTips = getExecutionTips(selected);
@@ -536,13 +763,22 @@ export default function PlansCalendarHost({
     try {
       setIsDeleting(true);
 
-      const { error } = await supabase
-        .from("user_plan_sessions")
-        .update({
-          status: "canceled",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", selected.id);
+      const isManualPlannedWorkout =
+        selected.source === "manual" ||
+        selected.structure?.source === "manual" ||
+        !selected.user_plan_id;
+
+      const result = isManualPlannedWorkout
+        ? await supabase.from("user_plan_sessions").delete().eq("id", selected.id)
+        : await supabase
+            .from("user_plan_sessions")
+            .update({
+              status: "canceled",
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", selected.id);
+
+      const { error } = result;
 
       if (error) {
         console.error("plan_session_cancel_failed", error);
@@ -565,6 +801,7 @@ export default function PlansCalendarHost({
         events={calendarEvents}
         initialMonth={initialMonth}
         onEventClick={handleEventClick}
+        onDayClick={handleDayClick}
       />
 
       <Dialog
@@ -637,6 +874,7 @@ export default function PlansCalendarHost({
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
             <div className="space-y-4 text-sm">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {!isGoal ? (
                 <Card className="gap-4 bg-muted/20 py-4 sm:col-span-2">
                   <CardContent className="flex flex-wrap items-start justify-between gap-3 px-4">
                     <div className="space-y-3">
@@ -700,9 +938,50 @@ export default function PlansCalendarHost({
                     </div>
                   </CardContent>
                 </Card>
+                ) : null}
               </div>
 
-              {isPlanned ? (
+              {isGoal ? (
+                <Card className="gap-4 bg-[rgba(255,214,0,0.12)] py-5">
+                  <CardContent className="space-y-4 px-5">
+                    <div className="flex items-start gap-4">
+                      <div className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-background/70 text-3xl">
+                        {(selected as any)?.goal_icon ?? "🎯"}
+                      </div>
+                      <div className="min-w-0 space-y-1">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Цель в календаре
+                        </div>
+                        <div className="text-xl font-bold leading-tight">
+                          {selected?.title || "Цель"}
+                        </div>
+                        <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                          <CalendarDays className="h-4 w-4" />
+                          <span>{dateStr}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border bg-background/65 p-4 text-sm text-muted-foreground">
+                      {selected?.description || "Дата завершения цели."}
+                    </div>
+
+                    {/* CTA */}
+                    <div className="flex justify-end pt-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => {
+                          setSelected(null);
+                          router.push("/goals");
+                        }}
+                      >
+                        Перейти к целям
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ) : isPlanned ? (
                 <>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                     <Card className="gap-4 py-4">
@@ -713,9 +992,29 @@ export default function PlansCalendarHost({
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="px-4">
-                        <div className="text-sm font-medium">
-                          {plannedHrTarget || "без ориентира по пульсу"}
-                        </div>
+                        {plannedHrZones.length > 0 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {plannedHrZones.map((zone, idx) => (
+                              <span
+                                key={zone.value ?? zone.label ?? String(idx)}
+                                className="inline-flex items-center gap-1.5 rounded-full border bg-muted/20 px-2.5 py-1 text-xs font-medium"
+                              >
+                                <span
+                                  className="h-2.5 w-2.5 rounded-full"
+                                  style={{ backgroundColor: zone.color ?? "#1B2EC9" }}
+                                />
+                                <span>{zone.value ?? zone.label}</span>
+                                {zone.range ? (
+                                  <span className="text-muted-foreground">{zone.range}</span>
+                                ) : null}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-sm font-medium">
+                            {plannedHrTarget || "без ориентира по пульсу"}
+                          </div>
+                        )}
                       </CardContent>
                     </Card>
 
@@ -910,9 +1209,44 @@ export default function PlansCalendarHost({
                 </>
               ) : (
                 <>
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <DetailRow label="Дистанция" value={distanceStr} />
-                    <DetailRow label="Время" value={durationStr} />
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <Card className="gap-4 py-4">
+                      <CardHeader className="px-4 pb-0">
+                        <CardTitle className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                          <Route className="h-4 w-4" />
+                          Дистанция
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-4">
+                        <div className="text-sm font-medium">{distanceStr}</div>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="gap-4 py-4">
+                      <CardHeader className="px-4 pb-0">
+                        <CardTitle className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                          <Timer className="h-4 w-4" />
+                          Время
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-4">
+                        <div className="text-sm font-medium">{durationStr}</div>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="gap-4 py-4">
+                      <CardHeader className="px-4 pb-0">
+                        <CardTitle className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                          <Activity className="h-4 w-4" />
+                          Тип
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-4">
+                        <div className="text-sm font-medium">
+                          <SportBadge sport={sport} />
+                        </div>
+                      </CardContent>
+                    </Card>
                   </div>
 
                   <Card className="gap-4 py-4">
@@ -923,31 +1257,27 @@ export default function PlansCalendarHost({
                       <div className="text-sm text-muted-foreground">{description || "—"}</div>
                     </CardContent>
                   </Card>
-
-                  {checklistItems.length > 0 ? (
-                    <Card className="gap-4 py-4">
-                      <CardHeader className="px-4 pb-0">
-                        <CardTitle className="text-sm font-semibold">Чеклист перед тренировкой</CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-2 px-4">
-                        {checklistItems.map((item, idx) => (
-                          <div
-                            key={`${selected?.id}-check-${idx}`}
-                            className="flex items-start gap-2 text-sm"
-                          >
-                            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[rgb(45,118,1)]" />
-                            <span className="text-muted-foreground">{item}</span>
-                          </div>
-                        ))}
-                      </CardContent>
-                    </Card>
-                  ) : null}
                 </>
               )}
             </div>
           </div>
 
           <div className="shrink-0 flex flex-row justify-end gap-2 border-t px-6 py-4">
+            {isWorkout && selected?.link_workout_id ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  const workoutId = selected.link_workout_id;
+                  setSelected(null);
+                  setConfirmDeleteOpen(false);
+                  window.location.href = `/workouts/${workoutId}`;
+                }}
+              >
+                Перейти
+              </Button>
+            ) : null}
+
             {isPlanned ? (
               <Button
                 type="button"
@@ -986,6 +1316,180 @@ export default function PlansCalendarHost({
         onConfirm={doDelete}
         contentClassName="max-w-md"
       />
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogPortal>
+          <DialogOverlay className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" />
+          <RD.Content
+            className={cn(
+              "fixed left-1/2 top-1/2 z-50 flex w-[min(760px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden",
+              "rounded-[var(--radius-lg,var(--radius))] border border-border bg-background p-0 text-foreground shadow-strong",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            )}
+          >
+            <div className="border-b px-6 py-5">
+              <DialogTitle>Создать плановую тренировку</DialogTitle>
+              <div className="mt-1 text-sm text-muted-foreground">
+                Добавьте тренировку в план на {formatDateRu(createDate)}.
+              </div>
+            </div>
+
+            <div className="space-y-5 px-6 py-5">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="planned-title">Название</Label>
+                  <Input
+                    id="planned-title"
+                    value={createTitle}
+                    onChange={(e) => setCreateTitle(e.target.value)}
+                    placeholder="Например: Лёгкий бег 40 минут"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Вид тренировки</Label>
+                  <Select value={createSport} onValueChange={setCreateSport}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Выберите спорт" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="run">Бег</SelectItem>
+                      <SelectItem value="ride">Вело</SelectItem>
+                      <SelectItem value="swim">Плавание</SelectItem>
+                      <SelectItem value="strength">ОФП / силовая</SelectItem>
+                      <SelectItem value="walk">Ходьба</SelectItem>
+                      <SelectItem value="other">Другое</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="planned-effort">Интенсивность</Label>
+                  <Input
+                    id="planned-effort"
+                    value={createEffort}
+                    onChange={(e) => setCreateEffort(e.target.value)}
+                    placeholder="Легко / умеренно / тяжело"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="planned-duration">Длительность, мин</Label>
+                  <Input
+                    id="planned-duration"
+                    type="number"
+                    inputMode="numeric"
+                    value={createDurationMin}
+                    onChange={(e) => setCreateDurationMin(e.target.value)}
+                    placeholder="40"
+                  />
+                </div>
+
+                {isDistanceVisible ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="planned-distance">Дистанция, км</Label>
+                    <Input
+                      id="planned-distance"
+                      type="number"
+                      inputMode="decimal"
+                      value={createDistanceKm}
+                      onChange={(e) => setCreateDistanceKm(e.target.value)}
+                      placeholder="6.0"
+                    />
+                  </div>
+                ) : null}
+
+                <div className="space-y-2 sm:col-span-2">
+                  <Label>Пульсовые зоны</Label>
+                  <Popover open={hrZonesOpen} onOpenChange={setHrZonesOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        role="combobox"
+                        className="w-full justify-between"
+                      >
+                        <span className="truncate">
+                          {createHrZones.length
+                            ? createHrZones.join(", ")
+                            : "Выберите одну или несколько зон"}
+                        </span>
+                        <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                      <Command>
+                        <CommandList>
+                          <CommandEmpty>Зоны не найдены</CommandEmpty>
+                          <CommandGroup>
+                            {HR_ZONE_OPTIONS.map((zone) => {
+                              const zoneSelected = createHrZones.includes(zone.value);
+                              return (
+                                <CommandItem
+                                  key={zone.value}
+                                  value={zone.label}
+                                  onSelect={() => toggleHrZone(zone.value)}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 size-4",
+                                      zoneSelected ? "opacity-100" : "opacity-0"
+                                    )}
+                                  />
+                                  {zone.label}
+                                </CommandItem>
+                              );
+                            })}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                  <div className="text-xs text-muted-foreground">
+                    Можно выбрать несколько зон, например Z2 и Z3
+                  </div>
+                </div>
+
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="planned-notes">План и заметки</Label>
+                  <Textarea
+                    id="planned-notes"
+                    value={createNotes}
+                    onChange={(e) => setCreateNotes(e.target.value)}
+                    rows={4}
+                    placeholder="Например: 10 минут разминки, затем ровный лёгкий бег. После — заминка и растяжка."
+                  />
+                </div>
+              </div>
+
+              {createError ? (
+                <div className="rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                  {createError}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex justify-end gap-2 border-t px-6 py-4">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={isCreating}
+                onClick={() => setCreateOpen(false)}
+              >
+                Отменить
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                disabled={isCreating || !isCreateValid}
+                onClick={() => void handleCreatePlannedWorkout()}
+              >
+                {isCreating ? "Сохраняем…" : "Сохранить"}
+              </Button>
+            </div>
+          </RD.Content>
+        </DialogPortal>
+      </Dialog>
     </>
   );
 }

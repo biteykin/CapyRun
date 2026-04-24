@@ -42,17 +42,27 @@ export type GoalsOnboardingFlowProps = {
     height_cm?: number | null;
     weight_kg?: number | null;
   };
+  editGoal?: {
+    id: string;
+    title: string | null;
+    type: string | null;
+    sport: string | null;
+    date_to: string | null;
+    date_from?: string | null;
+    target_json: any;
+    notes?: string | null;
+  } | null;
 };
 
 type PresetId =
-  | "start"
-  | "regular"
   | "weight"
   | "vo2max"
   | "race-5k"
   | "race-10k"
   | "race-hm"
-  | "race-marathon";
+  | "race-marathon"
+  | "start"
+  | "custom";
 
 type Step = 1 | 2;
 
@@ -69,16 +79,16 @@ const PRESETS: {
     description: "Хочу сдвинуться с мёртвой точки и понять, с чего начать.",
   },
   {
-    id: "regular",
-    title: "Регулярные тренировки",
-    emoji: "📆",
-    description: "Хочу стабильно заниматься 3–4 раза в неделю и не бросать.",
-  },
-  {
     id: "vo2max",
     title: "Улучшить выносливость",
     emoji: "🫁",
     description: "Хочу легче держать темп, меньше уставать и увереннее переносить нагрузку.",
+  },
+  {
+    id: "weight",
+    title: "Снижение веса",
+    emoji: "⚖️",
+    description: "Минус лишние килограммы без жёстких диет и перегрузок.",
   },
   {
     id: "race-5k",
@@ -105,10 +115,10 @@ const PRESETS: {
     description: "Большая цель — марафон. Готов работать системно.",
   },
   {
-    id: "weight",
-    title: "Снижение веса",
-    emoji: "⚖️",
-    description: "Минус лишние килограммы без жёстких диет и перегрузок.",
+    id: "custom",
+    title: "Своя цель",
+    emoji: "🎯",
+    description: "Опишите цель своими словами — если она не подходит под готовые варианты.",
   },
 ];
 
@@ -117,6 +127,7 @@ function resolveGoalType(presets: PresetId[]): string {
   if (presets.includes("race-hm")) return "HM";
   if (presets.includes("race-marathon")) return "M";
   if (presets.includes("weight")) return "weight";
+  if (presets.includes("vo2max")) return "vo2max";
   return "custom";
 }
 
@@ -127,7 +138,7 @@ function resolveSport(presets: PresetId[]): string | null {
     presets.includes("race-hm") ||
     presets.includes("race-marathon") ||
     presets.includes("start") ||
-    presets.includes("regular")
+    presets.includes("vo2max")
   ) {
     return "run";
   }
@@ -138,30 +149,101 @@ export default function GoalsOnboardingFlow({
   mode = "initial",
   onFinished,
   initialProfile,
+  editGoal = null,
 }: GoalsOnboardingFlowProps) {
   const router = useRouter();
   const [step, setStep] = React.useState<Step>(1);
 
-  const [selectedPreset, setSelectedPreset] = React.useState<PresetId | null>(
-    null
+  const isEditMode = !!editGoal?.id;
+
+  function presetFromGoal(goal: GoalsOnboardingFlowProps["editGoal"]): PresetId | null {
+    if (!goal) return null;
+    const presets = Array.isArray(goal.target_json?.presets)
+      ? goal.target_json.presets
+      : [];
+    if (presets[0]) return presets[0] as PresetId;
+    if (goal.type === "10k") return "race-10k";
+    if (goal.type === "HM") return "race-hm";
+    if (goal.type === "M") return "race-marathon";
+    if (goal.type === "weight") return "weight";
+    if (goal.type === "vo2max") return "vo2max";
+    return "custom";
+  }
+
+  function formatHhMmSsFromSeconds(totalSec?: number | null) {
+    if (!totalSec || totalSec <= 0) return "";
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+
+  function formatMmSsFromSeconds(totalSec?: number | null) {
+    if (!totalSec || totalSec <= 0) return "";
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+
+  const [selectedPreset, setSelectedPreset] = React.useState<PresetId | null>(() =>
+    presetFromGoal(editGoal)
   );
-  const [goalTitle, setGoalTitle] = React.useState("");
-  const [goalDate, setGoalDate] = React.useState("");
-  const [targetFinishTime, setTargetFinishTime] = React.useState("");
-  const [targetPace, setTargetPace] = React.useState("");
-  const [secondaryGoals, setSecondaryGoals] = React.useState("");
+  const [goalTitle, setGoalTitle] = React.useState(() => {
+    const fromTitle = editGoal?.title;
+    const fromPrimary = editGoal?.target_json?.primary;
+    const raw =
+      (typeof fromTitle === "string" && fromTitle.trim()) ||
+      (typeof fromPrimary === "string" && fromPrimary.trim()) ||
+      "";
+    return raw;
+  });
+  const [goalDate, setGoalDate] = React.useState(
+    editGoal?.date_to ? editGoal.date_to.slice(0, 10) : ""
+  );
+  const [targetFinishTime, setTargetFinishTime] = React.useState(() =>
+    formatHhMmSsFromSeconds(editGoal?.target_json?.target_time_s ?? null)
+  );
+  const [targetPace, setTargetPace] = React.useState(() =>
+    formatMmSsFromSeconds(editGoal?.target_json?.pace_s_per_km ?? null)
+  );
+  const [secondaryGoals, setSecondaryGoals] = React.useState(
+    editGoal?.target_json?.secondary ?? editGoal?.notes ?? ""
+  );
+
+  const goalProfile = editGoal?.target_json?.profile as
+    | {
+        gender?: string | null;
+        age?: number | null;
+        height_cm?: number | null;
+        weight_kg?: number | null;
+      }
+    | undefined;
 
   const [gender, setGender] = React.useState<"male" | "female" | "">(
-    (initialProfile?.sex as "male" | "female" | null) ?? ""
+    (goalProfile?.gender as "male" | "female" | undefined) ??
+      (initialProfile?.sex as "male" | "female" | null) ??
+      ""
   );
   const [age, setAge] = React.useState<string>(
-    initialProfile?.age != null ? String(initialProfile.age) : ""
+    goalProfile?.age != null
+      ? String(goalProfile.age)
+      : initialProfile?.age != null
+        ? String(initialProfile.age)
+        : ""
   );
   const [heightCm, setHeightCm] = React.useState<string>(
-    initialProfile?.height_cm != null ? String(initialProfile.height_cm) : ""
+    goalProfile?.height_cm != null
+      ? String(goalProfile.height_cm)
+      : initialProfile?.height_cm != null
+        ? String(initialProfile.height_cm)
+        : ""
   );
   const [weightKg, setWeightKg] = React.useState<string>(
-    initialProfile?.weight_kg != null ? String(initialProfile.weight_kg) : ""
+    goalProfile?.weight_kg != null
+      ? String(goalProfile.weight_kg)
+      : initialProfile?.weight_kg != null
+        ? String(initialProfile.weight_kg)
+        : ""
   );
 
   const [isSaving, setIsSaving] = React.useState(false);
@@ -421,7 +503,9 @@ export default function GoalsOnboardingFlow({
   const targetTimeSec = parseHhMmSsToSeconds(targetFinishTime);
   const targetPaceSecPerKm = parseMmSsToSeconds(targetPace);
 
-  const canGoNextFromStep1 = !!selectedPreset;
+  const canGoNextFromStep1 =
+    !!selectedPreset &&
+    (selectedPreset !== "custom" || goalTitle.trim().length >= 3);
 
   const canSaveFromStep2 =
     canGoNextFromStep1 &&
@@ -449,7 +533,10 @@ export default function GoalsOnboardingFlow({
       }
 
       const today = new Date();
-      const fromStr = today.toISOString().slice(0, 10);
+      const fromStr =
+        isEditMode && editGoal?.date_from
+          ? editGoal.date_from.slice(0, 10)
+          : today.toISOString().slice(0, 10);
       const toStr = goalDate;
 
       const selectedPresets = selectedPreset ? [selectedPreset] : [];
@@ -495,7 +582,7 @@ export default function GoalsOnboardingFlow({
         },
       };
 
-      const { error: insertErr } = await supabase.from("goals").insert({
+      const goalPayload = {
         user_id: user.id,
         title,
         type: goalType,
@@ -504,12 +591,23 @@ export default function GoalsOnboardingFlow({
         date_to: toStr,
         status: "active", // из enum plan_status
         target_json: targetJson,
-      });
+        notes: secondaryGoals.trim() || null,
+        updated_at: new Date().toISOString(),
+      };
 
-      if (insertErr) throw insertErr;
+      const { error: saveGoalErr } =
+        isEditMode && editGoal
+          ? await supabase
+              .from("goals")
+              .update(goalPayload)
+              .eq("id", editGoal.id)
+              .eq("user_id", user.id)
+          : await supabase.from("goals").insert(goalPayload);
+
+      if (saveGoalErr) throw saveGoalErr;
 
       onFinished?.();
-      router.push("/goals?created=1");
+      router.push(isEditMode ? "/goals?updated=1" : "/goals?created=1");
       router.refresh();
     } catch (e: any) {
       console.error("goals onboarding save error", e);
@@ -529,10 +627,16 @@ export default function GoalsOnboardingFlow({
       <div className="space-y-6">
         <div className="space-y-1">
           <CardTitle>
-            {isInitial ? "Какая цель сейчас главная?" : "Выберите новую цель"}
+            {isEditMode
+              ? "Редактируем цель"
+              : isInitial
+                ? "Какая цель сейчас главная?"
+                : "Выберите новую цель"}
           </CardTitle>
           <CardDescription>
-            Выберите один сценарий. На его основе тренер будет строить план и расставлять акценты.
+            {isEditMode
+              ? "Можно изменить сценарий цели, дату, параметры и детали подготовки."
+              : "Выберите один сценарий. На его основе тренер будет строить план и расставлять акценты."}
           </CardDescription>
         </div>
 
@@ -575,6 +679,22 @@ export default function GoalsOnboardingFlow({
             );
           })}
         </div>
+
+        {selectedPreset === "custom" ? (
+          <div className="space-y-2 rounded-2xl border bg-muted/10 p-4">
+            <Label htmlFor="customGoalTitle">Опишите свою цель</Label>
+            <Textarea
+              id="customGoalTitle"
+              value={goalTitle}
+              onChange={(e) => setGoalTitle(e.target.value)}
+              rows={3}
+              placeholder="Например: «Хочу спокойно бегать по утрам 3 раза в неделю» или «Хочу подготовиться к паделу и улучшить общую форму»"
+            />
+            <div className="text-xs text-muted-foreground">
+              Напишите свободно: что хотите улучшить, к какому сроку и почему это важно
+            </div>
+          </div>
+        ) : null}
 
         <div className="flex justify-between gap-2 pt-2">
           <Button

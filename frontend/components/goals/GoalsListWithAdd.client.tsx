@@ -19,15 +19,21 @@ type GoalRow = {
 type Props = {
   goals: GoalRow[];
   created?: boolean;
+  updated?: boolean;
 };
 
-export default function GoalsListWithAdd({ goals, created = false }: Props) {
+export default function GoalsListWithAdd({
+  goals,
+  created = false,
+  updated = false,
+}: Props) {
   const router = useRouter();
 
   return (
     <GoalsList
       goals={goals}
       created={created}
+      updated={updated}
       onAddGoal={() => router.push("/goals/onboarding")}
       onEditGoals={() => router.push("/goals/manage")} // пока заглушка
     />
