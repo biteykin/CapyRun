@@ -161,6 +161,29 @@ export default async function PlansPage() {
   }
 
   const workouts: WorkoutRow[] = (workoutsRaw ?? []) as any;
+  const workoutDates = new Set(
+    workouts.map((w) => w.local_date).filter(Boolean) as string[]
+  );
+
+  const todayISO = new Date().toISOString().slice(0, 10);
+
+  function resolvePlanSessionStatus(s: PlanSessionRow): string | null {
+    const status = s.status ?? "planned";
+
+    if (status === "planned" && workoutDates.has(s.planned_date)) {
+      return "completed";
+    }
+
+    if (
+      status === "planned" &&
+      s.planned_date < todayISO &&
+      !workoutDates.has(s.planned_date)
+    ) {
+      return "missed";
+    }
+
+    return status;
+  }
 
   const { data: activeGoalRaw, error: goalErr } = await supabase
     .from("goals")
@@ -224,7 +247,7 @@ export default async function PlansPage() {
       date: s.planned_date, // "YYYY-MM-DD"
       title: s.title || "Плановая тренировка",
       kind: "planned" as const,
-      status: s.status,
+      status: resolvePlanSessionStatus(s),
       sport: s.sport,
       description: formatPlannedDescription(s),
       user_plan_id: s.user_plan_id,

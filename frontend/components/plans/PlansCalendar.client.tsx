@@ -232,16 +232,18 @@ export default function PlansCalendar({
                   (isGoalDay
                     ? "opacity-70"
                     : "bg-muted/40 text-muted-foreground"),
-                isWeekend && inMonth && "bg-muted/[0.06]"
+                isWeekend && inMonth && "bg-muted/[0.06]",
+                isToday &&
+                  "bg-[color:var(--btn-primary-bg,#FFF6E8)] ring-1 ring-inset ring-[color:var(--btn-primary-main,#E58B21)]"
               )}
             >
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5">
                   <span
                     className={cn(
-                      "inline-flex h-7 min-w-7 items-center justify-center rounded-lg px-2 text-xs font-semibold leading-none transition-colors",
+                      "inline-flex h-6 w-6 items-center justify-center rounded-md text-xs font-medium leading-6 transition-colors",
                       isToday
-                        ? "bg-primary text-primary-foreground shadow-sm"
+                        ? "bg-[color:var(--btn-primary-bg,#FFF6E8)] text-[color:var(--btn-primary-main,#E58B21)] border border-[color:var(--btn-primary-main,#E58B21)]"
                         : inMonth
                         ? "text-foreground hover:bg-muted"
                         : "text-muted-foreground hover:bg-muted"
@@ -270,6 +272,16 @@ export default function PlansCalendar({
                     style.backgroundColor = "rgba(255, 214, 0, 0.18)";
                     style.borderColor = "rgba(229, 139, 33, 0.45)";
                     style.color = "inherit";
+                  } else if (e.kind === "planned" && e.status === "completed") {
+                    style.backgroundImage =
+                      "repeating-linear-gradient(135deg, rgba(27,46,201,0.22) 0, rgba(27,46,201,0.22) 6px, rgba(27,46,201,0.08) 6px, rgba(27,46,201,0.08) 12px)";
+                    style.borderColor = "rgba(27,46,201,0.65)";
+                    style.color = "var(--foreground)";
+                  } else if (e.status === "missed") {
+                    style.backgroundImage =
+                      "repeating-linear-gradient(135deg, rgba(246,176,33,0.22) 0, rgba(246,176,33,0.22) 6px, rgba(246,176,33,0.08) 6px, rgba(246,176,33,0.08) 12px)";
+                    style.borderColor = "rgba(246,176,33,0.65)";
+                    style.color = "var(--foreground)";
                   } else if (e.isCompleted && e.colorHex) {
                     // Выполненная: заливка + белый текст
                     style.backgroundColor = e.colorHex;
@@ -302,8 +314,13 @@ export default function PlansCalendar({
                       {getEventMetaLine(e) ? (
                         <div
                           className={cn(
-                            "mt-1 truncate text-[10px] opacity-80",
-                            e.isCompleted ? "text-white/90" : "text-muted-foreground"
+                            "mt-0.5 truncate text-[10px] opacity-80",
+                            (e.kind === "planned" &&
+                              (e.status === "completed" || e.status === "missed"))
+                              ? "text-foreground"
+                              : e.isCompleted
+                                ? "text-white/90"
+                                : "text-muted-foreground"
                           )}
                         >
                           {getEventMetaLine(e)}
