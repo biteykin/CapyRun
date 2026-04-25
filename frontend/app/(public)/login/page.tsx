@@ -148,6 +148,9 @@ export default function LoginPage() {
         const { data, error: signErr } = await supabase.auth.signUp({
           email,
           password,
+          options: {
+            emailRedirectTo: `${window.location.origin}/api/auth/confirm`,
+          },
         });
 
         if (!signErr && data?.session) {
@@ -178,7 +181,9 @@ export default function LoginPage() {
           return;
         }
 
-        setSuccess("Аккаунт создан. Сейчас перенаправим вас в сервис.");
+        setSuccess(
+          "Мы отправили письмо для подтверждения регистрации. Проверьте почту и перейдите по ссылке."
+        );
       }
     } catch (err: any) {
       setError(mapAuthError(err));
