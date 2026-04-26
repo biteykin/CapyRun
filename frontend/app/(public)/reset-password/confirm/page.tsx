@@ -20,9 +20,13 @@ export default function ResetPasswordConfirmPage() {
   const router = useRouter();
   const params = useSearchParams();
 
+  const tokenHash = params.get("token_hash");
+  const type = (params.get("type") ?? "recovery") as "recovery";
+
   const [password, setPassword] = useState("");
   const [password2, setPassword2] = useState("");
   const [showPass, setShowPass] = useState(false);
+  const [showPass2, setShowPass2] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -59,6 +63,17 @@ export default function ResetPasswordConfirmPage() {
     setLoading(true);
 
     try {
+      if (!tokenHash) {
+        throw new Error("Ссылка для восстановления пароля недействительна.");
+      }
+
+      const { error: verifyErr } = await supabase.auth.verifyOtp({
+        token_hash: tokenHash,
+        type,
+      });
+
+      if (verifyErr) throw verifyErr;
+
       const { error } = await supabase.auth.updateUser({
         password,
       });
@@ -71,7 +86,14 @@ export default function ResetPasswordConfirmPage() {
         router.replace("/home");
       }, 1500);
     } catch (err: any) {
-      setError("Не удалось обновить пароль. Попробуйте ещё раз.");
+      console.error("reset password failed", err);
+      setError(
+        String(err?.message ?? "")
+          .toLowerCase()
+          .includes("expired")
+          ? "Ссылка для восстановления пароля устарела. Запросите новое письмо."
+          : "Не удалось обновить пароль. Попробуйте запросить новое письмо для восстановления."
+      );
     } finally {
       setLoading(false);
     }
@@ -136,11 +158,23 @@ export default function ResetPasswordConfirmPage() {
                 <div className="relative">
                   <input
                     className="input pr-10"
-                    type={showPass ? "text" : "password"}
+                    type={showPass2 ? "text" : "password"}
                     value={password2}
                     onChange={(e) => setPassword2(e.target.value)}
                     required
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPass2((s) => !s)}
+                    className="absolute inset-y-0 right-2 my-auto inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted"
+                    aria-label={showPass2 ? "Скрыть пароль" : "Показать пароль"}
+                  >
+                    {showPass2 ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </button>
                 </div>
               </label>
 
