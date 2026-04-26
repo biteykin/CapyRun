@@ -303,7 +303,7 @@ export default function LoginPage() {
               <div className="text-center text-sm">
                 <button
                   type="button"
-                  onClick={handleResetPassword}
+                  onClick={() => router.push("/reset-password")}
                   className="underline text-[var(--text-secondary)]"
                 >
                   Забыли пароль?
