@@ -1,3 +1,5 @@
+//frontend/app/(public)/login/page.tsx
+
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -193,6 +195,31 @@ export default function LoginPage() {
     }
   }
 
+  async function handleResetPassword() {
+    if (!email) {
+      setError("Введите email");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+
+      if (error) throw error;
+
+      setSuccess("Мы отправили письмо для восстановления пароля");
+    } catch (err: any) {
+      setError(mapAuthError(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="mx-auto grid min-h-[70dvh] max-w-md place-items-center px-4">
       <Card className="w-full">
@@ -271,6 +298,18 @@ export default function LoginPage() {
                 ? "Войти"
                 : "Зарегистрироваться"}
             </button>
+
+            {mode === "login" && (
+              <div className="text-center text-sm">
+                <button
+                  type="button"
+                  onClick={handleResetPassword}
+                  className="underline text-[var(--text-secondary)]"
+                >
+                  Забыли пароль?
+                </button>
+              </div>
+            )}
           </form>
         </CardContent>
 
