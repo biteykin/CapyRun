@@ -49,6 +49,7 @@ type GoalsListProps = {
   goals: GoalRow[];
   created?: boolean;
   updated?: boolean;
+  goalCompleted?: boolean;
   onAddGoal?: () => void;
 };
 
@@ -244,6 +245,7 @@ export default function GoalsList({
   goals,
   created = false,
   updated = false,
+  goalCompleted = false,
   onAddGoal,
 }: GoalsListProps) {
   const router = useRouter();
@@ -255,6 +257,45 @@ export default function GoalsList({
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
+    if (!goalCompleted) return;
+
+    import("canvas-confetti")
+      .then((confetti) => {
+        confetti.default({
+          particleCount: 140,
+          spread: 85,
+          origin: { y: 0.6 },
+        });
+      })
+      .catch(() => {});
+  }, [goalCompleted]);
+
+  React.useEffect(() => {
+    const justCompleted = items.some(
+      (g) =>
+        g.status === "completed" &&
+        g.progress_cache?.completion_pct === 100 &&
+        !localStorage.getItem(`goal_confetti_${g.id}`)
+    );
+
+    if (!justCompleted) return;
+
+    import("canvas-confetti").then((confetti) => {
+      confetti.default({
+        particleCount: 120,
+        spread: 80,
+        origin: { y: 0.6 },
+      });
+    });
+
+    items.forEach((g) => {
+      if (g.status === "completed") {
+        localStorage.setItem(`goal_confetti_${g.id}`, "1");
+      }
+    });
+  }, [items]);
+
+  React.useEffect(() => {
     setItems(goals ?? []);
   }, [goals]);
 
@@ -264,8 +305,9 @@ export default function GoalsList({
   );
 
   const activeGoals = sorted.filter((g) => g.status === "active");
+  const completedGoals = sorted.filter((g) => g.status === "completed");
   const primaryGoal = sorted.find((g) => g.is_primary) ?? activeGoals[0] ?? sorted[0] ?? null;
-  const otherGoals = sorted.filter((g) => g.id !== primaryGoal?.id);
+  const otherGoals = activeGoals.filter((g) => g.id !== primaryGoal?.id);
   const nearestGoal =
     [...activeGoals].sort((a, b) => new Date(a.date_to).getTime() - new Date(b.date_to).getTime())[0] ?? null;
 
@@ -408,6 +450,27 @@ export default function GoalsList({
         </div>
       ) : null}
 
+      {completedGoals.length > 0 ? (
+        <div className="space-y-2 pt-4">
+          <div className="text-sm font-semibold text-muted-foreground">
+            Выполненные цели
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {completedGoals.map((goal) => (
+              <GoalCard
+                key={goal.id}
+                goal={goal}
+                editMode={editMode}
+                deleting={deletingId === goal.id}
+                onDelete={() => setPendingDeleteGoal(goal)}
+                onEdit={() => router.push(`/goals/onboarding?id=${goal.id}`)}
+                onMakePrimary={() => handleMakePrimary(goal)}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       <ConfirmActionDialog
         open={!!pendingDeleteGoal}
         onOpenChange={(open) => {
@@ -450,6 +513,8 @@ function GoalCard({
     <Card
       className={cn(
         "flex h-full flex-col border bg-card text-card-foreground shadow-sm transition-all",
+        goal.status === "completed" &&
+          "bg-gradient-to-br from-[rgba(197,237,208,0.6)] via-white to-[rgba(255,246,232,0.6)] border-[rgba(26,158,58,0.35)]",
         !primary && "hover:-translate-y-0.5 hover:shadow-md",
         primary && "overflow-hidden"
       )}
@@ -521,17 +586,19 @@ function GoalCard({
       {editMode ? (
         <CardFooter className="mt-auto flex flex-wrap justify-between gap-2 border-t bg-muted/10 px-4 py-3">
           <div className="flex flex-wrap gap-2">
-            {!goal.is_primary ? (
+            {goal.status !== "completed" && !goal.is_primary && !primary ? (
               <Button type="button" variant="secondary" size="sm" onClick={onMakePrimary}>
                 <Trophy className="mr-1.5 size-4" />
                 Сделать главной
               </Button>
             ) : null}
 
-            <Button type="button" variant="secondary" size="sm" onClick={onEdit}>
-              <Pencil className="mr-1.5 size-4" />
-              Редактировать
-            </Button>
+            {goal.status !== "completed" ? (
+              <Button type="button" variant="secondary" size="sm" onClick={onEdit}>
+                <Pencil className="mr-1.5 size-4" />
+                Редактировать
+              </Button>
+            ) : null}
           </div>
 
           <Button type="button" variant="danger" size="sm" disabled={deleting} onClick={onDelete}>

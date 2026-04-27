@@ -1,3 +1,5 @@
+//frontend/app/api/coach/send/route.ts
+
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import util from "node:util";
@@ -17,7 +19,6 @@ import type { PlannerOut, StructuredPlan } from "@/lib/coach/types";
 import {
   buildFallbackCoachText,
   pickRecentHistory,
-  buildLocalWorkoutAnalysis,
 } from "@/lib/coach/utils";
 
 import { getDialogState } from "@/lib/coach/dialogState";
@@ -207,14 +208,10 @@ function buildDegradedCoachReply(params: {
   }
 
   if (/последн.*трениров|разбер|анализ/.test(t) && hasWorkout) {
-    const local = buildLocalWorkoutAnalysis(workouts?.[0]);
-    if (local) {
-      return (
-        (normalizedErrorText?.trim() || "Сейчас у нас временная ошибка при генерации ответа тренера.") +
-        "\n\n" +
-        local
-      );
-    }
+    return (
+      (normalizedErrorText?.trim() || "Сейчас у нас временная ошибка при генерации ответа тренера.") +
+      "\n\nЯ вижу тренировку в данных, но сейчас не смог собрать полноценный разбор. Попробуем ещё раз через несколько секунд."
+    );
   }
 
   if (/сколько|километ|объем|дистанц/.test(t)) {
@@ -335,7 +332,7 @@ async function getActiveWorkoutInsight(params: {
     .maybeSingle();
 
   if (error) return null;
-  return (data ?? null) as WorkoutInsightRow | null;
+  return (data ?? null) as unknown as WorkoutInsightRow | null;
 }
 
 async function preloadInsightsForWorkouts(params: {
@@ -671,8 +668,10 @@ async function createWorkoutInsightViaLLM(params: {
     .eq("id", workoutId)
     .maybeSingle();
 
+  const workoutRow = workout as unknown as Record<string, any>;
+
   if (wErr || !workout) throw new Error(`Failed to load workout: ${wErr?.message ?? "not found"}`);
-  if (String(workout.user_id) !== String(userId)) {
+  if (String(workoutRow.user_id) !== String(userId)) {
     throw new Error("Forbidden (workout not owned by user)");
   }
 
@@ -697,8 +696,8 @@ async function createWorkoutInsightViaLLM(params: {
   }
 
   let checkin: any = null;
-  if (workout.start_time) {
-    const startIso = new Date(workout.start_time).toISOString();
+  if (workoutRow.start_time) {
+    const startIso = new Date(workoutRow.start_time).toISOString();
     const fromIso = new Date(new Date(startIso).getTime() - 48 * 3600 * 1000).toISOString();
 
     const { data: chk, error: chkErr } = await db
@@ -723,17 +722,17 @@ async function createWorkoutInsightViaLLM(params: {
   if (zErr) console.error("workout_insight: zones_error", zErr);
 
   const workoutName =
-    (workout as any)?.name != null && String((workout as any).name).trim()
-      ? String((workout as any).name).trim()
+    workoutRow?.name != null && String(workoutRow.name).trim()
+      ? String(workoutRow.name).trim()
       : null;
 
   const workoutDescription =
-    (workout as any)?.description != null && String((workout as any).description).trim()
-      ? String((workout as any).description).trim()
+    workoutRow?.description != null && String(workoutRow.description).trim()
+      ? String(workoutRow.description).trim()
       : null;
 
   const facts = {
-    workout,
+    workout: workoutRow,
     workout_name: workoutName,
     workout_description: workoutDescription,
     segments: segments ?? [],
@@ -917,7 +916,7 @@ async function createWorkoutInsightViaLLM(params: {
       entity_id: workoutId,
       period_from: null,
       period_to: null,
-      sport: workout.sport ?? null,
+      sport: workoutRow.sport ?? null,
       status: "active",
       title: displayTitle,
       summary: llmJson.summary ?? null,
@@ -958,14 +957,14 @@ async function createWorkoutInsightViaLLM(params: {
       .eq("scope", "workout")
       .eq("entity_id", workoutId)
       .eq("status", "active")
-      .neq("id", insRow.id);
+      .neq("id", String((insRow as any).id));
 
     if (supersedeErr) {
       console.error("workout_insight: supersede_previous_error", supersedeErr);
     }
   }
 
-  return insRow as WorkoutInsightRow;
+  return insRow as unknown as WorkoutInsightRow;
 }
 
 const DEFAULT_CONTEXT_NEEDS: PlannerOut["needs"] = {
@@ -1239,10 +1238,19 @@ export async function POST(req: NextRequest) {
       questionKind === "unknown" &&
       requestedWindow == null;
 
+    const likelyWorkoutFollowup = isLikelyWorkoutFollowup(finalText);
+    let replyWorkoutId: string | null = null;
+
+    const shouldForceLLM =
+      likelyWorkoutFollowup ||
+      explicitSingleWorkoutAnalysisIntent ||
+      Boolean(replyWorkoutId);
+
     if (
       !generalPlanningIntent &&
       !explicitSingleWorkoutAnalysisIntent &&
-      isMotivationIntent(finalText)
+      isMotivationIntent(finalText) &&
+      !shouldForceLLM
     ) {
       const motivationText = buildMotivationLocalResponse({
         text: finalText,
@@ -1431,7 +1439,7 @@ export async function POST(req: NextRequest) {
         })
       : null;
 
-    const replyWorkoutId = lastWorkoutBoundCoachMsg?.meta?.workout_id
+    replyWorkoutId = lastWorkoutBoundCoachMsg?.meta?.workout_id
       ? String(lastWorkoutBoundCoachMsg.meta.workout_id)
       : null;
 
@@ -1439,7 +1447,7 @@ export async function POST(req: NextRequest) {
       !generalPlanningIntent &&
       !isMultiWorkoutAnalysisIntent(finalText) &&
       Boolean(replyWorkoutId) &&
-      isLikelyWorkoutFollowup(finalText);
+      likelyWorkoutFollowup;
 
     if (isWorkoutFollowup && replyWorkoutId && lastWorkoutBoundCoachMsg) {
       stage = "workout_followup_insight";
@@ -1525,7 +1533,7 @@ export async function POST(req: NextRequest) {
     }
 
     stage = "static_answers";
-    const staticAnswer = tryStaticAnswer(finalText);
+    const staticAnswer = shouldForceLLM ? null : tryStaticAnswer(finalText);
     if (staticAnswer) {
       const ins = await insertCoachReply({
         db,
@@ -1608,6 +1616,62 @@ export async function POST(req: NextRequest) {
       userId: user.id,
       workoutIds,
     });
+
+    // Если пользователь просит разобрать последнюю тренировку,
+    // а по самой свежей тренировке ещё нет insight — не отдаём старый cache/fast_path.
+    // Сначала принудительно создаём разбор именно для последней тренировки.
+    const latestWorkout = (context.workouts?.[0] as any) ?? null;
+    const latestWorkoutId = latestWorkout?.id ? String(latestWorkout.id) : null;
+    const latestWorkoutHasInsight = latestWorkoutId
+      ? Boolean(insightsByWorkoutId[latestWorkoutId])
+      : false;
+
+    // FORCE: если есть свежая тренировка без insight — всегда делаем разбор
+    if (latestWorkoutId && !latestWorkoutHasInsight) {
+      stage = "force_latest_workout_insight";
+
+      try {
+        const insight = await createWorkoutInsightViaLLM({
+          db,
+          userId: user.id,
+          workoutId: latestWorkoutId,
+          locale,
+          options: {
+            forceRegenerate: true,
+            followupUserText: finalText,
+            source: "forced_latest_workout",
+          },
+        });
+
+        const answerFromInsight =
+          (insight?.content_md ?? "").trim() ||
+          (insight?.summary ?? "").trim();
+
+        if (answerFromInsight) {
+          const ins = await insertCoachReply({
+            db,
+            threadId,
+            userId: user.id,
+            replyToId: userMsgRow.id,
+            body: answerFromInsight,
+            stage: "workout_insight_forced",
+            meta: {
+              model: insight?.model ?? "llm",
+              workout_id: latestWorkoutId,
+              forced: true,
+            },
+          });
+
+          return NextResponse.json({
+            threadId,
+            userMessage: userMsgRow,
+            coachMessage: ins.data,
+          });
+        }
+      } catch (e) {
+        console.error("force_latest_workout_insight_failed", e);
+      }
+    }
 
     if (planner.fast_path?.enabled) {
       const wantsAnalysis = isWorkoutAnalysisIntent(finalText);
@@ -1776,11 +1840,10 @@ export async function POST(req: NextRequest) {
       const normalized = normalizeAIError(e);
       responderFallbackUsed = true;
       responderErrorText = userFacingAIErrorText(normalized);
-      answer = buildDegradedCoachReply({
-        userText: finalText,
-        workouts: context.workouts ?? [],
-        normalizedErrorText: responderErrorText,
-      });
+      // Не даем тупой ответ — даем хотя бы осмысленный минимум
+      answer =
+        "Не удалось сейчас полноценно разобрать, но по твоему описанию видно, что болезнь перед стартом почти точно повлияла на результат. " +
+        "Если хочешь — давай разберём подробнее: как чувствовался пульс, темп и самочувствие по ходу дистанции.";
       structuredPlan = null;
     }
 

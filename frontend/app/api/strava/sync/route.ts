@@ -58,6 +58,28 @@ function downsampleEvenly<T>(arr: T[], maxPoints: number) {
 }
 
 /**
+ * Lookback-логика:
+ * даже если есть cursor, всё равно смотрим назад на N дней,
+ * чтобы подтянуть удалённые локально тренировки.
+ */
+function buildStravaSyncAfter(cursorRaw: unknown) {
+  const cursor = cursorRaw ? Number(cursorRaw) : 0;
+
+  const lookbackDays = Number(process.env.STRAVA_SYNC_LOOKBACK_DAYS ?? 90);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const lookbackSec = nowSec - lookbackDays * 24 * 60 * 60;
+
+  // если cursor нет — просто берём lookback
+  if (!Number.isFinite(cursor) || cursor <= 0) {
+    return lookbackSec;
+  }
+
+  // ключевая логика:
+  // берём более "раннюю" дату, чтобы расширить окно назад
+  return Math.min(cursor, lookbackSec);
+}
+
+/**
  * Безопасное чтение ответа: сначала text(), потом пробуем JSON.parse
  * Это защищает от HTML-страниц (<!DOCTYPE ...>) и иных не-JSON ответов.
  */
@@ -70,6 +92,32 @@ async function readJsonOrText(resp: Response) {
     json = null;
   }
   return { text, json };
+}
+
+async function invokeEdgeFunction(name: string, payload: Record<string, unknown>) {
+  const url = `${env("NEXT_PUBLIC_SUPABASE_URL")}/functions/v1/${name}`;
+  const key = env("SUPABASE_SERVICE_ROLE_KEY");
+  const internalSecret = process.env.COACH_INTERNAL_SECRET;
+
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${key}`,
+      ...(internalSecret ? { "x-internal-secret": internalSecret } : {}),
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const { text, json } = await readJsonOrText(resp);
+
+  if (!resp.ok) {
+    throw new Error(
+      `${name}_failed: http_${resp.status}. Body: ${(text || JSON.stringify(json)).slice(0, 220)}`
+    );
+  }
+
+  return json;
 }
 
 async function refreshStravaToken(refresh_token: string) {
@@ -324,7 +372,7 @@ export async function POST() {
     NextResponse.json({ ok: false, reason, detail }, { status });
 
   try {
-    const jar = cookies(); // <-- без await
+    const jar = await cookies();
     const supabase = createServerClient(env("NEXT_PUBLIC_SUPABASE_URL"), env("NEXT_PUBLIC_SUPABASE_ANON_KEY"), {
       cookies: {
         getAll: () => jar.getAll(),
@@ -403,8 +451,8 @@ export async function POST() {
 
     if (!accessToken) return redirectErrJson("no_access_token", "Access token missing after refresh", 500);
 
-    // 4) cursor
-    const after = acc.last_sync_cursor ? Number(acc.last_sync_cursor) : 0;
+    // 4) cursor + lookback (очень важно для восстановления удалённых тренировок)
+    const after = buildStravaSyncAfter(acc.last_sync_cursor);
 
     // 5) fetch activities
     let all: StravaActivity[] = [];
@@ -702,6 +750,36 @@ export async function POST() {
           gps_fail_reasons.push({ activity_id: String(a.id), reason });
           preview_fail_reasons.push({ activity_id: String(a.id), reason });
           console.warn("[strava] streams fetch failed", a.id, e?.message ?? e);
+        }
+      }
+
+      // 7.2) Post-processing: погода + авторазбор тренером.
+      // Раньше тренировка попадала в workouts, но дальше pipeline не стартовал.
+      const newlyAddedActivityIds = new Set(ids.filter((id) => !existingSet.has(id)));
+      const workoutIdsForPostProcess = (wmap as any[])
+        .filter((r) => newlyAddedActivityIds.has(String(r.strava_activity_id)))
+        .map((r) => String(r.id))
+        .filter(Boolean);
+
+      for (const workoutId of workoutIdsForPostProcess) {
+        try {
+          await invokeEdgeFunction("workout-weather-fetch", {
+            user_id: user.id,
+            workout_id: workoutId,
+            source: "strava_sync",
+          });
+        } catch (e) {
+          console.warn("[strava] workout-weather-fetch failed", workoutId, e);
+        }
+
+        try {
+          await invokeEdgeFunction("coach-workout-enqueue", {
+            user_id: user.id,
+            workout_id: workoutId,
+            source: "strava_sync",
+          });
+        } catch (e) {
+          console.warn("[strava] coach-workout-enqueue failed", workoutId, e);
         }
       }
     }

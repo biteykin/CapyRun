@@ -1,3 +1,5 @@
+//frontend/app/(protected)/coach/page.tsx
+
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabaseServerApp";
