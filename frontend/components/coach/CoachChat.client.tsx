@@ -1,3 +1,5 @@
+//frontend/components/coach/CoachChat.client.tsx
+
 "use client";
 
 import * as React from "react";

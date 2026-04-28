@@ -1,3 +1,5 @@
+//frontend/components/coach/CoachMessageBubble.tsx
+
 "use client";
 
 import * as React from "react";
@@ -126,6 +128,7 @@ export default function CoachMessageBubble(props: {
 
   const isUser = role === "user";
   const isCoach = role === "coach";
+  const isSystem = role === "system";
 
   const bodyNode =
     typeof body === "string" ? (
@@ -144,15 +147,27 @@ export default function CoachMessageBubble(props: {
     >
       <div
         className={cn(
-          "max-w-[75%] rounded-lg px-3 py-2 text-xs leading-relaxed break-words",
+          "max-w-[78%] rounded-[var(--radius)] px-3.5 py-2.5 text-xs leading-relaxed break-words",
+          "border border-black/10 transition-transform",
           isUser
-            ? "bg-[rgb(246,176,33)] text-[color:var(--btn-primary-text,#0E0E0E)]"
-            : "bg-muted text-foreground",
+            ? [
+                "bg-[#f9bd2b] text-black",
+                "shadow-[inset_0_-2px_0_rgba(0,0,0,0.25),0_1px_2px_rgba(0,0,0,0.08)]",
+              ]
+            : isSystem
+              ? [
+                  "bg-muted text-muted-foreground",
+                  "shadow-[inset_0_-2px_0_rgba(0,0,0,0.06),0_1px_2px_rgba(0,0,0,0.04)]",
+                ]
+              : [
+                  "bg-white text-black dark:bg-[hsl(var(--btn-light-bg))] dark:text-[hsl(var(--btn-light-text))]",
+                  "shadow-[inset_0_-2px_0_rgba(0,0,0,0.08),0_1px_2px_rgba(0,0,0,0.06)]",
+                ],
           bubbleClassName
         )}
       >
         {isCoach && (
-          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="mb-1 text-[10px] font-black uppercase tracking-wide text-muted-foreground">
             {label ?? "Тренер"}
           </div>
         )}
@@ -164,7 +179,12 @@ export default function CoachMessageBubble(props: {
         {afterBody ? <div>{afterBody}</div> : null}
 
         {createdAt ? (
-          <div className="mt-1 text-[9px] text-muted-foreground opacity-80">
+          <div
+            className={cn(
+              "mt-1 text-[9px] opacity-70",
+              isUser ? "text-black/70" : "text-muted-foreground"
+            )}
+          >
             {formatCoachMessageTime(createdAt, hydrated)}
           </div>
         ) : null}
