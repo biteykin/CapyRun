@@ -989,6 +989,18 @@ export async function POST(req: NextRequest) {
   let plannerFallbackUsed = false;
 
   try {
+    console.log("[coach_send auth debug]", {
+      host: req.headers.get("host"),
+      origin: req.headers.get("origin"),
+      referer: req.headers.get("referer"),
+      cookieNames: req.headers
+        .get("cookie")
+        ?.split(";")
+        .map((x) => x.trim().split("=")[0])
+        .slice(0, 20),
+      hasAuthorization: Boolean(req.headers.get("authorization")),
+    });
+
     stage = "parse_body";
     let body: any = {};
     try {
