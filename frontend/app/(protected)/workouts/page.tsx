@@ -98,7 +98,8 @@ export default async function WorkoutsPage() {
   const { count } = await supabase
     .from("workouts")
     .select("id", { count: "exact", head: true })
-    .eq("user_id", uid);
+    .eq("user_id", uid)
+    .is("deleted_at", null);
   const workoutsCount = count ?? 0;
 
   // 5) 0 → заглушка с демо
@@ -148,6 +149,7 @@ export default async function WorkoutsPage() {
       weekday_iso
     `)
     .eq("user_id", uid)
+    .is("deleted_at", null)
     .order("start_time", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
     // TODO: заменить на пагинацию/инфинит-скролл

@@ -783,6 +783,8 @@ async function createWorkoutInsightViaLLM(params: {
           "Опирайся только на данные из FACTS_JSON и FOLLOWUP_USER_CONTEXT.",
           "Не выдумывай числа, факты, цели, историю или травмы.",
           "Если пользователь дал субъективный фидбек, встрои его в анализ как главный контекст.",
+          "Никогда не упоминай технические названия полей: FACTS_JSON, FOLLOWUP_USER_CONTEXT, followup, source, payload, meta.",
+          "Если человек просто попросил разобрать тренировку, не называй это техническим контекстом и не пиши, что нет FOLLOWUP_USER_CONTEXT.",
           "Не называй человека 'пользователь'. Пиши естественно: 'ты отметил', 'по ощущениям', 'судя по описанию'.",
           "Не пиши сухо и канцелярски.",
           "Не советуй агрессивно наращивать нагрузку, если есть усталость, боль, плохой сон или плохое восстановление.",
@@ -801,6 +803,8 @@ async function createWorkoutInsightViaLLM(params: {
           "Use only FACTS_JSON and FOLLOWUP_USER_CONTEXT.",
           "Do not invent numbers, facts, goals, history, or injuries.",
           "If there is subjective feedback, make it the main interpretation context.",
+          "Never mention internal field names: FACTS_JSON, FOLLOWUP_USER_CONTEXT, followup, source, payload, meta.",
+          "If the person simply asked to analyze a workout, do not call that technical context.",
           "Do not refer to the person as 'the user'.",
           "Be natural and concise.",
           "Do not recommend increasing load if there are signs of fatigue, pain, poor sleep, or poor recovery.",
@@ -863,8 +867,9 @@ async function createWorkoutInsightViaLLM(params: {
             "2) Если есть погода — используй её по делу.\n" +
             "3) Если есть усталость, тяжесть, боль, плохой сон, плохое восстановление — не советуй резко прибавлять.\n" +
             "4) Не пиши 'пользователь отметил'.\n" +
-            "5) Не выдумывай факты.\n" +
-            "6) Если нечего уточнить — не выводи раздел '## Вопросы' совсем.",
+            "5) Не упоминай FACTS_JSON, FOLLOWUP_USER_CONTEXT, source, payload, meta и любые внутренние технические поля.\n" +
+            "6) Не выдумывай факты.\n" +
+            "7) Если нечего уточнить — не выводи раздел '## Вопросы' совсем.",
         },
       ],
     });
@@ -1445,6 +1450,7 @@ export async function POST(req: NextRequest) {
 
     const isWorkoutFollowup =
       !generalPlanningIntent &&
+      !explicitSingleWorkoutAnalysisIntent &&
       !isMultiWorkoutAnalysisIntent(finalText) &&
       Boolean(replyWorkoutId) &&
       likelyWorkoutFollowup;

@@ -57,27 +57,6 @@ function downsampleEvenly<T>(arr: T[], maxPoints: number) {
   return out;
 }
 
-/**
- * Lookback-логика:
- * даже если есть cursor, всё равно смотрим назад на N дней,
- * чтобы подтянуть удалённые локально тренировки.
- */
-function buildStravaSyncAfter(cursorRaw: unknown) {
-  const cursor = cursorRaw ? Number(cursorRaw) : 0;
-
-  const lookbackDays = Number(process.env.STRAVA_SYNC_LOOKBACK_DAYS ?? 90);
-  const nowSec = Math.floor(Date.now() / 1000);
-  const lookbackSec = nowSec - lookbackDays * 24 * 60 * 60;
-
-  // если cursor нет — просто берём lookback
-  if (!Number.isFinite(cursor) || cursor <= 0) {
-    return lookbackSec;
-  }
-
-  // ключевая логика:
-  // берём более "раннюю" дату, чтобы расширить окно назад
-  return Math.min(cursor, lookbackSec);
-}
 
 /**
  * Безопасное чтение ответа: сначала text(), потом пробуем JSON.parse
@@ -451,8 +430,27 @@ export async function POST() {
 
     if (!accessToken) return redirectErrJson("no_access_token", "Access token missing after refresh", 500);
 
-    // 4) cursor + lookback (очень важно для восстановления удалённых тренировок)
-    const after = buildStravaSyncAfter(acc.last_sync_cursor);
+    // 4) Берём последнюю НЕ удалённую Strava-тренировку у нас
+    // и запрашиваем у Strava только активности новее неё.
+    // Небольшой overlap нужен, чтобы не потерять активности из-за таймзон/округлений.
+    const { data: latestLocalStravaWorkout } = await supabase
+      .from("workouts")
+      .select("start_time")
+      .eq("user_id", user.id)
+      .not("strava_activity_id", "is", null)
+      .is("deleted_at", null)
+      .order("start_time", { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle();
+
+    const overlapHours = Number(process.env.STRAVA_SYNC_OVERLAP_HOURS ?? 12);
+    const latestStartSec = latestLocalStravaWorkout?.start_time
+      ? Math.floor(new Date(latestLocalStravaWorkout.start_time).getTime() / 1000)
+      : null;
+
+    const after = latestStartSec
+      ? latestStartSec - overlapHours * 60 * 60
+      : 0;
 
     // 5) fetch activities
     let all: StravaActivity[] = [];
@@ -511,6 +509,7 @@ export async function POST() {
       .from("workouts")
       .select("strava_activity_id")
       .eq("user_id", user.id)
+      .is("deleted_at", null)
       .in("strava_activity_id", ids);
 
     const existingSet = new Set((existing || []).map((r: any) => String(r.strava_activity_id)));
@@ -571,6 +570,10 @@ export async function POST() {
 
         strava_activity_id: String(a.id),
         strava_activity_url: `https://www.strava.com/activities/${a.id}`,
+
+        // Если тренировку удалили через soft delete,
+        // повторная синхронизация из Strava должна восстановить её.
+        deleted_at: null,
 
         uploaded_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -755,11 +758,21 @@ export async function POST() {
 
       // 7.2) Post-processing: погода + авторазбор тренером.
       // Раньше тренировка попадала в workouts, но дальше pipeline не стартовал.
-      const newlyAddedActivityIds = new Set(ids.filter((id) => !existingSet.has(id)));
-      const workoutIdsForPostProcess = (wmap as any[])
-        .filter((r) => newlyAddedActivityIds.has(String(r.strava_activity_id)))
+      // Берём все workout_id из текущего sync
+      const workoutIdsAll = (wmap as any[])
         .map((r) => String(r.id))
         .filter(Boolean);
+
+      // Проверяем, какие уже имеют ai_insights
+      const { data: insights } = await supabase
+        .from("ai_insights")
+        .select("entity_id")
+        .in("entity_id", workoutIdsAll);
+
+      const hasInsight = new Set((insights || []).map((r: any) => String(r.entity_id)));
+
+      // Берём только те, у которых нет инсайта
+      const workoutIdsForPostProcess = workoutIdsAll.filter((id) => !hasInsight.has(id));
 
       for (const workoutId of workoutIdsForPostProcess) {
         try {

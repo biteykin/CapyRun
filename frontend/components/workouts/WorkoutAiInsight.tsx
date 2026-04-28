@@ -1,3 +1,5 @@
+//frontend/components/workouts/WorkoutAiInsight.tsx
+
 "use client";
 
 import * as React from "react";

@@ -221,8 +221,18 @@ export default function WorkoutDetailPage() {
           .from("workouts")
           .select("*")
           .eq("id", id)
-          .single();
+          .maybeSingle();
+
         if (error) throw error;
+
+        if (!data) {
+          if (!canceled) {
+            setRow(null);
+            setErr(null);
+          }
+          return;
+        }
+
         if (!canceled) {
           const w = data as Workout;
           setRow(w);
@@ -262,13 +272,17 @@ export default function WorkoutDetailPage() {
 
   async function doDelete() {
     if (!row) return;
-    const { error } = await supabase.from("workouts").delete().eq("id", row.id);
+    const { error } = await supabase
+      .from("workouts")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", row.id);
     if (error) {
-      // eslint-disable-next-line no-alert
       alert(error.message);
       return;
     }
+    setRow(null);
     router.replace("/workouts");
+    router.refresh();
   }
 
   async function saveNote() {

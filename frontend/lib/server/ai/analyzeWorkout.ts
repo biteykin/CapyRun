@@ -293,7 +293,13 @@ export async function analyzeWorkout({
       ...input,
       preferences,
     }),
-    text: { format: { type: "json_schema", json_schema: ver.output_schema as any } } as any,
+    text: {
+      format: {
+        type: "json_schema",
+        name: "WorkoutInsight",
+        schema: jsonSchema,
+      },
+    } as any,
   });
 
   const usage = (r as any).usage ?? {};

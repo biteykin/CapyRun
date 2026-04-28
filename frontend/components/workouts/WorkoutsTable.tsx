@@ -628,7 +628,10 @@ function RowActions({
   const doDelete = async () => {
     try {
       setDeleting(true);
-      const { error } = await supabase.from("workouts").delete().eq("id", workoutId);
+      const { error } = await supabase
+        .from("workouts")
+        .update({ deleted_at: new Date().toISOString() })
+        .eq("id", workoutId);
       if (error) throw error;
       onDeleted(workoutId);
       setConfirmOpen(false);
