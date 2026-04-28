@@ -989,18 +989,6 @@ export async function POST(req: NextRequest) {
   let plannerFallbackUsed = false;
 
   try {
-    console.log("[coach_send auth debug]", {
-      host: req.headers.get("host"),
-      origin: req.headers.get("origin"),
-      referer: req.headers.get("referer"),
-      cookieNames: req.headers
-        .get("cookie")
-        ?.split(";")
-        .map((x) => x.trim().split("=")[0])
-        .slice(0, 20),
-      hasAuthorization: Boolean(req.headers.get("authorization")),
-    });
-
     stage = "parse_body";
     let body: any = {};
     try {
@@ -1022,38 +1010,14 @@ export async function POST(req: NextRequest) {
 
     try {
       const supabaseAuth = await createClientWithCookies();
-      const { data, error } = await supabaseAuth.auth.getUser();
-
-      console.log("[coach_send auth ssr result]", {
-        hasUser: Boolean(data?.user?.id),
-        userId: data?.user?.id ?? null,
-        errorMessage: error?.message ?? null,
-      });
-
+      const { data } = await supabaseAuth.auth.getUser();
       if (data?.user?.id) user = { id: data.user.id };
-    } catch (e: any) {
-      console.log("[coach_send auth ssr exception]", {
-        message: e?.message ?? String(e),
-      });
-    }
+    } catch {}
 
     if (!user?.id) {
       const cookieAccessToken = req.cookies.get("sb-access-token")?.value;
-
-      console.log("[coach_send auth legacy cookie]", {
-        hasSbAccessToken: Boolean(cookieAccessToken),
-        sbAccessTokenLength: cookieAccessToken?.length ?? 0,
-      });
-
       if (cookieAccessToken) {
-        const { data, error } = await db.auth.getUser(cookieAccessToken);
-
-        console.log("[coach_send auth legacy result]", {
-          hasUser: Boolean(data?.user?.id),
-          userId: data?.user?.id ?? null,
-          errorMessage: error?.message ?? null,
-        });
-
+        const { data } = await db.auth.getUser(cookieAccessToken);
         if (data?.user?.id) user = { id: data.user.id };
       }
     }
@@ -1061,14 +1025,7 @@ export async function POST(req: NextRequest) {
     if (!user?.id) {
       const token = getBearerToken(req);
       if (token) {
-        const { data, error } = await db.auth.getUser(token);
-
-        console.log("[coach_send auth bearer result]", {
-          hasUser: Boolean(data?.user?.id),
-          userId: data?.user?.id ?? null,
-          errorMessage: error?.message ?? null,
-        });
-
+        const { data } = await db.auth.getUser(token);
         if (data?.user?.id) user = { id: data.user.id };
       }
     }
@@ -1648,19 +1605,6 @@ export async function POST(req: NextRequest) {
       plannerNeeds: planner.needs ?? DEFAULT_CONTEXT_NEEDS,
     });
 
-    console.log(
-      "[coach_send] context.workouts order",
-      (context.workouts ?? []).map((w: any, idx: number) => ({
-        idx,
-        id: w?.id ?? null,
-        name: w?.name ?? null,
-        sport: w?.sport ?? null,
-        start_time: w?.start_time ?? null,
-        distance_m: w?.distance_m ?? null,
-        duration_sec: w?.duration_sec ?? null,
-      }))
-    );
-
     const responderThreadMemory = mergeLegacyMemory(
       context.memory ?? null,
       threadMemoryWithGoal ?? legacyThreadMemory
@@ -1907,13 +1851,6 @@ export async function POST(req: NextRequest) {
       answer = extracted.text;
       structuredPlan = extracted.structuredPlan;
     } catch (e) {
-      console.error("[coach_send responder error FULL]", {
-        message: (e as any)?.message,
-        code: (e as any)?.code,
-        type: (e as any)?.type,
-        status: (e as any)?.status,
-      });
-
       const normalized = normalizeAIError(e);
       responderFallbackUsed = true;
       responderErrorText = userFacingAIErrorText(normalized);
