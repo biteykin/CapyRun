@@ -1597,6 +1597,19 @@ export async function POST(req: NextRequest) {
       plannerNeeds: planner.needs ?? DEFAULT_CONTEXT_NEEDS,
     });
 
+    console.log(
+      "[coach_send] context.workouts order",
+      (context.workouts ?? []).map((w: any, idx: number) => ({
+        idx,
+        id: w?.id ?? null,
+        name: w?.name ?? null,
+        sport: w?.sport ?? null,
+        start_time: w?.start_time ?? null,
+        distance_m: w?.distance_m ?? null,
+        duration_sec: w?.duration_sec ?? null,
+      }))
+    );
+
     const responderThreadMemory = mergeLegacyMemory(
       context.memory ?? null,
       threadMemoryWithGoal ?? legacyThreadMemory
