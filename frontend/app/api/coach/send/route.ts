@@ -1907,10 +1907,18 @@ export async function POST(req: NextRequest) {
       answer = extracted.text;
       structuredPlan = extracted.structuredPlan;
     } catch (e) {
+      console.error("[coach_send responder error FULL]", {
+        message: (e as any)?.message,
+        code: (e as any)?.code,
+        type: (e as any)?.type,
+        status: (e as any)?.status,
+      });
+
       const normalized = normalizeAIError(e);
       responderFallbackUsed = true;
       responderErrorText = userFacingAIErrorText(normalized);
-      // Не даем тупой ответ — даем хотя бы осмысленный минимум
+
+      // временный fallback (потом вернём умный)
       answer =
         "Не удалось сейчас полноценно разобрать, но по твоему описанию видно, что болезнь перед стартом почти точно повлияла на результат. " +
         "Если хочешь — давай разберём подробнее: как чувствовался пульс, темп и самочувствие по ходу дистанции.";
