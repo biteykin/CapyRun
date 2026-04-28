@@ -27,6 +27,8 @@ type RawMessage = {
   created_at: string;
 };
 
+const MESSAGES_PAGE_SIZE = 30;
+
 const QUICK_ACTIONS = [
   "Разбери последнюю тренировку",
   "Составь план на неделю",
@@ -65,13 +67,101 @@ function mergeDedup(prev: RawMessage[], incoming: RawMessage[]) {
   return arr;
 }
 
+const CoachChatInput = React.memo(function CoachChatInput(props: {
+  isSending: boolean;
+  onSend: (text: string, options?: { action?: string | null }) => Promise<void>;
+}) {
+  const { isSending, onSend } = props;
+  const [text, setText] = React.useState("");
+  const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
+
+  const handleSend = React.useCallback(async () => {
+    const trimmed = text.trim();
+    if (!trimmed || isSending) return;
+    setText("");
+    await onSend(trimmed);
+  }, [isSending, onSend, text]);
+
+  const handleKeyDown = React.useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        void handleSend();
+      }
+    },
+    [handleSend]
+  );
+
+  return (
+    <div className="mt-2 flex flex-col gap-2 border-t pt-2">
+      <Textarea
+        ref={textareaRef}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={handleKeyDown}
+        rows={2}
+        placeholder='Напиши Капи… например: "разбери тренировку" или "составь план"'
+      />
+
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                size="sm"
+                disabled={isSending}
+                className="border-0 bg-[rgb(45,118,1)] px-3 text-white shadow-[inset_0_-2px_0_rgb(29,71,0)] hover:bg-[rgb(78,142,39)] active:translate-y-px active:shadow-[inset_0_-1px_0_rgb(29,71,0)] [&_span]:font-black"
+              >
+                +
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-64">
+              {QUICK_ACTIONS.map((action) => (
+                <DropdownMenuItem
+                  key={action}
+                  onClick={() => void onSend(action)}
+                >
+                  {action}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={isSending}
+            onClick={() => setText("")}
+          >
+            Очистить
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            disabled={isSending || !text.trim()}
+            onClick={() => void handleSend()}
+          >
+            {isSending ? "Отправляем…" : "Отправить тренеру"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
 export default function CoachChat(props: {
   threadId: string;
   initialMessages: any[];
+  initialHasMoreMessages?: boolean;
   currentUserId: string;
   initialUnreadCount?: number;
 }) {
-  const { threadId, initialMessages, currentUserId } = props;
+  const { threadId, initialMessages, initialHasMoreMessages = false, currentUserId } = props;
 
   const [messages, setMessages] = React.useState<RawMessage[]>(() => {
     return (initialMessages ?? []).map((m: any) => ({
@@ -85,13 +175,13 @@ export default function CoachChat(props: {
     }));
   });
 
-  const [text, setText] = React.useState("");
   const [isSending, setIsSending] = React.useState(false);
+  const [isLoadingOlder, setIsLoadingOlder] = React.useState(false);
+  const [hasMoreMessages, setHasMoreMessages] = React.useState(initialHasMoreMessages);
   const [hydrated, setHydrated] = React.useState(false);
   const [showAllAuto, setShowAllAuto] = React.useState(false);
 
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
-  const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
 
   React.useEffect(() => {
     setHydrated(true);
@@ -136,6 +226,48 @@ export default function CoachChat(props: {
     if (!el) return;
     el.scrollTop = el.scrollHeight;
   }, [messages.length, isSending]);
+
+  const loadOlderMessages = React.useCallback(async () => {
+    if (isLoadingOlder || !hasMoreMessages) return;
+
+    const el = scrollRef.current;
+    const prevScrollHeight = el?.scrollHeight ?? 0;
+    const prevScrollTop = el?.scrollTop ?? 0;
+
+    const oldest = messages[0];
+    if (!oldest?.created_at) return;
+
+    try {
+      setIsLoadingOlder(true);
+
+      const { data, error } = await supabase
+        .from("coach_messages")
+        .select("id, thread_id, author_id, type, body, meta, created_at")
+        .eq("thread_id", threadId)
+        .lt("created_at", oldest.created_at)
+        .order("created_at", { ascending: false })
+        .limit(MESSAGES_PAGE_SIZE + 1);
+
+      if (error) throw error;
+
+      const rows = (data ?? []) as RawMessage[];
+      const older = rows.slice(0, MESSAGES_PAGE_SIZE).reverse();
+
+      setHasMoreMessages(rows.length > MESSAGES_PAGE_SIZE);
+      setMessages((prev) => mergeDedup(prev, older));
+
+      requestAnimationFrame(() => {
+        const nextEl = scrollRef.current;
+        if (!nextEl) return;
+        const nextScrollHeight = nextEl.scrollHeight;
+        nextEl.scrollTop = nextScrollHeight - prevScrollHeight + prevScrollTop;
+      });
+    } catch (e) {
+      console.error("[coach] load older messages failed", e);
+    } finally {
+      setIsLoadingOlder(false);
+    }
+  }, [hasMoreMessages, isLoadingOlder, messages, threadId]);
 
   const AUTO_LIMIT = 10;
 
@@ -234,10 +366,6 @@ export default function CoachChat(props: {
       };
 
       setMessages((prev) => mergeDedup(prev, [optimisticUser]));
-      if (trimmed === text.trim()) {
-        setText("");
-      }
-
       try {
         const res = await fetch("/api/coach/send", {
           method: "POST",
@@ -277,19 +405,8 @@ export default function CoachChat(props: {
         setIsSending(false);
       }
     },
-    [currentUserId, isSending, markRead, text, threadId]
+    [currentUserId, isSending, markRead, threadId]
   );
-
-  const handleSend = async () => {
-    await sendMessage(text);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
 
   function getRole(m: RawMessage): "user" | "coach" | "system" {
     if (m.type === "coach") return "coach";
@@ -302,6 +419,21 @@ export default function CoachChat(props: {
       <CardContent className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden p-4">
         <div className="relative min-h-0 flex-1 overflow-hidden rounded-md border bg-muted/10">
           <div ref={scrollRef} className="h-full overflow-y-auto p-3 space-y-3">
+            {hasMoreMessages && (
+              <div className="flex items-center justify-center">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="primary"
+                  disabled={isLoadingOlder}
+                  onClick={loadOlderMessages}
+                  className="min-w-[180px] rounded-full"
+                >
+                  {isLoadingOlder ? "Загружаем…" : "Загрузить предыдущие"}
+                </Button>
+              </div>
+            )}
+
             {hiddenAutoCount > 0 && !showAllAuto && (
               <div className="flex items-center justify-center">
                 <Button variant="secondary" size="sm" onClick={() => setShowAllAuto(true)}>
@@ -377,64 +509,7 @@ export default function CoachChat(props: {
           </div>
         </div>
 
-        <div className="mt-2 flex flex-col gap-2 border-t pt-2">
-          <Textarea
-            ref={textareaRef}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={handleKeyDown}
-            rows={2}
-            placeholder='Напиши Капи… например: "разбери тренировку" или "составь план"'
-          />
-
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    size="sm"
-                    disabled={isSending}
-                    className="border-0 bg-[rgb(45,118,1)] px-3 text-white shadow-[inset_0_-2px_0_rgb(29,71,0)] hover:bg-[rgb(78,142,39)] active:translate-y-px active:shadow-[inset_0_-1px_0_rgb(29,71,0)] [&_span]:font-black"
-                  >
-                    +
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-64">
-                  {QUICK_ACTIONS.map((action) => (
-                    <DropdownMenuItem
-                      key={action}
-                      onClick={() => void sendMessage(action)}
-                    >
-                      {action}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={isSending}
-                onClick={() => setText("")}
-              >
-                Очистить
-              </Button>
-              <Button
-                type="button"
-                variant="primary"
-                size="sm"
-                disabled={isSending || !text.trim()}
-                onClick={handleSend}
-              >
-                {isSending ? "Отправляем…" : "Отправить тренеру"}
-              </Button>
-            </div>
-          </div>
-        </div>
+        <CoachChatInput isSending={isSending} onSend={sendMessage} />
       </CardContent>
     </Card>
   );

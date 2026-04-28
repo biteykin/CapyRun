@@ -24,6 +24,18 @@ import ConfirmActionDialog from "@/components/ui/confirm-action-dialog";
 import { Textarea } from "@/components/ui/textarea";
 
 import { AppTooltip } from "@/components/ui/AppTooltip";
+import {
+  Activity,
+  Clock3,
+  Flame,
+  Footprints,
+  Gauge,
+  HeartPulse,
+  Mountain,
+  Route,
+  TrendingDown,
+  Zap,
+} from "lucide-react";
 
 // Charts (dynamic)
 const WorkoutCharts = dynamic(() => import("@/components/workouts/WorkoutCharts"), { ssr: false });
@@ -50,6 +62,16 @@ import {
 
 const MONTHS_RU = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сент", "окт", "ноя", "дек"];
 const WD_RU = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
+
+const METRIC_COLORS = {
+  blue: { solid: "#1B2EC9", light: "#C5CEFA" },
+  purple: { solid: "#59229F", light: "#D1C1E4" },
+  green: { solid: "#1A9E3A", light: "#C5EDD0" },
+  red: { solid: "#E60012", light: "#FFCCCC" },
+  yellow: { solid: "#B88700", light: "#FFF5B0" },
+  teal: { solid: "#3AAAEF", light: "#C5E8FF" },
+  navy: { solid: "#283158", light: "#D7DCE8" },
+} as const;
 
 type Weather = {
   temp_c?: number;
@@ -321,6 +343,8 @@ export default function WorkoutDetailPage() {
     value: React.ReactNode;
     present: boolean;
     hint?: string;
+    icon?: React.ReactNode;
+    tone?: keyof typeof METRIC_COLORS;
   };
 
   const metricItems: Array<MetricItem> = [
@@ -329,18 +353,24 @@ export default function WorkoutDetailPage() {
       value: fmtKm(row?.distance_m ?? null),
       present: isNum(row?.distance_m),
       hint: "Преодолённое расстояние. Единицы: километры.",
+      icon: <Route className="h-4 w-4" />,
+      tone: "blue" as const,
     },
     {
       label: "Время",
       value: fmtDuration(row?.duration_sec ?? null),
       present: isNum(row?.duration_sec),
       hint: "От старта до финиша, включая паузы.",
+      icon: <Clock3 className="h-4 w-4" />,
+      tone: "green" as const,
     },
     {
       label: "В движении",
       value: fmtDuration(row?.moving_time_sec ?? null),
       present: isNum(row?.moving_time_sec),
       hint: "Сумма интервалов движения (без пауз).",
+      icon: <Activity className="h-4 w-4" />,
+      tone: "teal" as const,
     },
     showRunPace
       ? {
@@ -348,36 +378,56 @@ export default function WorkoutDetailPage() {
           value: fmtPace(row?.avg_pace_s_per_km ?? null),
           present: isNum(row?.avg_pace_s_per_km),
           hint: "Средний темп: мин/км.",
+          icon: <Gauge className="h-4 w-4" />,
+          tone: "purple" as const,
         }
       : {
           label: "Скорость",
           value: computedSpeed,
           present: computedSpeed !== "—",
           hint: "Средняя скорость: км/ч.",
+          icon: <Gauge className="h-4 w-4" />,
+          tone: "purple" as const,
         },
     {
       label: "Подъём",
       value: fmtM(row?.elev_gain_m ?? null),
       present: isNum(row?.elev_gain_m),
       hint: "Суммарный набор высоты.",
+      icon: <Mountain className="h-4 w-4" />,
+      tone: "navy" as const,
+    },
+    {
+      label: "Время старта",
+      value: fmtTimeOfDay(row?.start_time ?? null),
+      present: isStr(row?.start_time),
+      hint: "Локальное время начала тренировки.",
+      icon: <Clock3 className="h-4 w-4" />,
+      tone: "yellow" as const,
     },
     {
       label: "Спуск",
       value: fmtM(row?.elev_loss_m ?? null),
       present: isNum(row?.elev_loss_m),
       hint: "Суммарная потеря высоты.",
+      icon: <TrendingDown className="h-4 w-4" />,
+      tone: "navy" as const,
     },
     {
       label: "Ккал",
       value: isNum(row?.calories_kcal) ? row!.calories_kcal : "—",
       present: isNum(row?.calories_kcal),
       hint: "Оценка энергозатрат.",
+      icon: <Flame className="h-4 w-4" />,
+      tone: "red" as const,
     },
     {
       label: "Пульс ср/макс",
       value: `${isNum(row?.avg_hr) ? row!.avg_hr : "—"} / ${isNum(row?.max_hr) ? row!.max_hr : "—"} bpm`,
       present: isNum(row?.avg_hr) || isNum(row?.max_hr),
       hint: "Средняя и максимальная ЧСС.",
+      icon: <HeartPulse className="h-4 w-4" />,
+      tone: "red" as const,
     },
     {
       label: "Мощность ср/NP/макс",
@@ -387,18 +437,23 @@ export default function WorkoutDetailPage() {
       present:
         isNum(row?.avg_power_w) || isNum(row?.np_power_w) || isNum(row?.max_power_w),
       hint: "Средняя, NP и максимальная мощность.",
+      icon: <Zap className="h-4 w-4" />,
+      tone: "yellow" as const,
     },
     {
       label: "Каденс (шаг)",
       value: isNum(row?.avg_cadence_spm) ? row!.avg_cadence_spm : "—",
       present: isNum(row?.avg_cadence_spm),
       hint: "SPM — шагов в минуту.",
+      icon: <Footprints className="h-4 w-4" />,
+      tone: "green" as const,
     },
     {
       label: "Каденс (rpm)",
       value: isNum(row?.avg_cadence_rpm) ? row!.avg_cadence_rpm : "—",
       present: isNum(row?.avg_cadence_rpm),
       hint: "RPM — оборотов в минуту.",
+      icon: "🔄",
     },
     {
       label: "SWOLF ср",
@@ -429,36 +484,42 @@ export default function WorkoutDetailPage() {
       value: isNum(row?.perceived_exertion) ? row!.perceived_exertion : "—",
       present: isNum(row?.perceived_exertion),
       hint: "Субъективная тяжесть (1–10).",
+      icon: "💪",
     },
     {
       label: "TRIMP",
       value: isNum(row?.trimp) ? row!.trimp : "—",
       present: isNum(row?.trimp),
       hint: "Импульс тренировки.",
+      icon: "📊",
     },
     {
       label: "EF",
       value: isNum(row?.ef) ? row!.ef : "—",
       present: isNum(row?.ef),
       hint: "Efficiency Factor.",
+      icon: "🧠",
     },
     {
       label: "PA:HR",
       value: isNum(row?.pa_hr_pct) ? `${row!.pa_hr_pct}%` : "—",
       present: isNum(row?.pa_hr_pct),
       hint: "Декуплинг темпа/мощности и ЧСС.",
+      icon: "📈",
     },
     {
       label: "IF",
       value: isNum(row?.intensity_factor) ? row!.intensity_factor : "—",
       present: isNum(row?.intensity_factor),
       hint: "Intensity Factor (≈ NP/FTP).",
+      icon: "🎯",
     },
     {
       label: "Нагрузка",
       value: isNum(row?.training_load_score) ? row!.training_load_score : "—",
       present: isNum(row?.training_load_score),
       hint: "TSS-подобная метрика.",
+      icon: "🏋️",
     },
   ].filter((i) => i.present);
 
@@ -548,28 +609,31 @@ export default function WorkoutDetailPage() {
         </div>
       </div>
 
-      {/* KPI STRIP */}
-      <section>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6">
-          <Card><CardContent className="p-3"><div className="text-xs text-muted-foreground">Дистанция</div><div className="mt-1 text-base font-semibold">{fmtKm(row.distance_m)}</div></CardContent></Card>
-          <Card><CardContent className="p-3"><div className="text-xs text-muted-foreground">Длительность</div><div className="mt-1 text-base font-semibold">{fmtDuration(row.duration_sec)}</div></CardContent></Card>
-          <Card><CardContent className="p-3"><div className="text-xs text-muted-foreground">{showRunPace ? "Темп" : "Скорость"}</div><div className="mt-1 text-base font-semibold">{showRunPace ? fmtPace(row.avg_pace_s_per_km) : computedSpeed}</div></CardContent></Card>
-          <Card><CardContent className="p-3"><div className="text-xs text-muted-foreground">Пульс (ср)</div><div className="mt-1 text-base font-semibold">{isNum(row.avg_hr) ? `${row.avg_hr} bpm` : "—"}</div></CardContent></Card>
-          <Card><CardContent className="p-3"><div className="text-xs text-muted-foreground">Набор</div><div className="mt-1 text-base font-semibold">{fmtM(row.elev_gain_m)}</div></CardContent></Card>
-          <Card><CardContent className="p-3"><div className="text-xs text-muted-foreground">Старт</div><div className="mt-1 text-base font-semibold">{fmtTimeOfDay(row.start_time)}</div></CardContent></Card>
-        </div>
-      </section>
-
       {/* METRICS GRID */}
       {metricItems.length > 0 && (
         <section>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {metricItems.map((m, idx) => (
               <AppTooltip key={`${m.label}-${idx}`} content={m.hint || m.label}>
-                <Card className="cursor-help">
-                  <CardContent className="p-3">
-                    <div className="text-xs text-muted-foreground">{m.label}</div>
-                    <div className="mt-1 text-base font-semibold">{m.value}</div>
+                <Card className="cursor-help overflow-hidden border bg-background/80 transition-all hover:-translate-y-0.5 hover:shadow-md">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-3">
+                      <span
+                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
+                        style={{
+                          background: METRIC_COLORS[m.tone ?? "blue"].light,
+                          color: METRIC_COLORS[m.tone ?? "blue"].solid,
+                        }}
+                      >
+                        {m.icon}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="text-xs text-muted-foreground">{m.label}</div>
+                        <div className="mt-1 truncate text-lg font-semibold tabular-nums">
+                          {m.value}
+                        </div>
+                      </div>
+                    </div>
                   </CardContent>
                 </Card>
               </AppTooltip>
@@ -584,58 +648,6 @@ export default function WorkoutDetailPage() {
           </div>
         </section>
       )}
-
-      {/* Insights row (должны быть выше графика) */}
-      <section>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <Card className="border-dashed">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Инсайт: набор/время</CardTitle>
-              <CardDescription>скорость набора высоты</CardDescription>
-            </CardHeader>
-            <CardContent className="text-sm">
-              <div className="flex items-baseline justify-between">
-                <span className="text-muted-foreground">Climb rate</span>
-                <span className="font-semibold">{computedClimbRate}</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-dashed">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Инсайт: нагрузка</CardTitle>
-              <CardDescription>TRIMP / Load</CardDescription>
-            </CardHeader>
-            <CardContent className="text-sm space-y-1">
-              <div className="flex items-baseline justify-between">
-                <span className="text-muted-foreground">TRIMP</span>
-                <span className="font-semibold">{isNum(row.trimp) ? row.trimp : "—"}</span>
-              </div>
-              <div className="flex items-baseline justify-between">
-                <span className="text-muted-foreground">Load</span>
-                <span className="font-semibold">{isNum(row.training_load_score) ? row.training_load_score : "—"}</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-dashed">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Инсайт: эффективность</CardTitle>
-              <CardDescription>EF / PA:HR</CardDescription>
-            </CardHeader>
-            <CardContent className="text-sm space-y-1">
-              <div className="flex items-baseline justify-between">
-                <span className="text-muted-foreground">EF</span>
-                <span className="font-semibold">{isNum(row.ef) ? row.ef : "—"}</span>
-              </div>
-              <div className="flex items-baseline justify-between">
-                <span className="text-muted-foreground">PA:HR</span>
-                <span className="font-semibold">{isNum(row.pa_hr_pct) ? `${row.pa_hr_pct}%` : "—"}</span>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </section>
 
       {/* Note + AI insight (должны быть выше графика) */}
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">

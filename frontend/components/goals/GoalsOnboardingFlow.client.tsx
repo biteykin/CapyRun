@@ -1,3 +1,5 @@
+//frontend/components/goals/GoalsOnboardingFlow.client.tsx
+
 "use client";
 
 import * as React from "react";
@@ -31,8 +33,9 @@ export type GoalsOnboardingFlowProps = {
   /** Режим использования:
    *  - "initial" — первый заход, приветственный текст
    *  - "add-more" — добавление новых целей позже
+   *  - "onboarding" — часть общего онбординга после регистрации
    */
-  mode?: "initial" | "add-more";
+  mode?: "initial" | "add-more" | "onboarding";
   /** Колбэк после успешного сохранения целей */
   onFinished?: () => void;
   initialProfile?: {

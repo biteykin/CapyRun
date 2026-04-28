@@ -9,6 +9,8 @@ import CoachChat from "@/components/coach/CoachChat.client";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+const COACH_MESSAGES_PAGE_SIZE = 30;
+
 export default async function CoachPage() {
   const supabase = await createSupabaseServerClient();
 
@@ -63,13 +65,16 @@ export default async function CoachPage() {
     .select("id, thread_id, author_id, type, body, meta, created_at")
     .eq("thread_id", thread.id)
     .order("created_at", { ascending: false })
-    .limit(200);
+    .limit(COACH_MESSAGES_PAGE_SIZE + 1);
 
   if (msgErr) {
     console.error("coach_messages select error", msgErr);
   }
 
-  const messages = (messagesDesc ?? []).slice().reverse();
+  const hasMoreMessages = (messagesDesc ?? []).length > COACH_MESSAGES_PAGE_SIZE;
+  const messages = (messagesDesc ?? [])
+    .slice(0, COACH_MESSAGES_PAGE_SIZE)
+    .reverse();
 
   const { data: unreadCount, error: unreadErr } = await supabase.rpc("get_thread_unread_count", {
     p_thread_id: thread.id,
@@ -85,6 +90,7 @@ export default async function CoachPage() {
         <CoachChat
           threadId={thread.id}
           initialMessages={messages}
+          initialHasMoreMessages={hasMoreMessages}
           currentUserId={user.id}
           initialUnreadCount={Number(unreadCount ?? 0)}
         />

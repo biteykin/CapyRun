@@ -1,3 +1,5 @@
+//frontend/components/coach/CoachPlanActions.stories.tsx
+
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import * as React from "react";
 import CoachMessageBubble from "./CoachMessageBubble";

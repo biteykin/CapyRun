@@ -8,12 +8,6 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -294,6 +288,7 @@ export default function WorkoutAiInsight({ workoutId }: { workoutId: string }) {
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
   const [generating, setGenerating] = React.useState(false);
+  const [detailsExpanded, setDetailsExpanded] = React.useState(false);
 
   // Preferences (with sensible default)
   const [tone, setTone] = React.useState<Tone>("supportive");
@@ -339,6 +334,7 @@ export default function WorkoutAiInsight({ workoutId }: { workoutId: string }) {
 
   React.useEffect(() => {
     load();
+    setDetailsExpanded(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workoutId]);
 
@@ -563,42 +559,43 @@ export default function WorkoutAiInsight({ workoutId }: { workoutId: string }) {
               />
             </div>
 
-            {/* Детали — аккуратно, красиво, по желанию */}
-            <Accordion type="single" collapsible>
-              <AccordionItem value="details" className="border-0">
-                <AccordionTrigger
+            {detailsMd ? (
+              <div className="rounded-2xl border bg-card p-4">
+                <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-xl border bg-background">
+                    ✨
+                  </span>
+                  <span>Детальные рекомендации</span>
+                </div>
+
+                <div
                   className={cx(
-                    "no-underline hover:no-underline",
-                    "py-2",
-                    "rounded-2xl",
-                    "px-3 -mx-3",
-                    "hover:bg-muted/40",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    "[&>svg]:opacity-60"
+                    "relative overflow-hidden transition-[max-height] duration-300",
+                    detailsExpanded ? "max-h-[2000px]" : "max-h-[5.8rem]"
                   )}
                 >
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <span className="inline-flex h-7 w-7 items-center justify-center rounded-xl border bg-background">
-                      ✨
-                    </span>
-                    <span>Детальные рекомендации</span>
-                    <span className="text-xs text-muted-foreground font-normal">
-                      (для тех, кто любит глубже)
-                    </span>
+                  <div className="prose prose-sm max-w-none text-foreground/90 dark:prose-invert prose-headings:font-semibold prose-headings:text-foreground">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {detailsMd}
+                    </ReactMarkdown>
                   </div>
-                </AccordionTrigger>
 
-                <AccordionContent className="pt-2">
-                  <div className="rounded-2xl border bg-card p-4">
-                    <div className="prose prose-sm max-w-none text-foreground/90 dark:prose-invert prose-headings:font-semibold prose-headings:text-foreground">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {emojiifyMd(stripDuplicateShortSection(row.content_md))}
-                      </ReactMarkdown>
-                    </div>
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
-            </Accordion>
+                  {!detailsExpanded ? (
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-card to-transparent" />
+                  ) : null}
+                </div>
+
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="mt-3 rounded-full"
+                  onClick={() => setDetailsExpanded((v) => !v)}
+                >
+                  {detailsExpanded ? "Свернуть" : "Развернуть"}
+                </Button>
+              </div>
+            ) : null}
           </div>
         )}
       </CardContent>

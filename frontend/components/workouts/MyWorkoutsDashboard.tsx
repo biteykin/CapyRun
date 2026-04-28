@@ -1,3 +1,5 @@
+//frontend/components/workouts/MyWorkoutsDashboard.tsx
+
 "use client";
 
 import * as React from "react";

@@ -105,7 +105,7 @@ function MarkdownMessage(props: {
   );
 }
 
-export default function CoachMessageBubble(props: {
+function CoachMessageBubble(props: {
   role: CoachMessageBubbleRole;
   body: React.ReactNode;
   createdAt?: string | null;
@@ -192,3 +192,16 @@ export default function CoachMessageBubble(props: {
     </div>
   );
 }
+
+export default React.memo(CoachMessageBubble, (prev, next) => {
+  return (
+    prev.role === next.role &&
+    prev.body === next.body &&
+    prev.createdAt === next.createdAt &&
+    prev.hydrated === next.hydrated &&
+    prev.label === next.label &&
+    prev.className === next.className &&
+    prev.bubbleClassName === next.bubbleClassName &&
+    prev.afterBody === next.afterBody
+  );
+});
