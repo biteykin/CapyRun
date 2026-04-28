@@ -1022,14 +1022,38 @@ export async function POST(req: NextRequest) {
 
     try {
       const supabaseAuth = await createClientWithCookies();
-      const { data } = await supabaseAuth.auth.getUser();
+      const { data, error } = await supabaseAuth.auth.getUser();
+
+      console.log("[coach_send auth ssr result]", {
+        hasUser: Boolean(data?.user?.id),
+        userId: data?.user?.id ?? null,
+        errorMessage: error?.message ?? null,
+      });
+
       if (data?.user?.id) user = { id: data.user.id };
-    } catch {}
+    } catch (e: any) {
+      console.log("[coach_send auth ssr exception]", {
+        message: e?.message ?? String(e),
+      });
+    }
 
     if (!user?.id) {
       const cookieAccessToken = req.cookies.get("sb-access-token")?.value;
+
+      console.log("[coach_send auth legacy cookie]", {
+        hasSbAccessToken: Boolean(cookieAccessToken),
+        sbAccessTokenLength: cookieAccessToken?.length ?? 0,
+      });
+
       if (cookieAccessToken) {
-        const { data } = await db.auth.getUser(cookieAccessToken);
+        const { data, error } = await db.auth.getUser(cookieAccessToken);
+
+        console.log("[coach_send auth legacy result]", {
+          hasUser: Boolean(data?.user?.id),
+          userId: data?.user?.id ?? null,
+          errorMessage: error?.message ?? null,
+        });
+
         if (data?.user?.id) user = { id: data.user.id };
       }
     }
@@ -1037,7 +1061,14 @@ export async function POST(req: NextRequest) {
     if (!user?.id) {
       const token = getBearerToken(req);
       if (token) {
-        const { data } = await db.auth.getUser(token);
+        const { data, error } = await db.auth.getUser(token);
+
+        console.log("[coach_send auth bearer result]", {
+          hasUser: Boolean(data?.user?.id),
+          userId: data?.user?.id ?? null,
+          errorMessage: error?.message ?? null,
+        });
+
         if (data?.user?.id) user = { id: data.user.id };
       }
     }
