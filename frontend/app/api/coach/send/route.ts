@@ -1027,6 +1027,14 @@ export async function POST(req: NextRequest) {
     } catch {}
 
     if (!user?.id) {
+      const cookieAccessToken = req.cookies.get("sb-access-token")?.value;
+      if (cookieAccessToken) {
+        const { data } = await db.auth.getUser(cookieAccessToken);
+        if (data?.user?.id) user = { id: data.user.id };
+      }
+    }
+
+    if (!user?.id) {
       const token = getBearerToken(req);
       if (token) {
         const { data } = await db.auth.getUser(token);
