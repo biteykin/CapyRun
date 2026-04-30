@@ -36,11 +36,410 @@ export async function GET() {
         description: "Training goals and onboarding goal setup",
       },
       {
+        name: "Plan",
+        description: "Training plan sessions and calendar items",
+      },
+      {
+        name: "Dashboard",
+        description: "Home dashboard analytics and widgets",
+      },
+      {
+        name: "Integrations",
+        description: "External integrations like Strava",
+      },
+      {
         name: "Auth",
         description: "Authentication and session management",
       },
     ],
     paths: {
+      "/api/integrations": {
+        get: {
+          tags: ["Integrations"],
+          summary: "Get user integrations status",
+          operationId: "getIntegrations",
+          security: [{ cookieAuth: [] }],
+          responses: {
+            "200": {
+              description: "User integrations",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      data: {
+                        $ref: "#/components/schemas/IntegrationsResponse",
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+          },
+        },
+      },
+
+      "/api/dashboard/fast-days": {
+        get: {
+          tags: ["Dashboard"],
+          summary: "Get dashboard daily aggregates",
+          operationId: "getDashboardFastDays",
+          security: [{ cookieAuth: [] }],
+          parameters: [
+            {
+              name: "days",
+              in: "query",
+              required: false,
+              schema: { type: "integer", default: 30, example: 30 },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Daily dashboard aggregates",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      data: {
+                        type: "array",
+                        items: { $ref: "#/components/schemas/DashboardDayRow" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+          },
+        },
+      },
+
+      "/api/dashboard/fast-weeks": {
+        get: {
+          tags: ["Dashboard"],
+          summary: "Get dashboard weekly aggregates",
+          operationId: "getDashboardFastWeeks",
+          security: [{ cookieAuth: [] }],
+          parameters: [
+            {
+              name: "weeks",
+              in: "query",
+              required: false,
+              schema: { type: "integer", default: 12, example: 12 },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Weekly dashboard aggregates",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      data: {
+                        type: "array",
+                        items: { $ref: "#/components/schemas/DashboardWeekRow" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+          },
+        },
+      },
+
+      "/api/dashboard/weekday": {
+        get: {
+          tags: ["Dashboard"],
+          summary: "Get dashboard weekday distribution",
+          operationId: "getDashboardWeekday",
+          security: [{ cookieAuth: [] }],
+          parameters: [
+            {
+              name: "days",
+              in: "query",
+              required: false,
+              schema: { type: "integer", default: 30, example: 30 },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Weekday dashboard aggregates",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      data: {
+                        type: "array",
+                        items: { $ref: "#/components/schemas/DashboardWeekdayRow" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+          },
+        },
+      },
+
+      "/api/dashboard/sport-mix": {
+        get: {
+          tags: ["Dashboard"],
+          summary: "Get dashboard sport mix",
+          operationId: "getDashboardSportMix",
+          security: [{ cookieAuth: [] }],
+          parameters: [
+            {
+              name: "days",
+              in: "query",
+              required: false,
+              schema: { type: "integer", default: 30, example: 30 },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Sport mix dashboard aggregates",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      data: {
+                        type: "array",
+                        items: { $ref: "#/components/schemas/DashboardSportMixRow" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+          },
+        },
+      },
+
+      "/api/dashboard/hr-zones": {
+        get: {
+          tags: ["Dashboard"],
+          summary: "Get dashboard heart-rate zone rows",
+          operationId: "getDashboardHrZones",
+          security: [{ cookieAuth: [] }],
+          parameters: [
+            {
+              name: "days",
+              in: "query",
+              required: false,
+              schema: { type: "integer", default: 30, example: 30 },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Workout HR zone rows for selected period",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      data: {
+                        type: "array",
+                        items: { $ref: "#/components/schemas/DashboardHrZoneRow" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+          },
+        },
+      },
+
+      "/api/dashboard/next-planned": {
+        get: {
+          tags: ["Dashboard"],
+          summary: "Get next planned workout",
+          operationId: "getDashboardNextPlannedWorkout",
+          security: [{ cookieAuth: [] }],
+          responses: {
+            "200": {
+              description: "Next planned workout",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      data: {
+                        oneOf: [
+                          { $ref: "#/components/schemas/DashboardNextPlannedWorkout" },
+                          { type: "null" },
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+          },
+        },
+      },
+
+      "/api/plan/sessions": {
+        post: {
+          tags: ["Plan"],
+          summary: "Create manual planned workout",
+          operationId: "createPlanSession",
+          security: [{ cookieAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["planned_date", "title", "sport"],
+                  properties: {
+                    planned_date: {
+                      type: "string",
+                      example: "2026-05-01",
+                    },
+                    title: {
+                      type: "string",
+                      example: "Лёгкий бег 40 минут",
+                    },
+                    sport: {
+                      type: "string",
+                      example: "run",
+                    },
+                    notes: {
+                      type: "string",
+                      nullable: true,
+                      example: "10 минут разминки, затем лёгкий бег.",
+                    },
+                    effort: {
+                      type: "string",
+                      nullable: true,
+                      example: "Легко",
+                    },
+                    hr_zones: {
+                      type: "array",
+                      items: { type: "string" },
+                      example: ["Z2"],
+                    },
+                    duration_min: {
+                      type: "number",
+                      nullable: true,
+                      example: 40,
+                    },
+                    distance_km: {
+                      type: "number",
+                      nullable: true,
+                      example: 6,
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "Plan session created",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      session: { $ref: "#/components/schemas/PlanSession" },
+                    },
+                  },
+                },
+              },
+            },
+            "400": {
+              description: "Validation error",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            "401": {
+              description: "Unauthorized",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      "/api/plan/sessions/{id}": {
+        delete: {
+          tags: ["Plan"],
+          summary: "Delete or cancel plan session",
+          description:
+            "Deletes manual planned workout sessions. For sessions that belong to an AI-generated plan, marks the session as canceled.",
+          operationId: "deleteOrCancelPlanSession",
+          security: [{ cookieAuth: [] }],
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: {
+                type: "string",
+              },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Plan session deleted or canceled",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      ok: {
+                        type: "boolean",
+                        example: true,
+                      },
+                      action: {
+                        type: "string",
+                        enum: ["deleted", "canceled"],
+                        example: "deleted",
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "401": {
+              description: "Unauthorized",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            "404": {
+              description: "Session not found",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+          },
+        },
+      },
+
       "/api/onboarding/profile": {
         patch: {
           tags: ["Onboarding"],
@@ -1119,6 +1518,209 @@ export async function GET() {
         },
       },
       schemas: {
+        IntegrationsResponse: {
+          type: "object",
+          properties: {
+            strava: {
+              type: "object",
+              properties: {
+                connected: {
+                  type: "boolean",
+                  example: true,
+                },
+                id: {
+                  type: "string",
+                  nullable: true,
+                },
+                provider: {
+                  type: "string",
+                  example: "strava",
+                },
+                status: {
+                  type: "string",
+                  example: "connected",
+                },
+                created_at: {
+                  type: "string",
+                  format: "date-time",
+                  nullable: true,
+                },
+                updated_at: {
+                  type: "string",
+                  format: "date-time",
+                  nullable: true,
+                },
+                last_synced_at: {
+                  type: "string",
+                  format: "date-time",
+                  nullable: true,
+                },
+                error_message: {
+                  type: "string",
+                  nullable: true,
+                },
+              },
+            },
+          },
+        },
+
+        DashboardDayRow: {
+          type: "object",
+          properties: {
+            d: { type: "string", example: "2026-04-30" },
+            workouts: { type: "number", example: 2 },
+            time_sec: { type: "number", example: 5400 },
+            distance_m: { type: "number", example: 12000 },
+            kcal: { type: "number", example: 720 },
+          },
+        },
+
+        DashboardWeekRow: {
+          type: "object",
+          properties: {
+            week_start: { type: "string", example: "2026-04-27" },
+            workouts: { type: "number", example: 4 },
+            time_sec: { type: "number", example: 14400 },
+            distance_m: { type: "number", example: 32000 },
+          },
+        },
+
+        DashboardWeekdayRow: {
+          type: "object",
+          properties: {
+            dow: {
+              type: "number",
+              description: "ISO weekday number, 1 = Monday, 7 = Sunday",
+              example: 1,
+            },
+            workouts: { type: "number", example: 3 },
+            time_sec: { type: "number", example: 7200 },
+          },
+        },
+
+        DashboardSportMixRow: {
+          type: "object",
+          properties: {
+            sport: { type: "string", example: "run" },
+            workouts: { type: "number", example: 8 },
+            time_sec: { type: "number", example: 21600 },
+          },
+        },
+
+        DashboardHrZoneRow: {
+          type: "object",
+          properties: {
+            local_date: {
+              type: "string",
+              nullable: true,
+              example: "2026-04-30",
+            },
+            hr_zone_time: {
+              type: "object",
+              nullable: true,
+              additionalProperties: {
+                type: "number",
+              },
+              example: {
+                Z1: 600,
+                Z2: 1800,
+                Z3: 300,
+              },
+            },
+          },
+        },
+
+        DashboardNextPlannedWorkout: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            planned_date: { type: "string", example: "2026-05-01" },
+            title: {
+              type: "string",
+              nullable: true,
+              example: "Лёгкий бег 40 минут",
+            },
+            sport: {
+              type: "string",
+              nullable: true,
+              example: "run",
+            },
+            status: {
+              type: "string",
+              nullable: true,
+              example: "planned",
+            },
+            structure: {
+              type: "object",
+              nullable: true,
+              additionalProperties: true,
+              properties: {
+                duration_min: { type: "number", nullable: true },
+                distance_km: { type: "number", nullable: true },
+                goal: { type: "string", nullable: true },
+                effort: { type: "string", nullable: true },
+              },
+            },
+          },
+        },
+
+        PlanSession: {
+          type: "object",
+          additionalProperties: true,
+          properties: {
+            id: { type: "string" },
+            user_plan_id: {
+              type: "string",
+              nullable: true,
+            },
+            planned_date: {
+              type: "string",
+              example: "2026-05-01",
+            },
+            sport: {
+              type: "string",
+              nullable: true,
+              example: "run",
+            },
+            status: {
+              type: "string",
+              nullable: true,
+              example: "planned",
+            },
+            title: {
+              type: "string",
+              nullable: true,
+            },
+            notes: {
+              type: "string",
+              nullable: true,
+            },
+            structure: {
+              type: "object",
+              nullable: true,
+              additionalProperties: true,
+              properties: {
+                source: { type: "string", example: "manual" },
+                goal: { type: "string", nullable: true },
+                main: { type: "string", nullable: true },
+                notes: { type: "string", nullable: true },
+                effort: { type: "string", nullable: true },
+                hr_target: { type: "string", nullable: true },
+                hr_zones: {
+                  type: "array",
+                  items: { type: "string" },
+                },
+                duration_min: { type: "number", nullable: true },
+                distance_km: { type: "number", nullable: true },
+              },
+            },
+            link_workout_id: {
+              type: "string",
+              nullable: true,
+            },
+          },
+        },
+
         Goal: {
           type: "object",
           additionalProperties: true,

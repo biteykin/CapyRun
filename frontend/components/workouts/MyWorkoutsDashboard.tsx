@@ -15,7 +15,6 @@ import {
   HeartPulse,
   TrendingUp,
 } from "lucide-react";
-import { supabase } from "@/lib/supabaseBrowser";
 
 import {
   AreaChart,
@@ -143,17 +142,6 @@ function prettySport(s: string) {
   };
   return map[s] ?? s;
 }
-function dateDaysAgo(days: number) {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - Math.max(0, days - 1));
-  return d.toISOString().slice(0, 10);
-}
-function todayISO() {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString().slice(0, 10);
-}
 function formatZoneLabel(raw: string) {
   const key = String(raw || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const map: Record<string, string> = {
@@ -242,38 +230,40 @@ export default function MyWorkoutsDashboardClient({ daysDefault = 30 }: { daysDe
       setLoading(true);
       setErr(null);
       try {
-        const fromISO = dateDaysAgo(days);
         const [a, b, c, d, e, f] = await Promise.all([
-          supabase.rpc("dash_fast_days",         { days }),
-          supabase.rpc("dash_fast_weeks",        { weeks: 12 }),
-          supabase.rpc("dash_fast_weekday",      { days }),
-          supabase.rpc("dash_fast_sport_mix",    { days }),
-          supabase
-            .from("workouts")
-            .select("local_date, hr_zone_time")
-            .gte("local_date", fromISO),
-          supabase
-            .from("user_plan_sessions")
-            .select("id, planned_date, title, sport, status, structure")
-            .gte("planned_date", todayISO())
-            .in("status", ["planned", "moved"])
-            .order("planned_date", { ascending: true })
-            .limit(1)
-            .maybeSingle(),
+          fetch(`/api/dashboard/fast-days?days=${days}`, { credentials: "include" }),
+          fetch("/api/dashboard/fast-weeks?weeks=12", { credentials: "include" }),
+          fetch(`/api/dashboard/weekday?days=${days}`, { credentials: "include" }),
+          fetch(`/api/dashboard/sport-mix?days=${days}`, { credentials: "include" }),
+          fetch(`/api/dashboard/hr-zones?days=${days}`, { credentials: "include" }),
+          fetch("/api/dashboard/next-planned", { credentials: "include" }),
         ]);
+
         if (canceled) return;
-        if (a.error) throw a.error;
-        if (b.error) throw b.error;
-        if (c.error) throw c.error;
-        if (d.error) throw d.error;
-        if ("error" in e && e.error) throw e.error;
-        if ("error" in f && f.error) throw f.error;
-        setDaysData((a.data ?? []) as DayRow[]);
-        setWeeks(   (b.data ?? []) as WeekRow[]);
-        setWd(      (c.data ?? []) as WdRow[]);
-        setMix(     (d.data ?? []) as MixRow[]);
-        setZoneRows((e.data ?? []) as WorkoutZoneRow[]);
-        setNextPlannedWorkout((f.data ?? null) as NextPlannedWorkoutRow | null);
+
+        const responses = [a, b, c, d, e, f];
+        const failed = responses.find((res) => !res.ok);
+
+        if (failed) {
+          const json = await failed.json().catch(() => null);
+          throw new Error(json?.error ?? `HTTP ${failed.status}`);
+        }
+
+        const [
+          daysJson,
+          weeksJson,
+          weekdayJson,
+          sportMixJson,
+          zonesJson,
+          nextPlannedJson,
+        ] = await Promise.all(responses.map((res) => res.json()));
+
+        setDaysData((daysJson.data ?? []) as DayRow[]);
+        setWeeks((weeksJson.data ?? []) as WeekRow[]);
+        setWd((weekdayJson.data ?? []) as WdRow[]);
+        setMix((sportMixJson.data ?? []) as MixRow[]);
+        setZoneRows((zonesJson.data ?? []) as WorkoutZoneRow[]);
+        setNextPlannedWorkout((nextPlannedJson.data ?? null) as NextPlannedWorkoutRow | null);
       } catch (e: any) {
         if (!canceled) setErr(e?.message ?? String(e));
       } finally {

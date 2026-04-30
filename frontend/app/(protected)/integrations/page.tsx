@@ -1,3 +1,5 @@
+// frontend/app/(protected)/integrations/page.tsx
+
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";

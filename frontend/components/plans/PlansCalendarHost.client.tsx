@@ -1,3 +1,5 @@
+// frontend/components/plans/PlansCalendarHost.client.tsx
+
 "use client";
 
 import * as React from "react";
@@ -17,7 +19,6 @@ import {
 } from "lucide-react";
 import PlansCalendar, { type PlanEvent } from "./PlansCalendar.client";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/lib/supabaseBrowser";
 import {
   Card,
   CardContent,
@@ -606,52 +607,35 @@ export default function PlansCalendarHost({
       setIsCreating(true);
       setCreateError(null);
 
-      const {
-        data: { user },
-        error: userErr,
-      } = await supabase.auth.getUser();
-
-      if (userErr) throw userErr;
-      if (!user) throw new Error("Пользователь не авторизован.");
-
-      const structure = {
-        source: "manual",
-        goal: title,
-        main: createNotes.trim() || null,
-        notes: createNotes.trim() || null,
-        effort: createEffort.trim() || null,
-        hr_target: createHrZones.length ? createHrZones.join(", ") : null,
-        hr_zones: createHrZones,
-        duration_min: durationMin,
-        distance_km: distanceKm,
-      };
-
-      const { data, error } = await supabase
-        .from("user_plan_sessions")
-        .insert({
-          user_id: user.id,
-          user_plan_id: null, // 👈 FIX: убираем NOT NULL проблему
+      const res = await fetch("/api/plan/sessions", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
           planned_date: createDate,
-          sport: createSport as any,
-          status: "planned",
+          sport: createSport,
           title,
           notes: createNotes.trim() || null,
-          structure,
-          updated_at: new Date().toISOString(),
-        } as any)
-        .select("id, user_plan_id, planned_date, sport, status, title, notes, structure, link_workout_id")
-        .single();
+          effort: createEffort.trim() || null,
+          hr_zones: createHrZones,
+          duration_min: durationMin,
+          distance_km: distanceKm,
+        }),
+      });
 
-      if (error) {
-        console.error(
-          "create planned workout failed",
-          JSON.stringify(error, null, 2)
-        );
-        if (error.message?.includes("user_plan_id")) {
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        console.error("create planned workout failed", json);
+
+        if (String(json?.error ?? "").includes("user_plan_id")) {
           throw new Error("Не удалось создать тренировку. План ещё не инициализирован.");
         }
+
         throw new Error("Ошибка сохранения тренировки. Попробуйте ещё раз.");
       }
+
+      const json = await res.json();
+      const data = json.session;
 
       const createdEvent: PlanEvent = {
         id: data.id,
@@ -763,25 +747,14 @@ export default function PlansCalendarHost({
     try {
       setIsDeleting(true);
 
-      const isManualPlannedWorkout =
-        selected.source === "manual" ||
-        selected.structure?.source === "manual" ||
-        !selected.user_plan_id;
+      const res = await fetch(`/api/plan/sessions/${selected.id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
 
-      const result = isManualPlannedWorkout
-        ? await supabase.from("user_plan_sessions").delete().eq("id", selected.id)
-        : await supabase
-            .from("user_plan_sessions")
-            .update({
-              status: "canceled",
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", selected.id);
-
-      const { error } = result;
-
-      if (error) {
-        console.error("plan_session_cancel_failed", error);
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        console.error("plan_session_cancel_failed", json);
         return;
       }
 
