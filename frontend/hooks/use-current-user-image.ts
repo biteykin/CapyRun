@@ -1,19 +1,36 @@
-import { createClient } from '@/components/clients/nextjs/lib/supabase/client'
+// frontend/hooks/use-current-user-image.ts
+
 import { useEffect, useState } from 'react'
 
 export const useCurrentUserImage = () => {
   const [image, setImage] = useState<string | null>(null)
 
   useEffect(() => {
+    let cancelled = false
+
     const fetchUserImage = async () => {
-      const { data, error } = await createClient().auth.getSession()
-      if (error) {
+      try {
+        const res = await fetch('/api/profile/me', {
+          method: 'GET',
+          credentials: 'include',
+        })
+
+        if (!res.ok) return
+
+        const data = await res.json()
+        const avatarUrl = data?.profile?.avatar_url ?? null
+
+        if (!cancelled) setImage(avatarUrl)
+      } catch (error) {
         console.error(error)
       }
-
-      setImage(data.session?.user.user_metadata.avatar_url ?? null)
     }
+
     fetchUserImage()
+
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   return image

@@ -189,11 +189,19 @@ export default function CoachChat(props: {
 
   React.useEffect(() => {
     (async () => {
-      const { error } = await supabase.rpc("coach_mark_thread_read", {
-        p_thread_id: threadId,
+      const res = await fetch("/api/coach/mark-read", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          threadId,
+        }),
       });
-      if (error) {
-        console.warn("[coach] mark read failed", error);
+
+      if (!res.ok) {
+        console.warn("[coach] mark-read http error", res.status);
       }
     })();
   }, [threadId]);
@@ -240,20 +248,24 @@ export default function CoachChat(props: {
     try {
       setIsLoadingOlder(true);
 
-      const { data, error } = await supabase
-        .from("coach_messages")
-        .select("id, thread_id, author_id, type, body, meta, created_at")
-        .eq("thread_id", threadId)
-        .lt("created_at", oldest.created_at)
-        .order("created_at", { ascending: false })
-        .limit(MESSAGES_PAGE_SIZE + 1);
+      const res = await fetch(`/api/coach/messages?threadId=${threadId}`, {
+        method: "GET",
+        credentials: "include",
+      });
 
-      if (error) throw error;
+      if (!res.ok) {
+        console.warn("[coach] messages http error", res.status);
+        return;
+      }
 
-      const rows = (data ?? []) as RawMessage[];
-      const older = rows.slice(0, MESSAGES_PAGE_SIZE).reverse();
+      const json = (await res.json()) as { messages?: RawMessage[] };
+      const allRows = json.messages ?? [];
+      const olderRows = allRows.filter(
+        (m) => new Date(m.created_at).getTime() < new Date(oldest.created_at).getTime()
+      );
+      const older = olderRows.slice(-MESSAGES_PAGE_SIZE);
 
-      setHasMoreMessages(rows.length > MESSAGES_PAGE_SIZE);
+      setHasMoreMessages(olderRows.length > MESSAGES_PAGE_SIZE);
       setMessages((prev) => mergeDedup(prev, older));
 
       requestAnimationFrame(() => {
@@ -335,11 +347,19 @@ export default function CoachChat(props: {
   }, [messages, pendingPlanActionMessageId]);
 
   const markRead = React.useCallback(async () => {
-    const { error } = await supabase.rpc("coach_mark_thread_read", {
-      p_thread_id: threadId,
+    const res = await fetch("/api/coach/mark-read", {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        threadId,
+      }),
     });
-    if (error) {
-      console.warn("[coach] mark read failed", error);
+
+    if (!res.ok) {
+      console.warn("[coach] mark-read http error", res.status);
     }
   }, [threadId]);
 

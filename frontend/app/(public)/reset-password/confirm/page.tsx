@@ -4,7 +4,6 @@
 
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { supabase } from "@/lib/supabaseBrowser";
 import { Eye, EyeOff } from "lucide-react";
 
 import {
@@ -67,18 +66,21 @@ export default function ResetPasswordConfirmPage() {
         throw new Error("Ссылка для восстановления пароля недействительна.");
       }
 
-      const { error: verifyErr } = await supabase.auth.verifyOtp({
-        token_hash: tokenHash,
-        type,
+      const res = await fetch("/api/auth/reset-password/confirm", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          tokenHash,
+          type,
+          password,
+        }),
       });
 
-      if (verifyErr) throw verifyErr;
-
-      const { error } = await supabase.auth.updateUser({
-        password,
-      });
-
-      if (error) throw error;
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        throw new Error(json?.error ?? `HTTP ${res.status}`);
+      }
 
       setSuccess(true);
 

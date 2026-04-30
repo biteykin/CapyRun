@@ -1,3 +1,5 @@
+// frontend/components/profile/profile-user-menu.client.tsx
+
 "use client";
 
 import * as React from "react";
@@ -23,12 +25,26 @@ export default function ProfileUserMenu() {
     if (loading) return;
     setLoading(true);
     try {
-      await supabase.auth.signOut();
+      try {
+        window.sessionStorage.setItem("capyrun:logout-in-progress", "1");
+      } catch {}
+
+      await supabase.auth.signOut({ scope: "local" });
+
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+
       router.push("/");
       router.refresh();
     } catch (e) {
       console.error("logout error", e);
     } finally {
+      try {
+        window.sessionStorage.removeItem("capyrun:logout-in-progress");
+      } catch {}
+
       setLoading(false);
     }
   }

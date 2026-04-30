@@ -16,74 +16,61 @@ import { useAppUser } from "@/app/providers";
 import { Skeleton } from "@/components/ui/skeleton";
 import { User, Settings, LogOut } from "lucide-react";
 
+type SidebarSessionUser = {
+  id: string;
+  email: string | null;
+  user_metadata?: Record<string, any> | null;
+};
+
 export default function SidebarProfile() {
-  // 1) Хуки: контекст, локальный стейт — всегда вызываются в одном порядке
   const { user, setUser } = useAppUser();
   const [profile, setProfile] = useState<any | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // 2) Поднимаем сессию и подписку на изменения auth
   useEffect(() => {
-    let isMounted = true;
+    let cancelled = false;
 
-    (async () => {
-      // Попытка быстро получить user из текущей сессии
-      const { data: sess } = await supabase.auth.getSession();
-      const u = sess?.session?.user ?? null;
-
-      if (isMounted) setUser(u);
-
-      // Если пользователя нет — дополнительная попытка
-      if (!u) {
-        const { data: uData } = await supabase.auth.getUser();
-        if (isMounted) setUser(uData?.user ?? null);
-      }
-
-      if (isMounted) setLoading(false);
-    })();
-
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!isMounted) return;
-      setUser(session?.user ?? null);
-    });
-
-    return () => {
-      isMounted = false;
+    async function loadSession() {
       try {
-        sub?.subscription?.unsubscribe();
-      } catch {}
-    };
-  }, [setUser]);
+        const res = await fetch("/api/auth/session", {
+          method: "GET",
+          credentials: "include",
+        });
 
-  // 3) Подтягиваем профиль из БД, когда появился user.id
-  useEffect(() => {
-    let canceled = false;
+        if (!res.ok) {
+          if (!cancelled) {
+            setUser(null);
+            setProfile(null);
+          }
+          return;
+        }
 
-    async function loadProfile() {
-      if (!user?.id) {
-        setProfile(null);
-        return;
-      }
-      try {
-        const { data } = await supabase
-          .from("profiles")
-          .select("display_name, avatar_url")
-          .eq("user_id", user.id)
-          .maybeSingle();
+        const json = (await res.json()) as {
+          user: SidebarSessionUser | null;
+          profile: any | null;
+        };
 
-        if (!canceled) setProfile(data ?? null);
+        if (!cancelled) {
+          setUser(json.user as any);
+          setProfile(json.profile ?? null);
+        }
       } catch {
-        if (!canceled) setProfile(null);
+        if (!cancelled) {
+          setUser(null);
+          setProfile(null);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     }
 
-    loadProfile();
-    return () => {
-      canceled = true;
-    };
-  }, [user?.id]);
+    loadSession();
 
-  // 4) Производные значения — вычисляем ХУКАМИ ПОВЕРХУ (безусловно)
+    return () => {
+      cancelled = true;
+    };
+  }, [setUser]);
+
   const displayName = useMemo(() => {
     const fromProfile =
       profile?.display_name && String(profile.display_name).trim();
@@ -91,12 +78,10 @@ export default function SidebarProfile() {
       user?.user_metadata?.full_name &&
       String(user.user_metadata.full_name).trim();
 
-    // верхняя строка: display_name > full_name > дефолт
     return fromProfile || fromMeta || "Резвая Капибара";
   }, [profile?.display_name, user?.user_metadata?.full_name]);
 
   const avatarUrl = useMemo(() => {
-    // Порядок: avatar_url из profiles > avatar_url из метаданных > дефолт
     return (
       profile?.avatar_url ||
       user?.user_metadata?.avatar_url ||
@@ -104,9 +89,6 @@ export default function SidebarProfile() {
     );
   }, [profile?.avatar_url, user?.user_metadata?.avatar_url]);
 
-  // 5) Рендер
-
-  // Лоадер (скелетон) — красивый и постоянный
   if (loading) {
     return (
       <SidebarMenuButton asChild className="w-full">
@@ -127,7 +109,6 @@ export default function SidebarProfile() {
     );
   }
 
-  // Не авторизован
   if (!user) {
     return (
       <SidebarMenuButton asChild className="w-full">
@@ -147,7 +128,6 @@ export default function SidebarProfile() {
     );
   }
 
-  // Авторизован
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -157,7 +137,6 @@ export default function SidebarProfile() {
               src={avatarUrl}
               alt={displayName}
               onError={(e) => {
-                // если svg/картинка не загрузилась — подставим дефолт
                 const img = e.currentTarget as HTMLImageElement;
                 if (img.src.endsWith("/avatars/default-1.svg")) return;
                 img.src = "/avatars/default-1.svg";
@@ -168,11 +147,9 @@ export default function SidebarProfile() {
             </AvatarFallback>
           </Avatar>
           <div className="flex flex-col truncate text-left">
-            {/* ВЕРХНЯЯ СТРОКА: только display_name|full_name|дефолт, БЕЗ email */}
             <span className="text-sm font-medium truncate">{displayName}</span>
-            {/* НИЖНЯЯ СТРОКА: email */}
             <span className="text-xs text-muted-foreground truncate">
-              {user.email}
+              {user.email ?? ""}
             </span>
           </div>
         </SidebarMenuButton>
@@ -190,10 +167,23 @@ export default function SidebarProfile() {
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onClick={async () => {
-            await supabase.auth.signOut();
             try {
-              await fetch("/api/auth/callback", { method: "POST" });
+              try {
+                window.sessionStorage.setItem("capyrun:logout-in-progress", "1");
+              } catch {}
+
+              await supabase.auth.signOut({ scope: "local" });
+
+              await fetch("/api/auth/logout", {
+                method: "POST",
+                credentials: "include",
+              });
             } catch {}
+
+            try {
+              window.sessionStorage.removeItem("capyrun:logout-in-progress");
+            } catch {}
+
             setUser(null);
             window.location.href = "/login";
           }}

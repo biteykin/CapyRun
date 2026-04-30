@@ -64,10 +64,27 @@ export default function LoginPage() {
   }
 
   useEffect(() => {
-    // Если уже есть сессия — редирект
-    supabase.auth.getSession().then(({ data }) => {
-      if (data?.session) router.replace("/home");
-    });
+    let cancelled = false;
+
+    async function checkServerSession() {
+      try {
+        const res = await fetch("/api/auth/session", {
+          method: "GET",
+          credentials: "include",
+        });
+
+        if (!res.ok) return;
+
+        const data = await res.json();
+        if (!cancelled && data?.user) router.replace("/home");
+      } catch {}
+    }
+
+    checkServerSession();
+
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   useEffect(() => {
@@ -87,99 +104,47 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      async function syncServerSession(session: any) {
-        await fetch("/api/auth/callback", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ event: "SIGNED_IN", session }),
-        });
-      }
-
-      async function ensureProfile(userId: string) {
-        await supabase.from("profiles").upsert(
-          {
-            user_id: userId,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "user_id" }
-        );
-      }
-
       if (mode === "login") {
         posthog.capture("login_submitted", {
           email_domain: email.split("@")[1] || null,
         });
 
-        const { data, error: signErr } = await supabase.auth.signInWithPassword({
-          email,
-          password,
+        const res = await fetch("/api/auth/login", {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ email, password }),
         });
 
-        if (signErr) throw signErr;
-
-        // Если сервер вернул session — редиректим сразу
-        if (data?.session) {
-          // Сразу синхронизируем httpOnly-куки на сервере
-          await syncServerSession(data.session);
-          router.replace("/home");
-          return;
+        if (!res.ok) {
+          const json = await res.json().catch(() => null);
+          throw new Error(json?.error ?? `HTTP ${res.status}`);
         }
 
-        // Иногда cookie/сессия ставится асинхронно (magic link flow или redirect). Делаем короткий retry getSession
-        for (let i = 0; i < 3; i++) {
-          const { data: retrySession } = await supabase.auth.getSession();
-          if (retrySession?.session) {
-            await syncServerSession(retrySession.session);
-          }
-          const { data: sessData } = await supabase.auth.getSession();
-          if (sessData?.session) {
-            router.replace("/home");
-            return;
-          }
-          await new Promise((res) => setTimeout(res, 300));
-        }
-
-        setError(
-          "Вход не завершён: сессия не найдена. Проверьте почту или повторите попытку."
-        );
+        router.replace("/home");
+        router.refresh();
+        return;
       } else {
         posthog.capture("signup_submitted", {
           email_domain: email.split("@")[1] || null,
         });
 
-        const { data, error: signErr } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            emailRedirectTo: `${window.location.origin}/api/auth/confirm`,
-          },
+        const res = await fetch("/api/auth/signup", {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ email, password }),
         });
 
-        if (!signErr && data?.session) {
-          await syncServerSession(data.session);
-          await ensureProfile(data.session.user.id);
-          router.replace("/home");
-          return;
+        const json = await res.json().catch(() => null);
+
+        if (!res.ok) {
+          throw new Error(json?.error ?? `HTTP ${res.status}`);
         }
 
-        // Если такой email уже есть, не раскрываем это напрямую.
-        // Пробуем войти с тем же email/password: если пароль верный — пускаем.
-        const { data: loginData, error: loginErr } =
-          await supabase.auth.signInWithPassword({
-            email,
-            password,
-          });
-
-        if (!loginErr && loginData?.session) {
-          await syncServerSession(loginData.session);
+        if (json?.user && !json?.needsEmailConfirmation) {
           router.replace("/home");
-          return;
-        }
-
-        if (signErr) {
-          setError(
-            "Не удалось создать аккаунт или войти с этими данными. Проверьте пароль или восстановите доступ."
-          );
+          router.refresh();
           return;
         }
 

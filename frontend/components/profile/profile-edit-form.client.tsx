@@ -5,7 +5,6 @@
 import * as React from "react";
 import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseBrowser";
 import Cropper from "react-easy-crop";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -225,23 +224,22 @@ export default function ProfileEditForm({
     setUploadingAvatar(true);
 
     try {
-      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
-      const safeExt = ["jpg", "jpeg", "png", "webp"].includes(ext) ? ext : "jpg";
-      const path = `${initial.user_id}/${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2)}.${safeExt}`;
+      const formData = new FormData();
+      formData.append("file", file);
 
-      const { error: uploadErr } = await supabase.storage
-        .from("avatars")
-        .upload(path, file, {
-          cacheControl: "3600",
-          upsert: false,
-        });
+      const res = await fetch("/api/profile/avatar", {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      });
 
-      if (uploadErr) throw uploadErr;
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        throw new Error(json?.error ?? `HTTP ${res.status}`);
+      }
 
-      const { data } = supabase.storage.from("avatars").getPublicUrl(path);
-      const publicUrl = data?.publicUrl;
+      const json = await res.json();
+      const publicUrl = json?.avatarUrl;
       if (!publicUrl) throw new Error("Не удалось получить ссылку на аватар.");
 
       setAvatarUrl(publicUrl);
@@ -332,34 +330,23 @@ export default function ProfileEditForm({
         updated_at: new Date().toISOString(),
       };
 
-      if (isOnboarding) {
-        const { data: currentProfile } = await supabase
-          .from("profiles")
-          .select("onboarding")
-          .eq("user_id", initial.user_id)
-          .maybeSingle();
-
-        payload.onboarding = {
-          ...((currentProfile?.onboarding as Record<string, any> | null) ?? {}),
-          status: "in_progress",
-          step: "goal",
-          profile_done: true,
-          completed_steps: ["profile"],
-          updated_at: new Date().toISOString(),
-        };
-      }
-
       for (const k of Object.keys(payload)) {
         const v = payload[k];
         if (typeof v === "number" && Number.isNaN(v)) payload[k] = null;
       }
 
-      const { error: upErr } = await supabase
-        .from("profiles")
-        .update(payload)
-        .eq("user_id", initial.user_id);
+      const endpoint = isOnboarding ? "/api/onboarding/profile" : "/api/profile/me";
+      const res = await fetch(endpoint, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
 
-      if (upErr) throw upErr;
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        throw new Error(json?.error ?? `HTTP ${res.status}`);
+      }
 
       setSuccess("Сохранено.");
 
@@ -385,30 +372,15 @@ export default function ProfileEditForm({
     setError(null);
 
     try {
-      const now = new Date().toISOString();
+      const res = await fetch("/api/onboarding/skip", {
+        method: "POST",
+        credentials: "include",
+      });
 
-      const { data: currentProfile } = await supabase
-        .from("profiles")
-        .select("onboarding")
-        .eq("user_id", initial.user_id)
-        .maybeSingle();
-
-      const { error: upErr } = await supabase
-        .from("profiles")
-        .update({
-          onboarding_completed_at: now,
-          onboarding: {
-            ...((currentProfile?.onboarding as Record<string, any> | null) ?? {}),
-            status: "skipped",
-            skipped_at: now,
-            completed_at: now,
-            updated_at: now,
-          },
-          updated_at: now,
-        })
-        .eq("user_id", initial.user_id);
-
-      if (upErr) throw upErr;
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        throw new Error(json?.error ?? `HTTP ${res.status}`);
+      }
 
       router.push("/home");
       router.refresh();

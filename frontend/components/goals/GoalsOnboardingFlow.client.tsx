@@ -5,7 +5,6 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/lib/supabaseBrowser";
 
 import {
   Card,
@@ -557,16 +556,6 @@ export default function GoalsOnboardingFlow({
     setError(null);
 
     try {
-      const {
-        data: { user },
-        error: userErr,
-      } = await supabase.auth.getUser();
-
-      if (userErr) throw userErr;
-      if (!user) {
-        throw new Error("Пользователь не авторизован");
-      }
-
       const today = new Date();
       const fromStr =
         isEditMode && editGoal?.date_from
@@ -579,20 +568,6 @@ export default function GoalsOnboardingFlow({
       const sport = resolveSport(selectedPresets);
 
       const birthDate = deriveBirthDateFromAge(age, initialProfile?.birth_date ?? null);
-
-      const { error: profileErr } = await supabase.from("profiles").upsert(
-        {
-          user_id: user.id,
-          sex: gender || null,
-          birth_date: birthDate,
-          height_cm: heightCm ? Number(heightCm) : null,
-          weight_kg: weightKg ? Number(weightKg) : null,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "user_id" }
-      );
-
-      if (profileErr) throw profileErr;
 
       const title = goalTitle.trim();
 
@@ -617,56 +592,39 @@ export default function GoalsOnboardingFlow({
         },
       };
 
-      const goalPayload = {
-        user_id: user.id,
-        title,
-        type: goalType,
-        sport,
-        date_from: fromStr,
-        date_to: toStr,
-        status: "active", // из enum plan_status
-        target_json: targetJson,
-        notes: secondaryGoals.trim() || null,
-        updated_at: new Date().toISOString(),
-      };
+      const res = await fetch("/api/goals/onboarding", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mode,
+          editGoalId: isEditMode && editGoal ? editGoal.id : null,
+          profile: {
+            sex: gender || null,
+            birth_date: birthDate,
+            height_cm: heightCm ? Number(heightCm) : null,
+            weight_kg: weightKg ? Number(weightKg) : null,
+          },
+          goal: {
+            title,
+            type: goalType,
+            sport,
+            date_from: fromStr,
+            date_to: toStr,
+            target_json: targetJson,
+            notes: secondaryGoals.trim() || null,
+          },
+        }),
+      });
 
-      const { error: saveGoalErr } =
-        isEditMode && editGoal
-          ? await supabase
-              .from("goals")
-              .update(goalPayload)
-              .eq("id", editGoal.id)
-              .eq("user_id", user.id)
-          : await supabase.from("goals").insert(goalPayload);
-
-      if (saveGoalErr) throw saveGoalErr;
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        throw new Error(json?.error ?? `HTTP ${res.status}`);
+      }
 
       onFinished?.();
 
       if (mode === "onboarding") {
-        const { data: profileRow } = await supabase
-          .from("profiles")
-          .select("onboarding")
-          .eq("user_id", user.id)
-          .maybeSingle();
-
-        await supabase
-          .from("profiles")
-          .update({
-            onboarding: {
-              ...((profileRow?.onboarding as Record<string, any> | null) ?? {}),
-              status: "in_progress",
-              step: "import",
-              goal_done: true,
-              profile_done: true,
-              completed_steps: ["intro", "goal", "profile"],
-              updated_at: new Date().toISOString(),
-            },
-            primary_sport: sport ?? "run",
-            updated_at: new Date().toISOString(),
-          })
-          .eq("user_id", user.id);
-
         router.push("/onboarding/import");
         router.refresh();
       } else {
@@ -690,38 +648,15 @@ export default function GoalsOnboardingFlow({
     setError(null);
 
     try {
-      const {
-        data: { user },
-        error: userErr,
-      } = await supabase.auth.getUser();
+      const res = await fetch("/api/onboarding/skip", {
+        method: "POST",
+        credentials: "include",
+      });
 
-      if (userErr) throw userErr;
-      if (!user) throw new Error("Пользователь не авторизован");
-
-      const { data: profileRow } = await supabase
-        .from("profiles")
-        .select("onboarding")
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      const now = new Date().toISOString();
-
-      const { error: updateErr } = await supabase
-        .from("profiles")
-        .update({
-          onboarding_completed_at: now,
-          onboarding: {
-            ...((profileRow?.onboarding as Record<string, any> | null) ?? {}),
-            status: "skipped",
-            skipped_at: now,
-            completed_at: now,
-            updated_at: now,
-          },
-          updated_at: now,
-        })
-        .eq("user_id", user.id);
-
-      if (updateErr) throw updateErr;
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        throw new Error(json?.error ?? `HTTP ${res.status}`);
+      }
 
       router.push("/home");
       router.refresh();

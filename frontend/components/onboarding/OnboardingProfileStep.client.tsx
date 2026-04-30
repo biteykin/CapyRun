@@ -1,3 +1,5 @@
+// frontend/components/onboarding/OnboardingProfileStep.client.tsx
+
 "use client";
 
 import ProfileEditForm from "@/components/profile/profile-edit-form.client";

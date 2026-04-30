@@ -1,10 +1,11 @@
+// frontend/components/onboarding/OnboardingImport.client.tsx
+
 "use client";
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Activity, FileUp, PencilLine, Unplug } from "lucide-react";
 
-import { supabase } from "@/lib/supabaseBrowser";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import OnboardingStepHeader from "@/components/onboarding/OnboardingStepHeader";
@@ -49,47 +50,17 @@ export default function OnboardingImportClient() {
     setError(null);
 
     try {
-      const {
-        data: { user },
-        error: userErr,
-      } = await supabase.auth.getUser();
+      const res = await fetch("/api/onboarding/import", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ choice }),
+      });
 
-      if (userErr) throw userErr;
-      if (!user) throw new Error("Пользователь не авторизован");
-
-      const { data: profileRow } = await supabase
-        .from("profiles")
-        .select("onboarding")
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      const current = (profileRow?.onboarding as Record<string, any> | null) ?? {};
-      const completedSteps = Array.isArray(current.completed_steps)
-        ? current.completed_steps
-        : [];
-
-      const now = new Date().toISOString();
-
-      const { error: updateErr } = await supabase
-        .from("profiles")
-        .update({
-          onboarding_completed_at: now,
-          onboarding: {
-            ...current,
-            status: choice === "skipped" ? "skipped" : "completed",
-            step: "done",
-            import_choice: choice,
-            import_done: choice !== "skipped",
-            skipped_import: choice === "skipped",
-            completed_steps: [...new Set([...completedSteps, "import"])],
-            completed_at: now,
-            updated_at: now,
-          },
-          updated_at: now,
-        })
-        .eq("user_id", user.id);
-
-      if (updateErr) throw updateErr;
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        throw new Error(json?.error ?? `HTTP ${res.status}`);
+      }
 
       if (href.startsWith("/api/")) {
         window.location.href = href;
