@@ -1,3 +1,5 @@
+//frontend/components/profile/profile-edit-form.client.tsx
+
 "use client";
 
 import * as React from "react";
@@ -72,11 +74,16 @@ type InitialProfile = {
 export default function ProfileEditForm({
   initial,
   email,
+  mode = "profile",
+  onSaved,
 }: {
   initial: InitialProfile;
   email: string | null;
+  mode?: "profile" | "onboarding";
+  onSaved?: () => void;
 }) {
   const router = useRouter();
+  const isOnboarding = mode === "onboarding";
   const countryOptions = React.useMemo(() => getCountryOptions(), []);
   const [countryOpen, setCountryOpen] = React.useState(false);
   const [avatarPanel, setAvatarPanel] = React.useState<"none" | "presets" | "upload">("none");
@@ -85,6 +92,18 @@ export default function ProfileEditForm({
   const [avatarUrl, setAvatarUrl] = React.useState(initial.avatar_url ?? "");
   const [sex, setSex] = React.useState(initial.sex ?? "");
   const [birthDate, setBirthDate] = React.useState(initial.birth_date ?? "");
+  const [age, setAge] = React.useState(() => {
+    if (!initial.birth_date) return "";
+    const d = new Date(initial.birth_date);
+    if (Number.isNaN(d.getTime())) return "";
+    const now = new Date();
+    let years = now.getFullYear() - d.getFullYear();
+    const hadBirthday =
+      now.getMonth() > d.getMonth() ||
+      (now.getMonth() === d.getMonth() && now.getDate() >= d.getDate());
+    if (!hadBirthday) years -= 1;
+    return years > 0 ? String(years) : "";
+  });
   const [heightCm, setHeightCm] = React.useState(initial.height_cm?.toString() ?? "");
   const [weightKg, setWeightKg] = React.useState(initial.weight_kg?.toString() ?? "");
   const [countryInput, setCountryInput] = React.useState(getCountryLabel(initial.country_code));
@@ -165,6 +184,27 @@ export default function ProfileEditForm({
     const n = Number(s);
     return Number.isFinite(n) ? n : null;
   };
+
+  function deriveBirthDateFromAge(ageValue: string, prevBirthDate?: string | null) {
+    const ageNum = Number(ageValue);
+    if (!Number.isFinite(ageNum) || ageNum <= 0) return null;
+
+    const now = new Date();
+    const year = now.getFullYear() - ageNum;
+
+    let month = 1;
+    let day = 1;
+
+    if (prevBirthDate) {
+      const prev = new Date(prevBirthDate);
+      if (!Number.isNaN(prev.getTime())) {
+        month = prev.getMonth() + 1;
+        day = prev.getDate();
+      }
+    }
+
+    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
 
   async function onUploadAvatar(file: File) {
     if (!file) return;
@@ -260,7 +300,7 @@ export default function ProfileEditForm({
   }
 
   async function onSave() {
-    if (saving || !isDirty) return;
+    if (saving || (!isDirty && !isOnboarding)) return;
     setSaving(true);
     setError(null);
     setSuccess(null);
@@ -270,17 +310,44 @@ export default function ProfileEditForm({
         findCountryCodeByLabel(countryInput) ??
         (countryCode ? countryCode.toUpperCase() : null);
 
+      const resolvedBirthDate = isOnboarding
+        ? deriveBirthDateFromAge(age, initial.birth_date)
+        : birthDate.trim() || null;
+
+      const timezone =
+        typeof Intl !== "undefined"
+          ? Intl.DateTimeFormat().resolvedOptions().timeZone
+          : null;
+
       const payload: Record<string, unknown> = {
         display_name: displayName.trim() || null,
         avatar_url: avatarUrl.trim() || null,
         sex: sex.trim() || null,
-        birth_date: birthDate.trim() || null,
+        birth_date: resolvedBirthDate,
         height_cm: toNumOrNull(heightCm),
         weight_kg: toNumOrNull(weightKg),
         country_code: normalizedCountryCode,
         city: city.trim() || null,
+        timezone,
         updated_at: new Date().toISOString(),
       };
+
+      if (isOnboarding) {
+        const { data: currentProfile } = await supabase
+          .from("profiles")
+          .select("onboarding")
+          .eq("user_id", initial.user_id)
+          .maybeSingle();
+
+        payload.onboarding = {
+          ...((currentProfile?.onboarding as Record<string, any> | null) ?? {}),
+          status: "in_progress",
+          step: "goal",
+          profile_done: true,
+          completed_steps: ["profile"],
+          updated_at: new Date().toISOString(),
+        };
+      }
 
       for (const k of Object.keys(payload)) {
         const v = payload[k];
@@ -295,11 +362,59 @@ export default function ProfileEditForm({
       if (upErr) throw upErr;
 
       setSuccess("Сохранено.");
-      router.push("/profile");
-      router.refresh();
+
+      if (isOnboarding) {
+        onSaved?.();
+        router.push("/onboarding?step=goal");
+        router.refresh();
+      } else {
+        router.push("/profile");
+        router.refresh();
+      }
     } catch (e: unknown) {
       console.error("profile save error", e);
       setError(e instanceof Error ? e.message : "Не удалось сохранить профиль.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function skipOnboarding() {
+    if (!isOnboarding || saving) return;
+    setSaving(true);
+    setError(null);
+
+    try {
+      const now = new Date().toISOString();
+
+      const { data: currentProfile } = await supabase
+        .from("profiles")
+        .select("onboarding")
+        .eq("user_id", initial.user_id)
+        .maybeSingle();
+
+      const { error: upErr } = await supabase
+        .from("profiles")
+        .update({
+          onboarding_completed_at: now,
+          onboarding: {
+            ...((currentProfile?.onboarding as Record<string, any> | null) ?? {}),
+            status: "skipped",
+            skipped_at: now,
+            completed_at: now,
+            updated_at: now,
+          },
+          updated_at: now,
+        })
+        .eq("user_id", initial.user_id);
+
+      if (upErr) throw upErr;
+
+      router.push("/home");
+      router.refresh();
+    } catch (e: unknown) {
+      console.error("onboarding skip error", e);
+      setError(e instanceof Error ? e.message : "Не удалось пропустить онбординг.");
     } finally {
       setSaving(false);
     }
@@ -309,19 +424,38 @@ export default function ProfileEditForm({
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-extrabold">Редактировать профиль</h1>
+          <h1 className="text-2xl font-extrabold">
+            {isOnboarding ? "Расскажите о себе" : "Редактировать профиль"}
+          </h1>
+          {isOnboarding ? (
+            <p className="mt-1 text-sm text-muted-foreground">
+              Эти данные нужны AI-тренеру, чтобы учитывать ваш возраст, параметры и локацию при подборе нагрузки, восстановлении и составлении программы тренировок.
+            </p>
+          ) : null}
         </div>
         <div className="flex items-center gap-2">
-          <Button type="button" variant="secondary" onClick={() => router.push("/profile")}>
-            Назад к профилю
-          </Button>
+          {isOnboarding ? (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void skipOnboarding()}
+              disabled={saving}
+            >
+              Пропустить
+            </Button>
+          ) : null}
+          {!isOnboarding ? (
+            <Button type="button" variant="secondary" onClick={() => router.push("/profile")}>
+              Назад к профилю
+            </Button>
+          ) : null}
           <Button
             type="button"
             onClick={() => void onSave()}
-            disabled={saving || !isDirty}
+            disabled={saving || (!isDirty && !isOnboarding)}
           >
-            <Save className="mr-2 size-4" />
-            {saving ? "Сохраняем…" : "Сохранить"}
+            {!isOnboarding ? <Save className="mr-2 size-4" /> : null}
+            {saving ? "Сохраняем…" : isOnboarding ? "Далее" : "Сохранить"}
           </Button>
         </div>
       </div>
@@ -500,17 +634,34 @@ export default function ProfileEditForm({
                 </Select>
               </FieldBlock>
 
-              <FieldBlock label="Дата рождения" htmlFor="birth_date">
-                <Input
-                  id="birth_date"
-                  type="date"
-                  value={birthDate}
-                  onChange={(e) => {
-                    if (success) setSuccess(null);
-                    setBirthDate(e.target.value);
-                  }}
-                />
-              </FieldBlock>
+              {isOnboarding ? (
+                <FieldBlock label="Возраст" htmlFor="age">
+                  <Input
+                    id="age"
+                    type="number"
+                    min={10}
+                    max={100}
+                    value={age}
+                    onChange={(e) => {
+                      if (success) setSuccess(null);
+                      setAge(e.target.value);
+                    }}
+                    placeholder="Например: 34"
+                  />
+                </FieldBlock>
+              ) : (
+                <FieldBlock label="Дата рождения" htmlFor="birth_date">
+                  <Input
+                    id="birth_date"
+                    type="date"
+                    value={birthDate}
+                    onChange={(e) => {
+                      if (success) setSuccess(null);
+                      setBirthDate(e.target.value);
+                    }}
+                  />
+                </FieldBlock>
+              )}
             </div>
           </FormSection>
 
@@ -643,16 +794,28 @@ export default function ProfileEditForm({
           ) : null}
 
           <div className="flex items-center justify-end gap-2 pt-4">
-            <Button type="button" variant="secondary" onClick={() => router.push("/profile")}>
-              Отмена
-            </Button>
+            {isOnboarding ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => void skipOnboarding()}
+                disabled={saving}
+              >
+                Пропустить
+              </Button>
+            ) : null}
+            {!isOnboarding ? (
+              <Button type="button" variant="secondary" onClick={() => router.push("/profile")}>
+                Отмена
+              </Button>
+            ) : null}
             <Button
               type="button"
               onClick={() => void onSave()}
-              disabled={saving || !isDirty}
+              disabled={saving || (!isDirty && !isOnboarding)}
             >
-              <Save className="mr-2 size-4" />
-              {saving ? "Сохраняем…" : "Сохранить"}
+              {!isOnboarding ? <Save className="mr-2 size-4" /> : null}
+              {saving ? "Сохраняем…" : isOnboarding ? "Далее" : "Сохранить"}
             </Button>
           </div>
         </CardContent>

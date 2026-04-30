@@ -1,3 +1,5 @@
+//components/Sidebar.tsx
+
 "use client";
 
 import Link from "next/link";
@@ -5,7 +7,6 @@ import { usePathname } from "next/navigation";
 import * as React from "react";
 import { AppTooltip } from "@/components/ui/AppTooltip";
 import UnreadCountBadge from "@/components/ui/unread-count-badge";
-import { supabase } from "@/lib/supabaseBrowser";
 import {
   Sidebar as UISidebar,
   SidebarContent,
@@ -91,15 +92,21 @@ export default function Sidebar() {
 
   const refetchUnread = React.useCallback(async () => {
     try {
-      // важно: rpc возвращает { data, error }, это НЕ промис с .catch()
-      const { data, error } = await supabase.rpc("get_unread_count_global");
-      if (error) {
-        console.warn("[sidebar] get_unread_count_global error", error);
+      const res = await fetch("/api/coach/unread-count", {
+        method: "GET",
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        console.warn("[sidebar] unread-count http error", res.status);
         return;
       }
-      setCoachUnread(Number(data) || 0);
+
+      const json = (await res.json()) as { count?: number };
+
+      setCoachUnread(Number(json.count) || 0);
     } catch (e) {
-      console.warn("[sidebar] get_unread_count_global failed", e);
+      console.warn("[sidebar] unread-count failed", e);
     }
   }, []);
 

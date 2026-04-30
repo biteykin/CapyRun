@@ -26,8 +26,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
 import { CheckCircle2, ChevronRight } from "lucide-react";
+import OnboardingStepHeader from "@/components/onboarding/OnboardingStepHeader";
 
 export type GoalsOnboardingFlowProps = {
   /** Режим использования:
@@ -38,6 +38,7 @@ export type GoalsOnboardingFlowProps = {
   mode?: "initial" | "add-more" | "onboarding";
   /** Колбэк после успешного сохранения целей */
   onFinished?: () => void;
+  initialStep?: 1 | 2;
   initialProfile?: {
     sex?: "male" | "female" | null;
     age?: number | null;
@@ -125,6 +126,23 @@ const PRESETS: {
   },
 ];
 
+const DEFAULT_GOAL_TITLES: Record<PresetId, string> = {
+  start: "Начать тренироваться регулярно",
+  vo2max: "Улучшить выносливость",
+  weight: "Снизить вес и улучшить форму",
+  "race-5k": "Пробежать первые 5 км",
+  "race-10k": "Пробежать 10 км уверенно",
+  "race-hm": "Подготовиться к полумарафону",
+  "race-marathon": "Пробежать первый марафон",
+  custom: "",
+};
+
+function isAutoGoalTitle(value: string) {
+  const title = value.trim();
+  if (!title) return true;
+  return Object.values(DEFAULT_GOAL_TITLES).includes(title);
+}
+
 function resolveGoalType(presets: PresetId[]): string {
   if (presets.includes("race-10k")) return "10k";
   if (presets.includes("race-hm")) return "HM";
@@ -151,11 +169,12 @@ function resolveSport(presets: PresetId[]): string | null {
 export default function GoalsOnboardingFlow({
   mode = "initial",
   onFinished,
+  initialStep = 1,
   initialProfile,
   editGoal = null,
 }: GoalsOnboardingFlowProps) {
   const router = useRouter();
-  const [step, setStep] = React.useState<Step>(1);
+  const [step, setStep] = React.useState<Step>(initialStep);
 
   const isEditMode = !!editGoal?.id;
 
@@ -253,10 +272,17 @@ export default function GoalsOnboardingFlow({
   const [error, setError] = React.useState<string | null>(null);
 
   const isInitial = mode === "initial";
-  const stepHint =
+  const isProductOnboarding = mode === "onboarding";
+  const totalSteps = isProductOnboarding ? 4 : 2;
+  const displayStep = isProductOnboarding ? step + 1 : step;
+
+  const onboardingTitle =
+    step === 1 ? "Цель тренировок" : "Параметры цели";
+
+  const onboardingDescription =
     step === 1
-      ? "Сейчас можно выбрать только одну цель"
-      : "Данные нужны для более точного плана и рекомендаций";
+      ? "Давайте выберем направление, к которому будем идти. Цель можно будет изменить позже или добавить ещё несколько целей."
+      : "Уточним критерии цели: название, срок, желаемый результат и важные детали, которые тренер учтёт при составлении плана.";
   const isRaceGoal =
     selectedPreset === "race-5k" ||
     selectedPreset === "race-10k" ||
@@ -296,6 +322,11 @@ export default function GoalsOnboardingFlow({
 
   const selectPreset = (id: PresetId) => {
     setSelectedPreset((prev) => (prev === id ? null : id));
+
+    if (!isEditMode && id !== "custom" && isAutoGoalTitle(goalTitle)) {
+      setGoalTitle(DEFAULT_GOAL_TITLES[id]);
+    }
+
     setError(null);
   };
 
@@ -514,10 +545,11 @@ export default function GoalsOnboardingFlow({
     canGoNextFromStep1 &&
     goalTitle.trim().length >= 3 &&
     goalDate.trim() !== "" &&
-    gender &&
-    age.trim() !== "" &&
-    heightCm.trim() !== "" &&
-    weightKg.trim() !== "";
+    (mode === "onboarding" ||
+      (gender &&
+        age.trim() !== "" &&
+        heightCm.trim() !== "" &&
+        weightKg.trim() !== ""));
 
   async function handleSave() {
     if (isSaving || !canSaveFromStep2) return;
@@ -610,8 +642,37 @@ export default function GoalsOnboardingFlow({
       if (saveGoalErr) throw saveGoalErr;
 
       onFinished?.();
-      router.push(isEditMode ? "/goals?updated=1" : "/goals?created=1");
-      router.refresh();
+
+      if (mode === "onboarding") {
+        const { data: profileRow } = await supabase
+          .from("profiles")
+          .select("onboarding")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        await supabase
+          .from("profiles")
+          .update({
+            onboarding: {
+              ...((profileRow?.onboarding as Record<string, any> | null) ?? {}),
+              status: "in_progress",
+              step: "import",
+              goal_done: true,
+              profile_done: true,
+              completed_steps: ["intro", "goal", "profile"],
+              updated_at: new Date().toISOString(),
+            },
+            primary_sport: sport ?? "run",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("user_id", user.id);
+
+        router.push("/onboarding/import");
+        router.refresh();
+      } else {
+        router.push(isEditMode ? "/goals?updated=1" : "/goals?created=1");
+        router.refresh();
+      }
     } catch (e: any) {
       console.error("goals onboarding save error", e);
       setError(
@@ -623,25 +684,76 @@ export default function GoalsOnboardingFlow({
     }
   }
 
+  async function skipOnboarding() {
+    if (mode !== "onboarding" || isSaving) return;
+    setIsSaving(true);
+    setError(null);
+
+    try {
+      const {
+        data: { user },
+        error: userErr,
+      } = await supabase.auth.getUser();
+
+      if (userErr) throw userErr;
+      if (!user) throw new Error("Пользователь не авторизован");
+
+      const { data: profileRow } = await supabase
+        .from("profiles")
+        .select("onboarding")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      const now = new Date().toISOString();
+
+      const { error: updateErr } = await supabase
+        .from("profiles")
+        .update({
+          onboarding_completed_at: now,
+          onboarding: {
+            ...((profileRow?.onboarding as Record<string, any> | null) ?? {}),
+            status: "skipped",
+            skipped_at: now,
+            completed_at: now,
+            updated_at: now,
+          },
+          updated_at: now,
+        })
+        .eq("user_id", user.id);
+
+      if (updateErr) throw updateErr;
+
+      router.push("/home");
+      router.refresh();
+    } catch (e: any) {
+      console.error("onboarding skip error", e);
+      setError(e?.message ?? "Не удалось пропустить онбординг.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   // --- Рендер шагов ---
 
   function renderStep1() {
     return (
       <div className="space-y-6">
-        <div className="space-y-1">
-          <CardTitle>
-            {isEditMode
-              ? "Редактируем цель"
-              : isInitial
-                ? "Какая цель сейчас главная?"
-                : "Выберите новую цель"}
-          </CardTitle>
-          <CardDescription>
-            {isEditMode
-              ? "Можно изменить сценарий цели, дату, параметры и детали подготовки."
-              : "Выберите один сценарий. На его основе тренер будет строить план и расставлять акценты."}
-          </CardDescription>
-        </div>
+        {!isProductOnboarding ? (
+          <div className="space-y-1">
+            <CardTitle>
+              {isEditMode
+                ? "Редактируем цель"
+                : isInitial
+                  ? "Какая цель сейчас главная?"
+                  : "Выберите новую цель"}
+            </CardTitle>
+            <CardDescription>
+              {isEditMode
+                ? "Можно изменить сценарий цели, дату, параметры и детали подготовки."
+                : "Выберите один сценарий. На его основе тренер будет строить план и расставлять акценты."}
+            </CardDescription>
+          </div>
+        ) : null}
 
         <div className="grid gap-3 md:grid-cols-2">
           {PRESETS.map((p) => {
@@ -700,22 +812,44 @@ export default function GoalsOnboardingFlow({
         ) : null}
 
         <div className="flex justify-between gap-2 pt-2">
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => router.push("/goals")}
-          >
-            Назад
-          </Button>
-          <Button
-            type="button"
-            variant="primary"
-            disabled={!canGoNextFromStep1}
-            onClick={() => setStep(2)}
-          >
-            Далее
-            <ChevronRight className="ml-2 size-4" />
-          </Button>
+          {isProductOnboarding ? (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => router.push("/onboarding?step=profile")}
+            >
+              Назад
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => router.push("/goals")}
+            >
+              Назад
+            </Button>
+          )}
+          <div className="flex items-center gap-2">
+            {isProductOnboarding ? (
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={isSaving}
+                onClick={() => void skipOnboarding()}
+              >
+                Пропустить
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="primary"
+              disabled={!canGoNextFromStep1}
+              onClick={() => setStep(2)}
+            >
+              Далее
+              <ChevronRight className="ml-2 size-4" />
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -724,12 +858,14 @@ export default function GoalsOnboardingFlow({
   function renderStep2() {
     return (
       <div className="space-y-6">
-        <div className="space-y-1">
-          <CardTitle>Параметры о тебе</CardTitle>
-          <CardDescription>
-            Мы предзаполнили данные из профиля. Если что-то измените здесь, обновим и профиль тоже.
-          </CardDescription>
-        </div>
+        {!isProductOnboarding ? (
+          <div className="space-y-1">
+            <CardTitle>Параметры о тебе</CardTitle>
+            <CardDescription>
+              Мы предзаполнили данные из профиля. Если что-то измените здесь, обновим и профиль тоже.
+            </CardDescription>
+          </div>
+        ) : null}
 
         <div className="grid w-full gap-4 md:grid-cols-2">
           <div className="space-y-2">
@@ -752,6 +888,29 @@ export default function GoalsOnboardingFlow({
             />
             <div className="text-xs text-muted-foreground">
               Это может быть дата старта или дата, к которой цель должна быть выполнена
+            </div>
+
+            {/* Быстрый выбор */}
+            <div className="flex flex-wrap gap-2 pt-1">
+              {[
+                { label: "Через 1 месяц", months: 1 },
+                { label: "Через 3 месяца", months: 3 },
+                { label: "Через 6 месяцев", months: 6 },
+              ].map((opt) => (
+                <Button
+                  key={opt.months}
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    const d = new Date();
+                    d.setMonth(d.getMonth() + opt.months);
+                    setGoalDate(d.toISOString().slice(0, 10));
+                  }}
+                >
+                  {opt.label}
+                </Button>
+              ))}
             </div>
           </div>
         </div>
@@ -792,65 +951,67 @@ export default function GoalsOnboardingFlow({
           </div>
         ) : null}
 
-        <div className="grid w-full gap-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <Label htmlFor="gender">Пол</Label>
-            <Select
-              value={gender || "unset"}
-              onValueChange={(v) =>
-                setGender(v === "unset" ? "" : (v as "male" | "female"))
-              }
-            >
-              <SelectTrigger id="gender">
-                <SelectValue placeholder="Выберите пол" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="unset">Не выбрано</SelectItem>
-                <SelectItem value="male">Мужской</SelectItem>
-                <SelectItem value="female">Женский</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+        {mode !== "onboarding" ? (
+          <div className="grid w-full gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="gender">Пол</Label>
+              <Select
+                value={gender || "unset"}
+                onValueChange={(v) =>
+                  setGender(v === "unset" ? "" : (v as "male" | "female"))
+                }
+              >
+                <SelectTrigger id="gender">
+                  <SelectValue placeholder="Выберите пол" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unset">Не выбрано</SelectItem>
+                  <SelectItem value="male">Мужской</SelectItem>
+                  <SelectItem value="female">Женский</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="age">Возраст</Label>
-            <Input
-              id="age"
-              type="number"
-              min={10}
-              max={100}
-              value={age}
-              onChange={(e) => setAge(e.target.value)}
-              placeholder="Например: 34"
-            />
-          </div>
+            <div className="space-y-2">
+              <Label htmlFor="age">Возраст</Label>
+              <Input
+                id="age"
+                type="number"
+                min={10}
+                max={100}
+                value={age}
+                onChange={(e) => setAge(e.target.value)}
+                placeholder="Например: 34"
+              />
+            </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="height">Рост (см)</Label>
-            <Input
-              id="height"
-              type="number"
-              min={120}
-              max={230}
-              value={heightCm}
-              onChange={(e) => setHeightCm(e.target.value)}
-              placeholder="Например: 178"
-            />
-          </div>
+            <div className="space-y-2">
+              <Label htmlFor="height">Рост (см)</Label>
+              <Input
+                id="height"
+                type="number"
+                min={120}
+                max={230}
+                value={heightCm}
+                onChange={(e) => setHeightCm(e.target.value)}
+                placeholder="Например: 178"
+              />
+            </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="weight">Вес (кг)</Label>
-            <Input
-              id="weight"
-              type="number"
-              min={35}
-              max={200}
-              value={weightKg}
-              onChange={(e) => setWeightKg(e.target.value)}
-              placeholder="Например: 79"
-            />
+            <div className="space-y-2">
+              <Label htmlFor="weight">Вес (кг)</Label>
+              <Input
+                id="weight"
+                type="number"
+                min={35}
+                max={200}
+                value={weightKg}
+                onChange={(e) => setWeightKg(e.target.value)}
+                placeholder="Например: 79"
+              />
+            </div>
           </div>
-        </div>
+        ) : null}
 
         <div className="space-y-2">
           <Label htmlFor="secondary">
@@ -882,49 +1043,65 @@ export default function GoalsOnboardingFlow({
           >
             Назад
           </Button>
-          <Button
-            type="button"
-            variant="primary"
-            disabled={!canSaveFromStep2 || isSaving}
-            onClick={handleSave}
-          >
-            {isSaving ? "Сохраняем…" : "Сохранить цели"}
-          </Button>
+          <div className="flex items-center gap-2">
+            {isProductOnboarding ? (
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={isSaving}
+                onClick={() => void skipOnboarding()}
+              >
+                Пропустить
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="primary"
+              disabled={!canSaveFromStep2 || isSaving}
+              onClick={handleSave}
+            >
+              {isSaving
+                ? "Сохраняем…"
+                : isProductOnboarding
+                  ? "Далее"
+                  : "Сохранить цели"}
+              {isProductOnboarding && !isSaving ? (
+                <ChevronRight className="ml-2 size-4" />
+              ) : null}
+            </Button>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <section className="w-full">
+    <section className="w-full space-y-4">
+      {isProductOnboarding ? (
+        <div>
+          <OnboardingStepHeader step={displayStep} total={4} />
+          <h1 className="mt-3 text-2xl font-extrabold">
+            {onboardingTitle}
+          </h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {onboardingDescription}
+          </p>
+        </div>
+      ) : null}
+
       <Card
         className={cn(
           "flex h-full flex-col border bg-card text-card-foreground shadow-sm rounded-xl"
         )}
       >
-        <CardHeader>
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary">Шаг {step} из 2</Badge>
-              <span className="text-xs text-muted-foreground">
-                {stepHint}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              {[1, 2].map((i) => (
-                <div
-                  key={i}
-                  className={cn(
-                    "h-1.5 w-6 rounded-full transition-all",
-                    step === i
-                      ? "bg-[color:var(--btn-primary-main,#E58B21)]"
-                      : "bg-muted"
-                  )}
-                />
-              ))}
-            </div>
-          </div>
-        </CardHeader>
+        {!isProductOnboarding ? (
+          <CardHeader>
+            <OnboardingStepHeader
+              step={step}
+              total={2}
+            />
+          </CardHeader>
+        ) : null}
 
         <CardContent className="w-full">
           {step === 1 && renderStep1()}
