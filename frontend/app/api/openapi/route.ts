@@ -1,3 +1,5 @@
+// frontend/app/api/openapi/route.ts
+
 import { NextResponse } from "next/server";
 
 export async function GET() {
@@ -48,11 +50,143 @@ export async function GET() {
         description: "External integrations like Strava",
       },
       {
+        name: "Workout files",
+        description: "Uploaded workout source files and processing",
+      },
+      {
         name: "Auth",
         description: "Authentication and session management",
       },
     ],
     paths: {
+      "/api/workout-files": {
+        get: {
+          tags: ["Workout files"],
+          summary: "Get uploaded workout files",
+          operationId: "getWorkoutFiles",
+          security: [{ cookieAuth: [] }],
+          parameters: [
+            {
+              name: "workoutId",
+              in: "query",
+              required: false,
+              schema: { type: "string", format: "uuid" },
+            },
+            {
+              name: "limit",
+              in: "query",
+              required: false,
+              schema: { type: "integer", default: 200, example: 500 },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Uploaded workout files",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      items: {
+                        type: "array",
+                        items: { $ref: "#/components/schemas/WorkoutFile" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+          },
+        },
+      },
+
+      "/api/workout-files/upload": {
+        post: {
+          tags: ["Workout files"],
+          summary: "Upload workout file",
+          operationId: "uploadWorkoutFile",
+          security: [{ cookieAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "multipart/form-data": {
+                schema: {
+                  type: "object",
+                  required: ["file"],
+                  properties: {
+                    file: { type: "string", format: "binary" },
+                    workoutId: { type: "string", format: "uuid", nullable: true },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "File uploaded or duplicate detected",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/WorkoutFileUploadResponse" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequest" },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+          },
+        },
+      },
+
+      "/api/workout-files/{id}": {
+        delete: {
+          tags: ["Workout files"],
+          summary: "Delete uploaded workout file",
+          operationId: "deleteWorkoutFile",
+          security: [{ cookieAuth: [] }],
+          parameters: [{ $ref: "#/components/parameters/WorkoutFileId" }],
+          responses: {
+            "200": {
+              description: "Workout file deleted",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/OkResponse" },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "404": { $ref: "#/components/responses/NotFound" },
+          },
+        },
+      },
+
+      "/api/workout-files/{id}/process": {
+        post: {
+          tags: ["Workout files"],
+          summary: "Start workout file processing",
+          operationId: "processWorkoutFile",
+          security: [{ cookieAuth: [] }],
+          parameters: [{ $ref: "#/components/parameters/WorkoutFileId" }],
+          responses: {
+            "200": {
+              description: "Processing started",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      ok: { type: "boolean", example: true },
+                      file: { $ref: "#/components/schemas/WorkoutFile" },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "404": { $ref: "#/components/responses/NotFound" },
+          },
+        },
+      },
+
       "/api/integrations": {
         get: {
           tags: ["Integrations"],
@@ -72,6 +206,65 @@ export async function GET() {
                       },
                     },
                   },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+          },
+        },
+      },
+      "/api/profile/hr-zones": {
+        patch: {
+          tags: ["Profile"],
+          summary: "Update current user's heart-rate zones",
+          operationId: "updateProfileHrZones",
+          security: [{ cookieAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["hr_zones"],
+                  properties: {
+                    hr_zones: {
+                      $ref: "#/components/schemas/HrZones",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "Heart-rate zones updated",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      profile: {
+                        type: "object",
+                        properties: {
+                          user_id: { type: "string" },
+                          hr_zones: { $ref: "#/components/schemas/HrZones" },
+                          updated_at: {
+                            type: "string",
+                            format: "date-time",
+                            nullable: true,
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "400": {
+              description: "Invalid heart-rate zones payload",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
                 },
               },
             },
@@ -985,6 +1178,206 @@ export async function GET() {
         },
       },
 
+      "/api/goals": {
+        get: {
+          tags: ["Goals"],
+          summary: "Get current user's goals",
+          operationId: "getGoals",
+          security: [{ cookieAuth: [] }],
+          responses: {
+            "200": {
+              description: "Goals list",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      goals: {
+                        type: "array",
+                        items: { $ref: "#/components/schemas/Goal" },
+                      },
+                      completedNowIds: {
+                        type: "array",
+                        items: { type: "string" },
+                      },
+                      goalCompleted: { type: "boolean" },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+          },
+        },
+        post: {
+          tags: ["Goals"],
+          summary: "Create goal",
+          operationId: "createGoal",
+          security: [{ cookieAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/GoalInput" },
+              },
+            },
+          },
+          responses: {
+            "201": {
+              description: "Goal created",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      goal: { $ref: "#/components/schemas/Goal" },
+                    },
+                  },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequest" },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+          },
+        },
+      },
+
+      "/api/goals/{id}": {
+        patch: {
+          tags: ["Goals"],
+          summary: "Update goal",
+          operationId: "updateGoal",
+          security: [{ cookieAuth: [] }],
+          parameters: [{ $ref: "#/components/parameters/GoalId" }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/GoalInput" },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "Goal updated",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      goal: { $ref: "#/components/schemas/Goal" },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "404": { $ref: "#/components/responses/NotFound" },
+          },
+        },
+        delete: {
+          tags: ["Goals"],
+          summary: "Delete goal",
+          operationId: "deleteGoal",
+          security: [{ cookieAuth: [] }],
+          parameters: [{ $ref: "#/components/parameters/GoalId" }],
+          responses: {
+            "200": {
+              description: "Goal deleted",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/OkResponse" },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "404": { $ref: "#/components/responses/NotFound" },
+          },
+        },
+      },
+
+      "/api/goals/{id}/set-primary": {
+        post: {
+          tags: ["Goals"],
+          summary: "Set goal as primary",
+          operationId: "setPrimaryGoal",
+          security: [{ cookieAuth: [] }],
+          parameters: [{ $ref: "#/components/parameters/GoalId" }],
+          responses: {
+            "200": {
+              description: "Primary goal updated",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      goal: { $ref: "#/components/schemas/Goal" },
+                    },
+                  },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequest" },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "404": { $ref: "#/components/responses/NotFound" },
+          },
+        },
+      },
+
+      "/api/goals/{id}/complete": {
+        post: {
+          tags: ["Goals"],
+          summary: "Complete goal",
+          operationId: "completeGoal",
+          security: [{ cookieAuth: [] }],
+          parameters: [{ $ref: "#/components/parameters/GoalId" }],
+          responses: {
+            "200": {
+              description: "Goal completed",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      goal: { $ref: "#/components/schemas/Goal" },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "404": { $ref: "#/components/responses/NotFound" },
+          },
+        },
+      },
+
+      "/api/goals/{id}/reopen": {
+        post: {
+          tags: ["Goals"],
+          summary: "Reopen completed goal",
+          operationId: "reopenGoal",
+          security: [{ cookieAuth: [] }],
+          parameters: [{ $ref: "#/components/parameters/GoalId" }],
+          responses: {
+            "200": {
+              description: "Goal reopened",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      goal: { $ref: "#/components/schemas/Goal" },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "404": { $ref: "#/components/responses/NotFound" },
+          },
+        },
+      },
+
       "/api/profile/me": {
         get: {
           tags: ["Profile"],
@@ -1517,7 +1910,105 @@ export async function GET() {
           description: "For future mobile clients.",
         },
       },
+      parameters: {
+        GoalId: {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Goal ID",
+        },
+        WorkoutFileId: {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+          description: "Workout file ID",
+        },
+      },
       schemas: {
+        WorkoutFile: {
+          type: "object",
+          properties: {
+            id: { type: "string", format: "uuid" },
+            user_id: { type: "string", format: "uuid" },
+            workout_id: { type: "string", format: "uuid", nullable: true },
+            filename: { type: "string", nullable: true },
+            status: {
+              type: "string",
+              nullable: true,
+              enum: [
+                "pending",
+                "uploading",
+                "uploaded",
+                "processing",
+                "ready",
+                "error",
+                "failed",
+                "archived",
+                null,
+              ],
+            },
+            error_message: { type: "string", nullable: true },
+            created_at: { type: "string", format: "date-time" },
+            uploaded_at: { type: "string", format: "date-time", nullable: true },
+            processed_at: { type: "string", format: "date-time", nullable: true },
+            storage_bucket: { type: "string", example: "fits" },
+            storage_path: { type: "string" },
+            size_bytes: { type: "integer", nullable: true },
+            kind: { type: "string", nullable: true, example: "source" },
+            content_type: { type: "string", nullable: true, example: "application/zip" },
+          },
+        },
+
+        WorkoutFileUploadResponse: {
+          type: "object",
+          properties: {
+            ok: { type: "boolean", example: true },
+            id: { type: "string", format: "uuid" },
+            duplicate: { type: "boolean", example: false },
+            file: { $ref: "#/components/schemas/WorkoutFile" },
+          },
+        },
+
+        HrZone: {
+          type: "object",
+          required: ["name", "min", "max"],
+          properties: {
+            name: {
+              type: "string",
+              example: "Аэробная база",
+            },
+            min: {
+              type: "integer",
+              example: 120,
+            },
+            max: {
+              type: "integer",
+              example: 140,
+            },
+          },
+        },
+
+        HrZones: {
+          type: "object",
+          required: ["Z1", "Z2", "Z3", "Z4", "Z5"],
+          properties: {
+            Z1: { $ref: "#/components/schemas/HrZone" },
+            Z2: { $ref: "#/components/schemas/HrZone" },
+            Z3: { $ref: "#/components/schemas/HrZone" },
+            Z4: { $ref: "#/components/schemas/HrZone" },
+            Z5: { $ref: "#/components/schemas/HrZone" },
+          },
+          example: {
+            Z1: { name: "Восстановление", min: 100, max: 120 },
+            Z2: { name: "Аэробная база", min: 120, max: 140 },
+            Z3: { name: "Темповая", min: 140, max: 160 },
+            Z4: { name: "Пороговая", min: 160, max: 180 },
+            Z5: { name: "VO₂ / Спурт", min: 180, max: 200 },
+          },
+        },
+
         IntegrationsResponse: {
           type: "object",
           properties: {
@@ -1723,32 +2214,107 @@ export async function GET() {
 
         Goal: {
           type: "object",
-          additionalProperties: true,
           properties: {
             id: { type: "string" },
             user_id: { type: "string" },
-            title: { type: "string", nullable: true },
-            type: { type: "string", nullable: true },
-            sport: { type: "string", nullable: true },
-            date_from: { type: "string", nullable: true },
-            date_to: { type: "string", nullable: true },
-            status: { type: "string", nullable: true },
+            title: { type: "string" },
+            type: {
+              type: "string",
+              example: "10k",
+            },
+            sport: {
+              type: "string",
+              nullable: true,
+              example: "run",
+            },
+            status: {
+              type: "string",
+              example: "active",
+            },
+            date_from: {
+              type: "string",
+              format: "date",
+              nullable: true,
+            },
+            date_to: {
+              type: "string",
+              format: "date",
+              nullable: true,
+            },
             target_json: {
               type: "object",
-              nullable: true,
               additionalProperties: true,
+              nullable: true,
             },
-            notes: { type: "string", nullable: true },
+            progress_cache: {
+              type: "object",
+              additionalProperties: true,
+              nullable: true,
+            },
+            notes: {
+              type: "string",
+              nullable: true,
+            },
+            is_primary: {
+              type: "boolean",
+              nullable: true,
+            },
             created_at: {
               type: "string",
               format: "date-time",
-              nullable: true,
             },
             updated_at: {
               type: "string",
               format: "date-time",
               nullable: true,
             },
+          },
+        },
+
+        GoalInput: {
+          type: "object",
+          properties: {
+            title: { type: "string", example: "Пробежать 10 км уверенно" },
+            type: { type: "string", example: "10k" },
+            sport: { type: "string", nullable: true, example: "run" },
+            date_from: { type: "string", format: "date" },
+            date_to: { type: "string", format: "date" },
+            status: { type: "string", example: "active" },
+            target_json: {
+              type: "object",
+              additionalProperties: true,
+            },
+            notes: { type: "string", nullable: true },
+            is_primary: { type: "boolean" },
+          },
+        },
+
+        ProfileInput: {
+          type: "object",
+          properties: {
+            display_name: { type: "string" },
+            avatar_url: { type: "string" },
+            locale: { type: "string" },
+            timezone: { type: "string" },
+            country_code: {
+              type: "string",
+              example: "DE",
+              description: "ISO country code",
+            },
+            country: {
+              type: "string",
+              deprecated: true,
+              description: "Deprecated alias. Will be mapped to country_code",
+            },
+            city: { type: "string" },
+            unit_system: { type: "string" },
+            username: { type: "string" },
+            bio: { type: "string" },
+            gender: { type: "string", nullable: true },
+            birth_date: { type: "string", format: "date" },
+            height_cm: { type: "number" },
+            weight_kg: { type: "number" },
+            default_workout_privacy: { type: "string" },
           },
         },
 
@@ -1766,17 +2332,39 @@ export async function GET() {
           additionalProperties: true,
           properties: {
             id: { type: "string" },
+            user_id: { type: "string" },
             display_name: { type: "string", nullable: true },
             avatar_url: { type: "string", nullable: true },
             locale: { type: "string", nullable: true },
             timezone: { type: "string", nullable: true },
-            country: { type: "string", nullable: true },
+            country_code: {
+              type: "string",
+              nullable: true,
+              example: "DE",
+              description: "ISO country code (source of truth)",
+            },
+            country: {
+              type: "string",
+              nullable: true,
+              deprecated: true,
+              description: "Deprecated. Use country_code instead",
+            },
             city: { type: "string", nullable: true },
             unit_system: { type: "string", nullable: true },
             username: { type: "string", nullable: true },
             bio: { type: "string", nullable: true },
             gender: { type: "string", nullable: true },
-            birth_date: { type: "string", nullable: true },
+            sex: {
+              type: "string",
+              nullable: true,
+              enum: ["male", "female", "other", null],
+            },
+            birth_date: {
+              type: "string",
+              format: "date",
+              nullable: true,
+              description: "Single source of truth for age",
+            },
             height_cm: { type: "number", nullable: true },
             weight_kg: { type: "number", nullable: true },
             default_workout_privacy: { type: "string", nullable: true },

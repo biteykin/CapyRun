@@ -1,3 +1,5 @@
+// frontend/app/(protected)/workouts/[id]/edit/page.tsx
+
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 

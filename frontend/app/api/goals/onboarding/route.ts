@@ -1,3 +1,5 @@
+// frontend/app/api/goals/onboarding/route.ts
+
 import { NextResponse } from "next/server";
 import { createClientWithCookies } from "@/lib/supabase/server";
 
@@ -59,17 +61,34 @@ export async function POST(req: Request) {
 
     const now = new Date().toISOString();
 
-    const { error: profileError } = await supabase.from("profiles").upsert(
-      {
-        user_id: user.id,
-        sex: profile.sex ?? null,
-        birth_date: profile.birth_date ?? null,
-        height_cm: heightCm,
-        weight_kg: weightKg,
-        updated_at: now,
-      },
-      { onConflict: "user_id" }
-    );
+    const profilePatch: Record<string, unknown> = {
+      user_id: user.id,
+      updated_at: now,
+    };
+
+    if (profile.sex !== undefined) {
+      profilePatch.sex = profile.sex ?? null;
+    }
+
+    if (
+      profile.birth_date !== undefined &&
+      profile.birth_date !== null &&
+      profile.birth_date !== ""
+    ) {
+      profilePatch.birth_date = profile.birth_date;
+    }
+
+    if (profile.height_cm !== undefined) {
+      profilePatch.height_cm = heightCm;
+    }
+
+    if (profile.weight_kg !== undefined) {
+      profilePatch.weight_kg = weightKg;
+    }
+
+    const { error: profileError } = await supabase
+      .from("profiles")
+      .upsert(profilePatch, { onConflict: "user_id" });
 
     if (profileError) {
       return NextResponse.json({ error: profileError.message }, { status: 500 });

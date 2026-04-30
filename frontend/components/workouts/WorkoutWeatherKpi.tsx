@@ -1,3 +1,5 @@
+// frontend/components/workouts/WorkoutWeatherKpi.tsx
+
 "use client";
 
 import * as React from "react";

@@ -1,7 +1,8 @@
+// frontend/components/workouts/NoteInline.tsx
+
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { supabase } from "@/lib/supabaseBrowser";
 
 type Props = {
   workoutId: string;
@@ -28,16 +29,17 @@ export default function NoteInline({ workoutId, initial }: Props) {
     setStatus("saving");
     setError(null);
 
-    const { error } = await supabase
-      .from("workouts")
-      .update({ description: v }) // сохраняем в description
-      .eq("id", workoutId)
-      .select("id")
-      .maybeSingle();
+    const res = await fetch(`/api/workouts/${workoutId}/note`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ description: v }),
+    });
+    const json = await res.json().catch(() => null);
 
-    if (error) {
+    if (!res.ok) {
       setStatus("error");
-      setError(error.message);
+      setError(json?.error ?? `HTTP ${res.status}`);
       return;
     }
     lastSavedRef.current = v;

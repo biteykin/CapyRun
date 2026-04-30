@@ -3,7 +3,6 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseBrowser";
 import { uploadWorkoutFile } from "@/lib/uploadWorkoutFile";
 
 // shadcn/ui
@@ -58,8 +57,11 @@ export default function WorkoutUploadPage() {
 
     (async () => {
       setLoading(true);
-      const { data: userData } = await supabase.auth.getUser();
-      const u = userData?.user ?? null;
+      const sessionRes = await fetch("/api/auth/session", {
+        credentials: "include",
+      });
+      const sessionJson = await sessionRes.json().catch(() => null);
+      const u = sessionJson?.user ?? null;
 
       if (!u) {
         const hasLegacy = typeof document !== "undefined" && document.cookie.includes("capyrun.auth=");
@@ -72,25 +74,21 @@ export default function WorkoutUploadPage() {
       }
 
       setUserId(u.id);
-      const { data, error, status } = await supabase
-        .from("workout_files")
-        .select("id,user_id,workout_id,filename,status,error_message,created_at")
-        .eq("user_id", u.id) // показываем ТОЛЬКО свои файлы
-        .order("created_at", { ascending: false })
-        .limit(500);
+      const res = await fetch("/api/workout-files?limit=500", {
+        credentials: "include",
+      });
+      const text = await res.text();
+      const json = text ? JSON.parse(text) : null;
 
       if (!cancelled) {
-        if (error) {
+        if (!res.ok) {
           console.error("workout_files list error:", {
-            status,
-            code: (error as any)?.code,
-            message: (error as any)?.message,
-            details: (error as any)?.details,
-            hint: (error as any)?.hint,
+            status: res.status,
+            body: json ?? text,
           });
           setRows([]);
         } else {
-          const normalized = ((data || []) as FileRow[]).map((r) => ({
+          const normalized = ((json?.items || []) as FileRow[]).map((r) => ({
             ...r,
             status: (r.status || "pending").toLowerCase(),
           }));
@@ -107,22 +105,18 @@ export default function WorkoutUploadPage() {
   async function refresh() {
     if (!userId) return;
     setReloading(true);
-    const { data, error, status } = await supabase
-      .from("workout_files")
-      .select("id,user_id,workout_id,filename,status,error_message,created_at")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(500);
-    if (error) {
+    const res = await fetch("/api/workout-files?limit=500", {
+      credentials: "include",
+    });
+    const text = await res.text();
+    const json = text ? JSON.parse(text) : null;
+    if (!res.ok) {
       console.error("workout_files refresh error:", {
-        status,
-        code: (error as any)?.code,
-        message: (error as any)?.message,
-        details: (error as any)?.details,
-        hint: (error as any)?.hint,
+        status: res.status,
+        body: json ?? text,
       });
     }
-    const normalized = ((data || []) as FileRow[]).map((r) => ({
+    const normalized = ((json?.items || []) as FileRow[]).map((r) => ({
       ...r,
       status: (r.status || "pending").toLowerCase(),
     }));
@@ -164,10 +158,14 @@ export default function WorkoutUploadPage() {
   }
 
   async function removeRow(id: string) {
-    if (!confirm("Удалить запись о файле? (Файл в сторидже может остаться)")) return;
-    const { error } = await supabase.from("workout_files").delete().eq("id", id);
-    if (error) {
-      alert(error.message);
+    if (!confirm("Удалить файл?")) return;
+    const res = await fetch(`/api/workout-files/${id}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      alert(json?.error ?? `HTTP ${res.status}`);
       return;
     }
     setRows(prev => prev.filter(r => r.id !== id));

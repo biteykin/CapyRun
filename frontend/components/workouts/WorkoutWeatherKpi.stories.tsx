@@ -1,3 +1,5 @@
+// frontend/components/workouts/WorkoutWeatherKpi.stories.tsx
+
 import type { Meta, StoryObj } from "@storybook/react";
 import WorkoutWeatherKpi from "./WorkoutWeatherKpi";
 

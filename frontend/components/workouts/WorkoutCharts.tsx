@@ -1,7 +1,8 @@
+// frontend/components/workouts/WorkoutCharts.tsx
+
 "use client";
 
 import * as React from "react";
-import { supabase } from "@/lib/supabaseBrowser";
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -237,23 +238,27 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
         setErr(null);
 
         // 1) превью стримов
-        const { data, error } = await supabase
-          .from("workout_streams_preview")
-          .select("s, updated_at, created_at")
-          .eq("workout_id", workoutId)
-          .maybeSingle();
+        const res = await fetch(`/api/workouts/${workoutId}/streams`, {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
 
-        if (error) throw error;
+        const json = await res.json().catch(() => null);
 
-        if (!data) {
+        if (!res.ok) {
+          throw new Error(json?.error ?? `HTTP ${res.status}`);
+        }
+
+        const row = json?.streams ?? json?.data ?? json ?? null;
+
+        if (!row) {
           if (!cancelled) {
             setStreams({ time_s: [], hr: [], pace_s_per_km: [] });
             setErr("Нет данных превью для этой тренировки.");
           }
           return;
         }
-
-        const row = data as PreviewRow;
         const s = row?.s ?? null;
 
         const time_s = Array.isArray(s?.time_s) ? s.time_s : [];
@@ -280,17 +285,16 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
         }
 
         // 2) подтянуть hr_max + hr_zones из профиля (для раскраски зон)
-        const { data: u } = await supabase.auth.getUser();
-        const uid = u.user?.id;
-        if (!uid) return;
+        const profileRes = await fetch("/api/profile/me", {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
 
-        const { data: prof, error: profErr } = await supabase
-          .from("profiles")
-          .select("hr_max, hr_zones")
-          .eq("user_id", uid)
-          .maybeSingle();
+        if (!profileRes.ok) return;
 
-        if (profErr) return;
+        const profileJson = await profileRes.json().catch(() => null);
+        const prof = profileJson?.profile ?? null;
 
         if (!cancelled) {
           const maxHr = prof?.hr_max != null ? Number(prof.hr_max) : null;

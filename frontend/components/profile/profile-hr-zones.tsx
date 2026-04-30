@@ -1,3 +1,5 @@
+// frontend/components/profile/profile-hr-zones.tsx
+
 "use client";
 
 import * as React from "react";
@@ -7,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { PencilLine, Sparkles, Save, X } from "lucide-react";
-import { supabase } from "@/lib/supabaseBrowser";
 
 type Zone = {
   key: string; // Z1..Z5
@@ -259,15 +260,19 @@ export default function ProfileHrZones({
         ])
       );
 
-      const { error: upErr } = await supabase
-        .from("profiles")
-        .update({
+      const res = await fetch("/api/profile/hr-zones", {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
           hr_zones: payload,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("user_id", userId);
+        }),
+      });
 
-      if (upErr) throw upErr;
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        throw new Error(json?.error ?? `HTTP ${res.status}`);
+      }
 
       setSuccess("Пульсовые зоны сохранены");
       setEditing(false);

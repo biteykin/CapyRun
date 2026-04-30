@@ -1,3 +1,5 @@
+// frontend/components/workouts/WorkoutsAnalytics.tsx
+
 "use client";
 
 import { useMemo } from "react";

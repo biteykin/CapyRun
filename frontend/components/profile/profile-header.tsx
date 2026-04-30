@@ -1,3 +1,5 @@
+// frontend/components/profile/profile-header.tsx
+
 import type { ReactNode } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";

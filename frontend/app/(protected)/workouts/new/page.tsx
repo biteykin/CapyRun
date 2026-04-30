@@ -1,7 +1,8 @@
+// frontend/app/(protected)/workouts/new/page.tsx
+
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseBrowser";
 
 // используем ВАШ рабочий shadcn select
 import {
@@ -83,37 +84,14 @@ export default function NewWorkoutPage() {
     setSubsLoading(true);
     let opts: SubOpt[] = [];
 
-    // 1) reference table (adjust table/columns if your schema differs)
     try {
-      const { data, error } = await supabase
-        .from("sport_subtypes")
-        .select("*")
-        .eq("sport", s)
-        .order("order", { ascending: true });
-      if (!error && data?.length) {
-        opts = (data as any[]).map(r => {
-          const value = r.code ?? r.key ?? r.value ?? r.sub_sport ?? r.slug ?? r.id ?? "";
-          const label = r.name_ru ?? r.label_ru ?? r.title_ru ?? r.label ?? r.title ?? r.name ?? value;
-          return { value: String(value), label: String(label) };
-        }).filter(o => o.value);
-      }
+      const res = await fetch(`/api/workouts/sport-subtypes?sport=${encodeURIComponent(s)}`, {
+        credentials: "include",
+      });
+      const json = await res.json().catch(() => null);
+      if (res.ok && Array.isArray(json?.items)) opts = json.items;
     } catch { /* ignore */ }
 
-    // 2) distinct from existing workouts
-    if (!opts.length) {
-      const { data } = await supabase
-        .from("workouts")
-        .select("sub_sport")
-        .eq("sport", s)
-        .not("sub_sport", "is", null)
-        .limit(500);
-      if (data) {
-        const uniq = Array.from(new Set((data as any[]).map(x => x.sub_sport).filter(Boolean)));
-        opts = uniq.map(v => ({ value: String(v), label: String(v) }));
-      }
-    }
-
-    // 3) fallbacks
     if (!opts.length) {
       opts = (SUB_FALLBACKS[s] || []).map(v => ({ value: v, label: v }));
     }
@@ -216,12 +194,7 @@ export default function NewWorkoutPage() {
     e.preventDefault();
     setSaving(true); setError(null);
 
-    const { data: u } = await supabase.auth.getUser();
-    const user_id = u.user?.id;
-    if (!user_id) { setError("Нет сессии"); setSaving(false); return; }
-
     const patch: any = {
-      user_id,
       name: name || null,
       description: description || null,
       sport: sport || null,
@@ -243,8 +216,21 @@ export default function NewWorkoutPage() {
       patch.gym_volume_kg = gymVolume === "" ? null : Number(gymVolume);
     }
 
-    const { error } = await supabase.from("workouts").insert([patch]);
-    if (error) { setError(error.message); setSaving(false); return; }
+    const res = await fetch("/api/workouts", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      setError(json?.error ?? `HTTP ${res.status}`);
+      setSaving(false);
+      return;
+    }
+
     router.replace("/workouts");
   }
 

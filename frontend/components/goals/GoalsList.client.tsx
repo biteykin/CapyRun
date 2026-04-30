@@ -4,7 +4,6 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/lib/supabaseBrowser";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -318,8 +317,15 @@ export default function GoalsList({
     setError(null);
 
     try {
-      const { error: deleteErr } = await supabase.from("goals").delete().eq("id", goalId);
-      if (deleteErr) throw deleteErr;
+      const res = await fetch(`/api/goals/${goalId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        throw new Error(json?.error ?? `HTTP ${res.status}`);
+      }
 
       setItems((prev) => prev.filter((g) => g.id !== goalId));
       setPendingDeleteGoal(null);
@@ -335,16 +341,15 @@ export default function GoalsList({
     if (goal.is_primary) return;
 
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const res = await fetch(`/api/goals/${goal.id}/set-primary`, {
+        method: "POST",
+        credentials: "include",
+      });
 
-      if (!user) throw new Error("no user");
-
-      await supabase.from("goals").update({ is_primary: false }).eq("user_id", user.id).eq("is_primary", true);
-
-      const { error: updateErr } = await supabase.from("goals").update({ is_primary: true }).eq("id", goal.id);
-      if (updateErr) throw updateErr;
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        throw new Error(json?.error ?? `HTTP ${res.status}`);
+      }
 
       setItems((prev) => prev.map((g) => ({ ...g, is_primary: g.id === goal.id })));
     } catch (e) {

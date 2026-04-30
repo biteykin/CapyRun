@@ -1,8 +1,9 @@
+// frontend/components/workouts/WorkoutMap.client.tsx
+
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Map as LeafletMap } from "leaflet";
-import { supabase } from "@/lib/supabaseBrowser";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
@@ -247,16 +248,23 @@ export default function WorkoutMap(props: {
         setGpsErr(null);
         setGps(null);
 
-        const { data, error } = await supabase
-          .from("workout_gps_streams")
-          .select("s, points_count, updated_at, created_at")
-          .eq("workout_id", workoutId)
-          .maybeSingle();
+        const res = await fetch(`/api/workouts/${workoutId}/gps`, {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
 
-        if (error) throw error;
-        if (!data) return;
+        const json = await res.json().catch(() => null);
 
-        const s = (data as any)?.s ?? null;
+        if (!res.ok) {
+          throw new Error(json?.error ?? `HTTP ${res.status}`);
+        }
+
+        const row = json?.gps ?? json?.data ?? json ?? null;
+
+        if (!row) return;
+
+        const s = row?.s ?? null;
         const time_s: number[] = Array.isArray(s?.time_s) ? s.time_s : [];
         const lat: number[] = Array.isArray(s?.lat) ? s.lat : [];
         const lon: number[] = Array.isArray(s?.lon) ? s.lon : [];
@@ -282,15 +290,21 @@ export default function WorkoutMap(props: {
     (async () => {
       try {
         setPreview(null);
-        const { data, error } = await supabase
-          .from("workout_streams_preview")
-          .select("s")
-          .eq("workout_id", workoutId)
-          .maybeSingle();
-        if (error) return;
-        if (!data) return;
+        const res = await fetch(`/api/workouts/${workoutId}/streams`, {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
 
-        const s = (data as any)?.s ?? null;
+        const json = await res.json().catch(() => null);
+
+        if (!res.ok) return;
+
+        const row = json?.streams ?? json?.data ?? json ?? null;
+
+        if (!row) return;
+
+        const s = row?.s ?? null;
         const time_s: number[] = Array.isArray(s?.time_s) ? s.time_s : [];
         const hr: Array<number | null> = Array.isArray(s?.hr) ? s.hr : [];
         const pace: Array<number | null> = Array.isArray(s?.pace_s_per_km) ? s.pace_s_per_km : [];
@@ -570,13 +584,17 @@ export default function WorkoutMap(props: {
             <Button
               size="sm"
               variant="secondary"
-              onClick={() => mapRef.current?.fitBounds(padBounds(mapBounds, 0.12) as any)}
+              onClick={() =>
+                mapRef.current?.fitBounds(
+                  padBounds(mapBounds as [[number, number], [number, number]], 0.12) as any
+                )
+              }
             >
               Уместить
             </Button>
           )}
 
-          <Button size="sm" variant={playing ? "secondary" : "default"} onClick={() => setPlaying((v) => !v)}>
+          <Button size="sm" variant={playing ? "secondary" : "primary"} onClick={() => setPlaying((v) => !v)}>
             {playing ? "⏸ Пауза" : "▶ Play"}
           </Button>
 
@@ -656,7 +674,11 @@ export default function WorkoutMap(props: {
             scrollWheelZoom
             whenCreated={(mm: any) => {
               mapRef.current = mm;
-              if (mapBounds) mm.fitBounds(padBounds(mapBounds, 0.12) as any);
+              if (mapBounds) {
+                mm.fitBounds(
+                  padBounds(mapBounds as [[number, number], [number, number]], 0.12) as any
+                );
+              }
             }}
             style={{ height: "100%", width: "100%" }}
           >

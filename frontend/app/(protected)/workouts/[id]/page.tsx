@@ -6,7 +6,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { supabase } from "@/lib/supabaseBrowser";
 import WorkoutAiInsight from "@/components/workouts/WorkoutAiInsight";
 
 import WorkoutWeatherKpi from "@/components/workouts/WorkoutWeatherKpi";
@@ -241,13 +240,12 @@ export default function WorkoutDetailPage() {
     (async () => {
       try {
         setLoading(true);
-        const { data, error } = await supabase
-          .from("workouts")
-          .select("*")
-          .eq("id", id)
-          .maybeSingle();
-
-        if (error) throw error;
+        const res = await fetch(`/api/workouts/${id}`, {
+          credentials: "include",
+        });
+        const json = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+        const data = json?.workout ?? null;
 
         if (!data) {
           if (!canceled) {
@@ -296,12 +294,13 @@ export default function WorkoutDetailPage() {
 
   async function doDelete() {
     if (!row) return;
-    const { error } = await supabase
-      .from("workouts")
-      .update({ deleted_at: new Date().toISOString() })
-      .eq("id", row.id);
-    if (error) {
-      alert(error.message);
+    const res = await fetch(`/api/workouts/${row.id}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      alert(json?.error ?? `HTTP ${res.status}`);
       return;
     }
     setRow(null);
@@ -313,11 +312,14 @@ export default function WorkoutDetailPage() {
     if (!row) return;
     try {
       setNoteSaving(true);
-      const { error } = await supabase
-        .from("workouts")
-        .update({ description: note })
-        .eq("id", row.id);
-      if (error) throw error;
+      const res = await fetch(`/api/workouts/${row.id}/note`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ description: note }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
       setNoteDirty(false);
       setNoteSavedAt(new Date());
       setRow({ ...row, description: note });

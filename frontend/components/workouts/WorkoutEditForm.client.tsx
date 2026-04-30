@@ -4,7 +4,6 @@
 // ⚠️ ВАЖНО: не трогаем импорты shadcn Select, как у вас уже подключено
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseBrowser";
 
 // используем ВАШ рабочий shadcn select
 import {
@@ -100,34 +99,11 @@ export default function WorkoutEditForm({
       let opts: SubOpt[] = [];
 
       try {
-        const { data, error } = await supabase
-          .from("sport_subtypes")
-          .select("*")
-          .eq("sport", sport)
-          .order("order", { ascending: true });
-
-        if (!error && Array.isArray(data) && data.length) {
-          opts = (data as any[]).map((r) => {
-            const value =
-              r.code ?? r.key ?? r.value ?? r.sub_sport ?? r.slug ?? r.id ?? "";
-            const label =
-              r.name_ru ?? r.label_ru ?? r.title_ru ?? r.label ?? r.title ?? r.name ?? value;
-            return value ? { value: String(value), label: String(label) } : null;
-          }).filter(Boolean) as any[];
-        }
-
-        if (!opts.length) {
-          const { data: d2 } = await supabase
-            .from("workouts")
-            .select("sub_sport")
-            .eq("sport", sport)
-            .not("sub_sport", "is", null)
-            .limit(1000);
-          if (d2) {
-            const uniq = Array.from(new Set((d2 as any[]).map((x) => x.sub_sport).filter(Boolean)));
-            opts = uniq.map((v) => ({ value: String(v), label: String(v) }));
-          }
-        }
+        const res = await fetch(`/api/workouts/sport-subtypes?sport=${encodeURIComponent(sport)}`, {
+          credentials: "include",
+        });
+        const json = await res.json().catch(() => null);
+        if (res.ok && Array.isArray(json?.items)) opts = json.items;
       } catch {}
 
       if (!opts.length && SUB_FALLBACKS[sport]) {
@@ -160,9 +136,15 @@ export default function WorkoutEditForm({
       description: description || null,
     };
 
-    const { error } = await supabase.from("workouts").update(patch).eq("id", workout.id);
-    if (error) {
-      setError(error.message);
+    const res = await fetch(`/api/workouts/${workout.id}`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      setError(json?.error ?? `HTTP ${res.status}`);
       setSaving(false);
       return;
     }

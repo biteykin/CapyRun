@@ -3,7 +3,6 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseBrowser";
 
 // NEW: общий конфиг/компонент спорта
 import { humanSport } from "@/components/ui/sport-theme";
@@ -162,44 +161,20 @@ export default function WorkoutsTable({
         setLoading(true);
         setError(null);
 
-        const { data, error, status } = await supabase.rpc("list_dashboard", {
-          limit_files: 0,
-          limit_workouts: 1000,
+        const res = await fetch("/api/workouts?limit=1000", {
+          method: "GET",
+          credentials: "include",
         });
+        const json = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
 
-        if (error) {
-          console.warn("RPC list_dashboard failed", { status, error });
-          throw error;
-        }
-
-        // страховка: фильтруем по owner
-        const arr0 = (Array.isArray(data?.workouts) ? data?.workouts : []) as Workout[];
-        const arr = arr0.filter((r: any) => r.user_id === userId);
+        const arr = (Array.isArray(json?.items) ? json.items : []) as Workout[];
         if (!cancelled) {
           setRows(arr);
           setTotalCount?.(arr.length);
         }
-      } catch {
-        try {
-          const { data: rows2, error: err2 } = await supabase
-            .from("workouts")
-            .select(
-              "id,start_time,local_date,uploaded_at,sport,sub_sport,duration_sec,moving_time_sec,distance_m,avg_hr,calories_kcal,name,visibility,weekday_iso,user_id"
-            )
-            .eq("user_id", userId)  // ← ТОЛЬКО свои
-            .order("start_time", { ascending: false, nullsFirst: false })
-            // TODO: заменить на пагинацию/инфинит-скролл
-            .limit(1000);
-
-          if (err2) throw err2;
-          if (!cancelled) {
-            const arr = (rows2 ?? []) as Workout[];
-            setRows(arr);
-            setTotalCount?.(arr.length);
-          }
-        } catch (e: any) {
-          if (!cancelled) setError(e?.message || "Не удалось загрузить тренировки");
-        }
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message || "Не удалось загрузить тренировки");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -628,11 +603,12 @@ function RowActions({
   const doDelete = async () => {
     try {
       setDeleting(true);
-      const { error } = await supabase
-        .from("workouts")
-        .update({ deleted_at: new Date().toISOString() })
-        .eq("id", workoutId);
-      if (error) throw error;
+      const res = await fetch(`/api/workouts/${workoutId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
       onDeleted(workoutId);
       setConfirmOpen(false);
     } catch (e: any) {
