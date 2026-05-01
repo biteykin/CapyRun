@@ -164,11 +164,14 @@ export default function WorkoutsTable({
         const res = await fetch("/api/workouts?limit=1000", {
           method: "GET",
           credentials: "include",
+          cache: "no-store",
         });
         const json = await res.json().catch(() => null);
         if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
 
-        const arr = (Array.isArray(json?.items) ? json.items : []) as Workout[];
+        const raw = json?.workouts ?? json?.items ?? json?.data ?? [];
+        const arr0 = (Array.isArray(raw) ? raw : []) as Workout[];
+        const arr = userId ? arr0.filter((r) => r.user_id === userId) : arr0;
         if (!cancelled) {
           setRows(arr);
           setTotalCount?.(arr.length);
@@ -606,6 +609,7 @@ function RowActions({
       const res = await fetch(`/api/workouts/${workoutId}`, {
         method: "DELETE",
         credentials: "include",
+        cache: "no-store",
       });
       const json = await res.json().catch(() => null);
       if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);

@@ -1,5 +1,16 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { createClientWithCookies } from "@/lib/supabase/server";
+
+const WORKOUT_SELECT = `
+  id,user_id,start_time,local_date,uploaded_at,created_at,updated_at,
+  sport,sub_sport,duration_sec,moving_time_sec,distance_m,avg_hr,max_hr,
+  calories_kcal,name,description,visibility,weekday_iso,source,filename,
+  size_bytes,timezone_at_start,elev_gain_m,elev_loss_m,avg_power_w,max_power_w,
+  np_power_w,avg_cadence_spm,avg_cadence_rpm,avg_pace_s_per_km,trimp,ef,
+  pa_hr_pct,intensity_factor,training_load_score,laps_count,has_gps,
+  avg_swim_pace_s_per_100m,swim_pool_length_m,swim_stroke_primary,
+  swim_swolf_avg,weather,hr_zone_time,perceived_exertion,strava_activity_url
+`;
 
 const WORKOUT_PATCH_FIELDS = [
   "name",
@@ -12,39 +23,33 @@ const WORKOUT_PATCH_FIELDS = [
   "duration_sec",
   "moving_time_sec",
   "calories_kcal",
-  "swim_pool_length_m",
-  "gym_exercises_count",
-  "gym_sets_count",
-  "gym_reps_total",
-  "gym_volume_kg",
   "visibility",
 ] as const;
 
-function pickWorkoutPatch(body: any) {
-  const patch: Record<string, unknown> = {};
-  for (const field of WORKOUT_PATCH_FIELDS) {
-    if (Object.prototype.hasOwnProperty.call(body, field)) {
-      patch[field] = body[field];
-    }
-  }
-  return patch;
-}
-
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: { id: string } }
-) {
+async function getUser() {
   const supabase = await createClientWithCookies();
   const {
     data: { user },
+    error,
   } = await supabase.auth.getUser();
+  return { supabase, user, error };
+}
 
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export async function GET(
+  _req: Request,
+  ctx: { params: Promise<{ id: string }> }
+) {
+  const { id } = await ctx.params;
+  const { supabase, user, error: userError } = await getUser();
+
+  if (userError || !user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   const { data, error } = await supabase
     .from("workouts")
-    .select("*")
-    .eq("id", params.id)
+    .select(WORKOUT_SELECT)
+    .eq("id", id)
     .eq("user_id", user.id)
     .is("deleted_at", null)
     .maybeSingle();
@@ -56,32 +61,38 @@ export async function GET(
 }
 
 export async function PATCH(
-  req: NextRequest,
-  { params }: { params: { id: string } }
+  req: Request,
+  ctx: { params: Promise<{ id: string }> }
 ) {
-  const supabase = await createClientWithCookies();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { id } = await ctx.params;
+  const { supabase, user, error: userError } = await getUser();
 
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (userError || !user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
-  const body = await req.json();
-  const patch = pickWorkoutPatch(body);
+  const body = await req.json().catch(() => null);
+  const patch: Record<string, unknown> = {};
+
+  for (const field of WORKOUT_PATCH_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(body ?? {}, field)) {
+      patch[field] = (body as Record<string, unknown>)[field];
+    }
+  }
 
   if (!Object.keys(patch).length) {
     return NextResponse.json({ error: "No supported workout fields provided" }, { status: 400 });
   }
 
+  patch.updated_at = new Date().toISOString();
+
   const { data, error } = await supabase
     .from("workouts")
-    .update({
-      ...patch,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", params.id)
+    .update(patch)
+    .eq("id", id)
     .eq("user_id", user.id)
-    .select("*")
+    .is("deleted_at", null)
+    .select(WORKOUT_SELECT)
     .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -91,29 +102,26 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _req: NextRequest,
-  { params }: { params: { id: string } }
+  _req: Request,
+  ctx: { params: Promise<{ id: string }> }
 ) {
-  const supabase = await createClientWithCookies();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { id } = await ctx.params;
+  const { supabase, user, error: userError } = await getUser();
 
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (userError || !user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from("workouts")
     .update({
       deleted_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
-    .eq("id", params.id)
-    .eq("user_id", user.id)
-    .select("id")
-    .maybeSingle();
+    .eq("id", id)
+    .eq("user_id", user.id);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  if (!data) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   return NextResponse.json({ ok: true });
 }

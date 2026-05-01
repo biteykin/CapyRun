@@ -241,7 +241,9 @@ export default function WorkoutDetailPage() {
       try {
         setLoading(true);
         const res = await fetch(`/api/workouts/${id}`, {
+          method: "GET",
           credentials: "include",
+          cache: "no-store",
         });
         const json = await res.json().catch(() => null);
         if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
@@ -297,13 +299,14 @@ export default function WorkoutDetailPage() {
     const res = await fetch(`/api/workouts/${row.id}`, {
       method: "DELETE",
       credentials: "include",
+      cache: "no-store",
     });
     const json = await res.json().catch(() => null);
     if (!res.ok) {
       alert(json?.error ?? `HTTP ${res.status}`);
       return;
     }
-    setRow(null);
+
     router.replace("/workouts");
     router.refresh();
   }
@@ -315,6 +318,7 @@ export default function WorkoutDetailPage() {
       const res = await fetch(`/api/workouts/${row.id}/note`, {
         method: "PATCH",
         credentials: "include",
+        cache: "no-store",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ description: note }),
       });

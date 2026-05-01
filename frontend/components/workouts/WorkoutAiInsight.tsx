@@ -3,7 +3,6 @@
 "use client";
 
 import * as React from "react";
-import { supabase } from "@/lib/supabaseBrowser";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -312,21 +311,20 @@ export default function WorkoutAiInsight({ workoutId }: { workoutId: string }) {
     setLoading(true);
     setErr(null);
 
-    const { data, error } = await supabase
-      .from("ai_insights")
-      .select("id, summary, content_md, title, created_at")
-      .eq("scope", "workout")
-      .eq("entity_id", workoutId)
-      .eq("status", "active")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const res = await fetch(`/api/workouts/${workoutId}/ai-insight`, {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+    });
 
-    if (error) {
-      setErr(error.message);
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      setErr(json?.error ?? `HTTP ${res.status}`);
       setRow(null);
     } else {
-      setRow((data as any) ?? null);
+      const insight = (json?.insight ?? json?.data ?? json) as AiInsight | null | undefined;
+      setRow(insight ?? null);
     }
 
     setLoading(false);

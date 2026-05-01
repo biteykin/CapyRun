@@ -42,6 +42,10 @@ export async function GET() {
         description: "Training plan sessions and calendar items",
       },
       {
+        name: "Workouts",
+        description: "Workout CRUD, streams, GPS tracks and AI workout insights",
+      },
+      {
         name: "Dashboard",
         description: "Home dashboard analytics and widgets",
       },
@@ -1540,6 +1544,344 @@ export async function GET() {
           },
         },
       },
+
+      "/api/workouts": {
+        get: {
+          tags: ["Workouts"],
+          summary: "Get current user's workouts",
+          operationId: "getWorkouts",
+          security: [{ cookieAuth: [] }],
+          parameters: [
+            {
+              name: "limit",
+              in: "query",
+              required: false,
+              schema: { type: "integer", minimum: 1, maximum: 1000, default: 50 },
+              description: "Maximum number of workouts to return",
+            },
+            {
+              name: "offset",
+              in: "query",
+              required: false,
+              schema: { type: "integer", minimum: 0, default: 0 },
+              description: "Pagination offset",
+            },
+            {
+              name: "sport",
+              in: "query",
+              required: false,
+              schema: { type: "string", example: "run" },
+              description: "Filter by sport",
+            },
+            {
+              name: "date_from",
+              in: "query",
+              required: false,
+              schema: { type: "string", format: "date", example: "2026-01-01" },
+              description: "Filter workouts from this local date",
+            },
+            {
+              name: "date_to",
+              in: "query",
+              required: false,
+              schema: { type: "string", format: "date", example: "2026-12-31" },
+              description: "Filter workouts up to this local date",
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Workout list",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      items: {
+                        type: "array",
+                        items: { $ref: "#/components/schemas/Workout" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+          },
+        },
+        post: {
+          tags: ["Workouts"],
+          summary: "Create manual workout",
+          operationId: "createWorkout",
+          security: [{ cookieAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/WorkoutInput" },
+              },
+            },
+          },
+          responses: {
+            "201": {
+              description: "Workout created",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      workout: { $ref: "#/components/schemas/Workout" },
+                    },
+                  },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequest" },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+          },
+        },
+      },
+
+      "/api/workouts/{id}": {
+        get: {
+          tags: ["Workouts"],
+          summary: "Get workout by id",
+          operationId: "getWorkoutById",
+          security: [{ cookieAuth: [] }],
+          parameters: [
+            { $ref: "#/components/parameters/WorkoutId" },
+            {
+              name: "include",
+              in: "query",
+              required: false,
+              schema: {
+                type: "string",
+                example: "streams,gps,insights",
+              },
+              description:
+                "Optional comma-separated related data to include. Supported values: streams, gps, insights.",
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Workout details",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      workout: { $ref: "#/components/schemas/Workout" },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "404": { $ref: "#/components/responses/NotFound" },
+          },
+        },
+        patch: {
+          tags: ["Workouts"],
+          summary: "Update workout",
+          operationId: "updateWorkout",
+          security: [{ cookieAuth: [] }],
+          parameters: [{ $ref: "#/components/parameters/WorkoutId" }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/WorkoutInput" },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "Workout updated",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      workout: { $ref: "#/components/schemas/Workout" },
+                    },
+                  },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/BadRequest" },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "404": { $ref: "#/components/responses/NotFound" },
+          },
+        },
+        delete: {
+          tags: ["Workouts"],
+          summary: "Soft-delete workout",
+          operationId: "deleteWorkout",
+          security: [{ cookieAuth: [] }],
+          parameters: [{ $ref: "#/components/parameters/WorkoutId" }],
+          responses: {
+            "200": {
+              description: "Workout deleted",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/OkResponse" },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "404": { $ref: "#/components/responses/NotFound" },
+          },
+        },
+      },
+
+      "/api/workouts/{id}/note": {
+        patch: {
+          tags: ["Workouts"],
+          summary: "Update workout note",
+          operationId: "updateWorkoutNote",
+          security: [{ cookieAuth: [] }],
+          parameters: [{ $ref: "#/components/parameters/WorkoutId" }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    description: {
+                      type: "string",
+                      nullable: true,
+                      example: "Лёгкий бег, самочувствие хорошее.",
+                    },
+                    note: {
+                      type: "string",
+                      nullable: true,
+                      deprecated: true,
+                      description: "Deprecated alias for description",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "Workout note updated",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      workout: {
+                        type: "object",
+                        properties: {
+                          id: { type: "string" },
+                          description: { type: "string", nullable: true },
+                          updated_at: { type: "string", format: "date-time", nullable: true },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "404": { $ref: "#/components/responses/NotFound" },
+          },
+        },
+      },
+
+      "/api/workouts/{id}/streams": {
+        get: {
+          tags: ["Workouts"],
+          summary: "Get workout chart streams preview",
+          description:
+            "Returns downsampled time-series data for workout charts: time, heart rate and pace.",
+          operationId: "getWorkoutStreams",
+          security: [{ cookieAuth: [] }],
+          parameters: [{ $ref: "#/components/parameters/WorkoutId" }],
+          responses: {
+            "200": {
+              description: "Workout streams preview",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      streams: { $ref: "#/components/schemas/WorkoutStreamsPreview" },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "404": { $ref: "#/components/responses/NotFound" },
+          },
+        },
+      },
+
+      "/api/workouts/{id}/gps": {
+        get: {
+          tags: ["Workouts"],
+          summary: "Get workout GPS stream",
+          description:
+            "Returns GPS stream data for the interactive workout map.",
+          operationId: "getWorkoutGps",
+          security: [{ cookieAuth: [] }],
+          parameters: [{ $ref: "#/components/parameters/WorkoutId" }],
+          responses: {
+            "200": {
+              description: "Workout GPS stream",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      gps: { $ref: "#/components/schemas/WorkoutGpsStream" },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "404": { $ref: "#/components/responses/NotFound" },
+          },
+        },
+      },
+
+      "/api/workouts/{id}/ai-insight": {
+        get: {
+          tags: ["Workouts"],
+          summary: "Get latest workout AI insight",
+          description:
+            "Returns the latest active AI insight for a workout, if it exists.",
+          operationId: "getWorkoutAiInsight",
+          security: [{ cookieAuth: [] }],
+          parameters: [{ $ref: "#/components/parameters/WorkoutId" }],
+          responses: {
+            "200": {
+              description: "Latest workout AI insight",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      insight: {
+                        oneOf: [
+                          { $ref: "#/components/schemas/WorkoutAiInsight" },
+                          { type: "null" },
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "404": { $ref: "#/components/responses/NotFound" },
+          },
+        },
+      },
+
       "/api/coach/send": {
         post: {
           tags: ["Coach"],
@@ -1917,6 +2259,13 @@ export async function GET() {
           required: true,
           schema: { type: "string" },
           description: "Goal ID",
+        },
+        WorkoutId: {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Workout ID",
         },
         WorkoutFileId: {
           name: "id",
@@ -2380,6 +2729,151 @@ export async function GET() {
             },
           },
         },
+
+        Workout: {
+          type: "object",
+          additionalProperties: true,
+          properties: {
+            id: { type: "string" },
+            user_id: { type: "string" },
+            name: { type: "string", nullable: true },
+            description: { type: "string", nullable: true },
+            sport: { type: "string", nullable: true, example: "run" },
+            sub_sport: { type: "string", nullable: true, example: "road" },
+            source: { type: "string", nullable: true, example: "manual" },
+            visibility: { type: "string", nullable: true, example: "private" },
+            start_time: { type: "string", format: "date-time", nullable: true },
+            local_date: { type: "string", format: "date", nullable: true },
+            timezone_at_start: { type: "string", nullable: true, example: "Europe/Berlin" },
+            uploaded_at: { type: "string", format: "date-time", nullable: true },
+            duration_sec: { type: "number", nullable: true, example: 3600 },
+            moving_time_sec: { type: "number", nullable: true, example: 3520 },
+            distance_m: { type: "number", nullable: true, example: 10000 },
+            calories_kcal: { type: "number", nullable: true, example: 650 },
+            avg_hr: { type: "number", nullable: true, example: 145 },
+            max_hr: { type: "number", nullable: true, example: 178 },
+            avg_pace_s_per_km: { type: "number", nullable: true, example: 330 },
+            elev_gain_m: { type: "number", nullable: true, example: 120 },
+            elev_loss_m: { type: "number", nullable: true, example: 118 },
+            avg_power_w: { type: "number", nullable: true },
+            max_power_w: { type: "number", nullable: true },
+            np_power_w: { type: "number", nullable: true },
+            avg_cadence_spm: { type: "number", nullable: true },
+            avg_cadence_rpm: { type: "number", nullable: true },
+            trimp: { type: "number", nullable: true },
+            ef: { type: "number", nullable: true },
+            pa_hr_pct: { type: "number", nullable: true },
+            intensity_factor: { type: "number", nullable: true },
+            training_load_score: { type: "number", nullable: true },
+            laps_count: { type: "number", nullable: true },
+            has_gps: { type: "boolean", nullable: true },
+            weather: {
+              type: "object",
+              nullable: true,
+              additionalProperties: true,
+            },
+            hr_zone_time: {
+              type: "object",
+              nullable: true,
+              additionalProperties: { type: "number" },
+            },
+            perceived_exertion: { type: "number", nullable: true },
+            strava_activity_url: { type: "string", nullable: true },
+            created_at: { type: "string", format: "date-time", nullable: true },
+            updated_at: { type: "string", format: "date-time", nullable: true },
+          },
+        },
+
+        WorkoutInput: {
+          type: "object",
+          properties: {
+            name: { type: "string", nullable: true, example: "Лёгкий бег" },
+            description: { type: "string", nullable: true },
+            sport: { type: "string", nullable: true, example: "run" },
+            sub_sport: { type: "string", nullable: true, example: "road" },
+            start_time: { type: "string", format: "date-time", nullable: true },
+            local_date: { type: "string", format: "date", nullable: true },
+            distance_m: { type: "number", nullable: true, example: 10000 },
+            duration_sec: { type: "number", nullable: true, example: 3600 },
+            moving_time_sec: { type: "number", nullable: true },
+            calories_kcal: { type: "number", nullable: true },
+            visibility: { type: "string", nullable: true, example: "private" },
+            swim_pool_length_m: { type: "number", nullable: true },
+            gym_exercises_count: { type: "number", nullable: true },
+            gym_sets_count: { type: "number", nullable: true },
+            gym_reps_total: { type: "number", nullable: true },
+            gym_volume_kg: { type: "number", nullable: true },
+          },
+        },
+
+        WorkoutStreamsPreview: {
+          type: "object",
+          properties: {
+            s: {
+              type: "object",
+              properties: {
+                time_s: {
+                  type: "array",
+                  items: { type: "number" },
+                  example: [0, 10, 20],
+                },
+                hr: {
+                  type: "array",
+                  items: { type: "number", nullable: true },
+                  example: [132, 135, 138],
+                },
+                pace_s_per_km: {
+                  type: "array",
+                  items: { type: "number", nullable: true },
+                  example: [360, 355, 350],
+                },
+              },
+            },
+            created_at: { type: "string", format: "date-time", nullable: true },
+            updated_at: { type: "string", format: "date-time", nullable: true },
+          },
+        },
+
+        WorkoutGpsStream: {
+          type: "object",
+          properties: {
+            s: {
+              type: "object",
+              properties: {
+                time_s: {
+                  type: "array",
+                  items: { type: "number" },
+                  example: [0, 10, 20],
+                },
+                lat: {
+                  type: "array",
+                  items: { type: "number" },
+                  example: [55.7558, 55.756, 55.7562],
+                },
+                lon: {
+                  type: "array",
+                  items: { type: "number" },
+                  example: [37.6173, 37.6175, 37.6178],
+                },
+              },
+            },
+            points_count: { type: "integer", nullable: true, example: 1500 },
+            created_at: { type: "string", format: "date-time", nullable: true },
+            updated_at: { type: "string", format: "date-time", nullable: true },
+          },
+        },
+
+        WorkoutAiInsight: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            title: { type: "string", nullable: true },
+            summary: { type: "string", nullable: true },
+            content_md: { type: "string", nullable: true },
+            created_at: { type: "string", format: "date-time" },
+          },
+        },
+
         CoachMessage: {
           type: "object",
           properties: {
@@ -2414,6 +2908,12 @@ export async function GET() {
               format: "date-time",
               example: "2026-04-30T11:30:05.000Z",
             },
+          },
+        },
+        OkResponse: {
+          type: "object",
+          properties: {
+            ok: { type: "boolean", example: true },
           },
         },
         ErrorResponse: {

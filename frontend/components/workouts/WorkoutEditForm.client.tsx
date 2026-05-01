@@ -139,6 +139,7 @@ export default function WorkoutEditForm({
     const res = await fetch(`/api/workouts/${workout.id}`, {
       method: "PATCH",
       credentials: "include",
+      cache: "no-store",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(patch),
     });

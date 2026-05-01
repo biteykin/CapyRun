@@ -32,6 +32,7 @@ export default function NoteInline({ workoutId, initial }: Props) {
     const res = await fetch(`/api/workouts/${workoutId}/note`, {
       method: "PATCH",
       credentials: "include",
+      cache: "no-store",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ description: v }),
     });

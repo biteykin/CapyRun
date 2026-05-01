@@ -1,10 +1,15 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { createClientWithCookies } from "@/lib/supabase/server";
 
 const WORKOUT_SELECT = `
-  id,user_id,start_time,local_date,uploaded_at,sport,sub_sport,
-  duration_sec,moving_time_sec,distance_m,avg_hr,calories_kcal,
-  name,description,visibility,weekday_iso,created_at,updated_at
+  id,user_id,start_time,local_date,uploaded_at,created_at,updated_at,
+  sport,sub_sport,duration_sec,moving_time_sec,distance_m,avg_hr,max_hr,
+  calories_kcal,name,description,visibility,weekday_iso,source,filename,
+  size_bytes,timezone_at_start,elev_gain_m,elev_loss_m,avg_power_w,max_power_w,
+  np_power_w,avg_cadence_spm,avg_cadence_rpm,avg_pace_s_per_km,trimp,ef,
+  pa_hr_pct,intensity_factor,training_load_score,laps_count,has_gps,
+  avg_swim_pace_s_per_100m,swim_pool_length_m,swim_stroke_primary,
+  swim_swolf_avg,weather,hr_zone_time,perceived_exertion,strava_activity_url
 `;
 
 const WORKOUT_PATCH_FIELDS = [
@@ -18,34 +23,28 @@ const WORKOUT_PATCH_FIELDS = [
   "duration_sec",
   "moving_time_sec",
   "calories_kcal",
+  "visibility",
   "swim_pool_length_m",
   "gym_exercises_count",
   "gym_sets_count",
   "gym_reps_total",
   "gym_volume_kg",
-  "visibility",
 ] as const;
 
-function pickWorkoutPatch(body: any) {
-  const patch: Record<string, unknown> = {};
-  for (const field of WORKOUT_PATCH_FIELDS) {
-    if (Object.prototype.hasOwnProperty.call(body, field)) {
-      patch[field] = body[field];
-    }
-  }
-  return patch;
-}
-
-export async function GET(req: NextRequest) {
+export async function GET(req: Request) {
   const supabase = await createClientWithCookies();
   const {
     data: { user },
+    error: userError,
   } = await supabase.auth.getUser();
 
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (userError || !user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   const url = new URL(req.url);
-  const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 1000), 1), 1000);
+  const limitRaw = Number(url.searchParams.get("limit") ?? 1000);
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 1000) : 1000;
 
   const { data, error } = await supabase
     .from("workouts")
@@ -56,38 +55,48 @@ export async function GET(req: NextRequest) {
     .order("created_at", { ascending: false })
     .limit(limit);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
 
   return NextResponse.json({ items: data ?? [] });
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   const supabase = await createClientWithCookies();
   const {
     data: { user },
+    error: userError,
   } = await supabase.auth.getUser();
 
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (userError || !user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
-  const body = await req.json();
-  const patch = pickWorkoutPatch(body);
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== "object") {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
-  if (!patch.start_time && !patch.local_date) {
-    return NextResponse.json({ error: "start_time or local_date is required" }, { status: 400 });
+  const patch: Record<string, unknown> = {
+    user_id: user.id,
+  };
+
+  for (const field of WORKOUT_PATCH_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(body, field)) {
+      patch[field] = body[field];
+    }
   }
 
   const { data, error } = await supabase
     .from("workouts")
-    .insert({
-      ...patch,
-      user_id: user.id,
-      source: body?.source ?? "manual",
-      updated_at: new Date().toISOString(),
-    })
-    .select("*")
+    .insert(patch)
+    .select(WORKOUT_SELECT)
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
 
   return NextResponse.json({ workout: data }, { status: 201 });
 }

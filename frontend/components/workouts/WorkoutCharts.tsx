@@ -94,6 +94,19 @@ function maxv(values: Array<number | null | undefined>) {
 function parseHrZones(raw: any, hrMaxFallback?: number | null): HrZone[] {
   if (!raw || typeof raw !== "object") return [];
 
+  // Формат CapyRun: { Z1: { name, min, max }, Z2: { name, min, max } }
+  const objectZones = Object.entries(raw)
+    .filter(([k]) => /^z\d+$/i.test(k))
+    .map(([k, v]: any) => {
+      const from = isNum(v?.min) ? Number(v.min) : null;
+      const to = isNum(v?.max) ? Number(v.max) : null;
+      if (from == null || to == null) return null;
+      return { name: String(v?.name ?? k).toUpperCase(), from, to };
+    })
+    .filter(Boolean) as HrZone[];
+
+  if (objectZones.length) return objectZones;
+
   // Формат A: { Z1: [120, 140], Z2: [141, 155], ... }
   const keys = Object.keys(raw);
   if (keys.some((k) => /^z\d+$/i.test(k))) {
