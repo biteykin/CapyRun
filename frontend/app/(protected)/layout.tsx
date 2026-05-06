@@ -1,31 +1,33 @@
-import { createSupabaseServerClient } from "@/lib/supabaseServerApp";
+//frontend/app/(protected)/layout.tsx
+
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import Shell from "@/components/Shell";
+
+async function apiUrl(path: string) {
+  const h = await headers();
+  const host = h.get("host");
+  const proto = h.get("x-forwarded-proto") ?? "http";
+  return `${proto}://${host}${path}`;
+}
 
 export default async function ProtectedLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = await createSupabaseServerClient();
+  const h = await headers();
+  const res = await fetch(await apiUrl("/api/profile/onboarding-status"), {
+    cache: "no-store",
+    headers: { cookie: h.get("cookie") ?? "" },
+  });
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  if (res.status === 401) redirect("/login");
+  if (!res.ok) redirect("/login");
 
-  if (!user) {
-    redirect("/login");
-  }
+  const json = await res.json();
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("onboarding_completed_at")
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  const isOnboardingDone = !!profile?.onboarding_completed_at;
-
-  if (!profile?.onboarding_completed_at) {
+  if (!json?.onboardingDone) {
     redirect("/onboarding");
   }
 

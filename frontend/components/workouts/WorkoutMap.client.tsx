@@ -3,7 +3,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Map as LeafletMap } from "leaflet";
+import type { DivIcon, Icon, LatLngExpression, LatLngBoundsExpression, Map as LeafletMap } from "leaflet";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
@@ -24,16 +24,16 @@ type PreviewStreams = {
 };
 
 type LeafletModules = {
-  L: any;
-  MapContainer: any;
-  TileLayer: any;
-  Polyline: any;
-  Marker: any;
-  CircleMarker: any;
-  useMapEvents: any;
+  L: typeof import("leaflet");
+  MapContainer: typeof import("react-leaflet").MapContainer;
+  TileLayer: typeof import("react-leaflet").TileLayer;
+  Polyline: typeof import("react-leaflet").Polyline;
+  Marker: typeof import("react-leaflet").Marker;
+  CircleMarker: typeof import("react-leaflet").CircleMarker;
+  useMapEvents: typeof import("react-leaflet").useMapEvents;
 };
 
-function isNum(v: any): v is number {
+function isNum(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v);
 }
 
@@ -169,7 +169,7 @@ export default function WorkoutMap(props: {
 
   // ✅ dynamic-loaded leaflet/react-leaflet modules
   const [m, setM] = useState<LeafletModules | null>(null);
-  const [icons, setIcons] = useState<{ DefaultIcon: any; PulseDotIcon: any } | null>(null);
+  const [icons, setIcons] = useState<{ DefaultIcon: Icon; PulseDotIcon: DivIcon } | null>(null);
 
   const [gps, setGps] = useState<GpsStreams | null>(null);
   const [preview, setPreview] = useState<PreviewStreams | null>(null);
@@ -214,9 +214,9 @@ export default function WorkoutMap(props: {
 
         // icons created AFTER L exists
         const DefaultIcon = L.icon({
-          iconRetinaUrl: (marker2x as any)?.src ?? (marker2x as any),
-          iconUrl: (marker as any)?.src ?? (marker as any),
-          shadowUrl: (shadow as any)?.src ?? (shadow as any),
+          iconRetinaUrl: (marker2x as { src?: string })?.src ?? marker2x,
+          iconUrl: (marker as { src?: string })?.src ?? marker,
+          shadowUrl: (shadow as { src?: string })?.src ?? shadow,
           iconSize: [25, 41],
           iconAnchor: [12, 41],
         });
@@ -229,9 +229,9 @@ export default function WorkoutMap(props: {
         });
 
         setIcons({ DefaultIcon, PulseDotIcon });
-      } catch (e: any) {
+      } catch (e: unknown) {
         // if leaflet fails to load for some reason, show readable error
-        setGpsErr((prev) => prev ?? `Leaflet init failed: ${String(e?.message ?? e)}`);
+        setGpsErr((prev) => prev ?? `Leaflet init failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     })();
 
@@ -275,8 +275,8 @@ export default function WorkoutMap(props: {
           setGps({ time_s: ds.t, lat: ds.lat, lon: ds.lon });
           setActiveIdx(0);
         }
-      } catch (e: any) {
-        if (!canceled) setGpsErr(String(e?.message ?? e));
+      } catch (e: unknown) {
+        if (!canceled) setGpsErr(e instanceof Error ? e.message : String(e));
       }
     })();
     return () => {
@@ -355,10 +355,10 @@ export default function WorkoutMap(props: {
     if (!followMarker) return;
     if (!mapRef.current) return;
     if (!activePoint) return;
-    mapRef.current.panTo([activePoint.lat, activePoint.lon] as any, {
+    mapRef.current.panTo([activePoint.lat, activePoint.lon] as LatLngExpression, {
       animate: true,
       duration: 0.35,
-    } as any);
+    });
   }, [activePoint, followMarker]);
 
   // external sync from charts: time -> idx
@@ -545,7 +545,7 @@ export default function WorkoutMap(props: {
 
   function MapClickPicker({ onPick }: { onPick: (lat: number, lon: number) => void }) {
     useMapEvents({
-      click: (e: any) => onPick(e.latlng.lat, e.latlng.lng),
+      click: (e) => onPick(e.latlng.lat, e.latlng.lng),
     });
     return null;
   }
@@ -586,7 +586,7 @@ export default function WorkoutMap(props: {
               variant="secondary"
               onClick={() =>
                 mapRef.current?.fitBounds(
-                  padBounds(mapBounds as [[number, number], [number, number]], 0.12) as any
+                  padBounds(mapBounds as [[number, number], [number, number]], 0.12) as LatLngBoundsExpression
                 )
               }
             >
@@ -602,7 +602,7 @@ export default function WorkoutMap(props: {
             {[1, 5, 10, 20].map((x) => (
               <button
                 key={x}
-                onClick={() => setPlaySpeed(x as any)}
+                onClick={() => setPlaySpeed(x as 1 | 5 | 10 | 20)}
                 className={[
                   "rounded-full border px-2 py-1 text-xs",
                   playSpeed === x ? "bg-foreground text-background" : "bg-card text-foreground",
@@ -669,14 +669,14 @@ export default function WorkoutMap(props: {
       <div className="capyrun-map-wrap">
         <div className="h-[440px] w-full rounded-2xl border">
           <MapContainer
-            center={mapPoints[0] as any}
+            center={mapPoints[0] as LatLngExpression}
             zoom={14}
             scrollWheelZoom
-            whenCreated={(mm: any) => {
+            whenCreated={(mm: LeafletMap) => {
               mapRef.current = mm;
               if (mapBounds) {
                 mm.fitBounds(
-                  padBounds(mapBounds as [[number, number], [number, number]], 0.12) as any
+                  padBounds(mapBounds as [[number, number], [number, number]], 0.12) as LatLngBoundsExpression
                 );
               }
             }}
@@ -693,7 +693,7 @@ export default function WorkoutMap(props: {
 
             {/* shadow under route */}
             <Polyline
-              positions={mapPoints as any}
+              positions={mapPoints as LatLngExpression[]}
               pathOptions={{
                 color: "#000000",
                 opacity: 0.22,
@@ -704,10 +704,10 @@ export default function WorkoutMap(props: {
             />
 
             {/* gradient segments */}
-            {coloredSegments.map((s: any, i: number) => (
+            {coloredSegments.map((s, i) => (
               <Polyline
                 key={i}
-                positions={s.positions as any}
+                positions={s.positions as LatLngExpression[]}
                 pathOptions={{
                   color: s.color,
                   opacity: s.opacity,
@@ -719,18 +719,18 @@ export default function WorkoutMap(props: {
             ))}
 
             {/* start / finish */}
-            <CircleMarker center={mapPoints[0] as any} radius={6} pathOptions={{ color: "white", weight: 2, fillColor: HR_PINK, fillOpacity: 1 }} />
+            <CircleMarker center={mapPoints[0] as LatLngExpression} radius={6} pathOptions={{ color: "white", weight: 2, fillColor: HR_PINK, fillOpacity: 1 }} />
             <CircleMarker
-              center={mapPoints[mapPoints.length - 1] as any}
+              center={mapPoints[mapPoints.length - 1] as LatLngExpression}
               radius={6}
               pathOptions={{ color: "white", weight: 2, fillColor: HR_PINK, fillOpacity: 1 }}
             />
 
             {/* active marker (pulse) */}
-            {activePoint && <Marker position={[activePoint.lat, activePoint.lon] as any} icon={icons.PulseDotIcon} />}
+            {activePoint && <Marker position={[activePoint.lat, activePoint.lon] as LatLngExpression} icon={icons.PulseDotIcon} />}
 
             {/* safety: force default marker assets */}
-            <Marker position={mapPoints[0] as any} icon={icons.DefaultIcon} opacity={0} />
+            <Marker position={mapPoints[0] as LatLngExpression} icon={icons.DefaultIcon} opacity={0} />
           </MapContainer>
         </div>
       </div>

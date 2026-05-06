@@ -25,7 +25,10 @@ const SUB_FALLBACKS: Record<string, string[]> = {
   other: [],
 };
 
-async function loadSubOptionsServer(supabase: any, sport: string) {
+type SupabaseClient = Awaited<ReturnType<typeof createSupabaseServerClient>>;
+type AnyRow = Record<string, unknown>;
+
+async function loadSubOptionsServer(supabase: SupabaseClient, sport: string) {
   // 1) справочник
   let opts: { value: string; label: string }[] = [];
   try {
@@ -36,7 +39,7 @@ async function loadSubOptionsServer(supabase: any, sport: string) {
       .order("order", { ascending: true });
     if (Array.isArray(data) && data.length) {
       opts = data
-        .map((r: any) => {
+        .map((r: AnyRow) => {
           const value =
             r.code ?? r.key ?? r.value ?? r.sub_sport ?? r.slug ?? r.id ?? "";
           const label =
@@ -49,7 +52,7 @@ async function loadSubOptionsServer(supabase: any, sport: string) {
             value;
           return value ? { value: String(value), label: String(label) } : null;
         })
-        .filter(Boolean) as any[];
+        .filter((v): v is { value: string; label: string } => !!v);
     }
   } catch {}
 
@@ -64,7 +67,11 @@ async function loadSubOptionsServer(supabase: any, sport: string) {
         .limit(1000);
       if (data) {
         const uniq = Array.from(
-          new Set((data as any[]).map((x) => x.sub_sport).filter(Boolean))
+          new Set(
+            (data as Array<{ sub_sport?: unknown }>)
+              .map((x) => x.sub_sport)
+              .filter((v): v is string => typeof v === "string" && v.length > 0)
+          )
         );
         opts = uniq.map((v) => ({ value: String(v), label: String(v) }));
       }

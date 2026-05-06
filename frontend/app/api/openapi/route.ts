@@ -51,7 +51,7 @@ export async function GET() {
       },
       {
         name: "Integrations",
-        description: "External integrations like Strava",
+        description: "External service integrations",
       },
       {
         name: "Workout files",
@@ -144,13 +144,15 @@ export async function GET() {
       "/api/workout-files/{id}": {
         delete: {
           tags: ["Workout files"],
-          summary: "Delete uploaded workout file",
+          summary: "Soft-delete uploaded workout file",
+          description:
+            "Deletes a workout file owned by the current user. The API removes the object from Supabase Storage best-effort and archives the database row via deleted_at/status.",
           operationId: "deleteWorkoutFile",
           security: [{ cookieAuth: [] }],
           parameters: [{ $ref: "#/components/parameters/WorkoutFileId" }],
           responses: {
             "200": {
-              description: "Workout file deleted",
+              description: "File archived",
               content: {
                 "application/json": {
                   schema: { $ref: "#/components/schemas/OkResponse" },
@@ -159,6 +161,44 @@ export async function GET() {
             },
             "401": { $ref: "#/components/responses/Unauthorized" },
             "404": { $ref: "#/components/responses/NotFound" },
+            "500": {
+              description: "Server error",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      "/api/onboarding/state": {
+        get: {
+          tags: ["Onboarding"],
+          summary: "Get onboarding state",
+          description:
+            "Returns the current authenticated user and profile fields required to render the onboarding flow.",
+          operationId: "getOnboardingState",
+          security: [{ cookieAuth: [] }],
+          responses: {
+            "200": {
+              description: "Onboarding state",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/OnboardingStateResponse" },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "500": {
+              description: "Server error",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
           },
         },
       },
@@ -214,6 +254,47 @@ export async function GET() {
               },
             },
             "401": { $ref: "#/components/responses/Unauthorized" },
+          },
+        },
+      },
+
+      "/api/integrations/strava-status": {
+        get: {
+          tags: ["Integrations"],
+          summary: "Get Strava integration status",
+          description:
+            "Returns current user's Strava connection status and connection metadata.",
+          operationId: "getStravaStatus",
+          security: [{ cookieAuth: [] }],
+          responses: {
+            "200": {
+              description: "Strava integration status",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      conn: {
+                        anyOf: [
+                          { $ref: "#/components/schemas/ExternalAccount" },
+                          { type: "null" },
+                        ],
+                      },
+                      isConnected: { type: "boolean", example: true },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "500": {
+              description: "Internal server error",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
           },
         },
       },
@@ -273,6 +354,122 @@ export async function GET() {
               },
             },
             "401": { $ref: "#/components/responses/Unauthorized" },
+          },
+        },
+      },
+
+      "/api/profile/onboarding-status": {
+        get: {
+          tags: ["Profile"],
+          summary: "Get current user's onboarding status",
+          description:
+            "Returns whether the authenticated user has completed onboarding. Used by protected layout redirects.",
+          operationId: "getProfileOnboardingStatus",
+          security: [{ cookieAuth: [] }],
+          responses: {
+            "200": {
+              description: "Onboarding status",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      profile: {
+                        type: "object",
+                        nullable: true,
+                        properties: {
+                          onboarding_completed_at: {
+                            type: "string",
+                            format: "date-time",
+                            nullable: true,
+                          },
+                        },
+                      },
+                      onboardingDone: { type: "boolean", example: true },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "500": {
+              description: "Internal server error",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      "/api/profile/overview": {
+        get: {
+          tags: ["Profile"],
+          summary: "Get profile overview",
+          description:
+            "Returns profile header data, profile metrics and cached training stats for the authenticated user.",
+          operationId: "getProfileOverview",
+          security: [{ cookieAuth: [] }],
+          responses: {
+            "200": {
+              description: "Profile overview",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ProfileOverviewResponse" },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "500": {
+              description: "Internal server error",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      "/api/profile/edit-state": {
+        get: {
+          tags: ["Profile"],
+          summary: "Get profile edit form state",
+          description:
+            "Returns current user email and normalized profile fields for the profile edit form.",
+          operationId: "getProfileEditState",
+          security: [{ cookieAuth: [] }],
+          responses: {
+            "200": {
+              description: "Profile edit state",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      email: {
+                        type: "string",
+                        nullable: true,
+                        example: "runner@example.com",
+                      },
+                      initial: { $ref: "#/components/schemas/ProfileEditState" },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "500": {
+              description: "Internal server error",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
           },
         },
       },
@@ -896,6 +1093,45 @@ export async function GET() {
             },
             "401": {
               description: "Unauthorized",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      "/api/goals/onboarding/state": {
+        get: {
+          tags: ["Goals"],
+          summary: "Get goals onboarding state",
+          description:
+            "Returns initial profile fields and optional goal for editing in goals onboarding flow.",
+          operationId: "getGoalsOnboardingState",
+          security: [{ cookieAuth: [] }],
+          parameters: [
+            {
+              name: "id",
+              in: "query",
+              required: false,
+              schema: { type: "string", format: "uuid" },
+              description: "Goal id to edit",
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Goals onboarding state",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/GoalsOnboardingStateResponse" },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "500": {
+              description: "Internal server error",
               content: {
                 "application/json": {
                   schema: { $ref: "#/components/schemas/ErrorResponse" },
@@ -1545,6 +1781,40 @@ export async function GET() {
         },
       },
 
+      "/api/workouts/sport-subtypes": {
+        get: {
+          tags: ["Workouts"],
+          summary: "Get sport subtype options",
+          operationId: "getWorkoutSportSubtypes",
+          parameters: [
+            {
+              name: "sport",
+              in: "query",
+              required: false,
+              schema: { type: "string", example: "run" },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "Subtype options",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      items: {
+                        type: "array",
+                        items: { $ref: "#/components/schemas/SportSubtypeOption" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
       "/api/workouts": {
         get: {
           tags: ["Workouts"],
@@ -1790,6 +2060,42 @@ export async function GET() {
         },
       },
 
+      "/api/workouts/{id}/files": {
+        get: {
+          tags: ["Workouts"],
+          summary: "Get workout source files",
+          operationId: "getWorkoutSourceFiles",
+          security: [{ cookieAuth: [] }],
+          parameters: [{ $ref: "#/components/parameters/WorkoutId" }],
+          responses: {
+            "200": {
+              description: "Workout files",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      files: {
+                        type: "array",
+                        items: { $ref: "#/components/schemas/WorkoutFile" },
+                      },
+                      file: {
+                        oneOf: [
+                          { $ref: "#/components/schemas/WorkoutFile" },
+                          { type: "null" },
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "404": { $ref: "#/components/responses/NotFound" },
+          },
+        },
+      },
+
       "/api/workouts/{id}/streams": {
         get: {
           tags: ["Workouts"],
@@ -1867,7 +2173,7 @@ export async function GET() {
                     properties: {
                       insight: {
                         oneOf: [
-                          { $ref: "#/components/schemas/WorkoutAiInsight" },
+                          { $ref: "#/components/schemas/AiInsight" },
                           { type: "null" },
                         ],
                       },
@@ -2048,6 +2354,47 @@ export async function GET() {
                         error: "internal_error",
                       },
                     },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      "/api/coach/bootstrap": {
+        get: {
+          tags: ["Coach"],
+          summary: "Bootstrap coach chat",
+          description:
+            "Returns or creates the user's general coach thread, loads initial messages and unread count.",
+          operationId: "bootstrapCoachChat",
+          security: [{ cookieAuth: [] }],
+          responses: {
+            "200": {
+              description: "Coach chat bootstrap payload",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/CoachBootstrapResponse" },
+                },
+              },
+            },
+            "401": {
+              description: "User is not authenticated",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            "500": {
+              description: "Internal server error",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
                   },
                 },
               },
@@ -2276,13 +2623,22 @@ export async function GET() {
         },
       },
       schemas: {
+        SportSubtypeOption: {
+          type: "object",
+          properties: {
+            value: { type: "string", example: "road" },
+            label: { type: "string", example: "road" },
+          },
+        },
+
         WorkoutFile: {
           type: "object",
+          additionalProperties: true,
           properties: {
             id: { type: "string", format: "uuid" },
             user_id: { type: "string", format: "uuid" },
             workout_id: { type: "string", format: "uuid", nullable: true },
-            filename: { type: "string", nullable: true },
+            filename: { type: "string", nullable: true, example: "activity.fit" },
             status: {
               type: "string",
               nullable: true,
@@ -2302,8 +2658,8 @@ export async function GET() {
             created_at: { type: "string", format: "date-time" },
             uploaded_at: { type: "string", format: "date-time", nullable: true },
             processed_at: { type: "string", format: "date-time", nullable: true },
-            storage_bucket: { type: "string", example: "fits" },
-            storage_path: { type: "string" },
+            storage_bucket: { type: "string", nullable: true, example: "fits" },
+            storage_path: { type: "string", nullable: true },
             size_bytes: { type: "integer", nullable: true },
             kind: { type: "string", nullable: true, example: "source" },
             content_type: { type: "string", nullable: true, example: "application/zip" },
@@ -2863,13 +3219,16 @@ export async function GET() {
           },
         },
 
-        WorkoutAiInsight: {
+        AiInsight: {
           type: "object",
           properties: {
-            id: { type: "string" },
+            id: { type: "string", format: "uuid" },
+            scope: { type: "string", example: "workout" },
+            entity_id: { type: "string", format: "uuid" },
             title: { type: "string", nullable: true },
             summary: { type: "string", nullable: true },
             content_md: { type: "string", nullable: true },
+            status: { type: "string", example: "active" },
             created_at: { type: "string", format: "date-time" },
           },
         },
@@ -2910,10 +3269,175 @@ export async function GET() {
             },
           },
         },
+
+        ProfileOverviewResponse: {
+          type: "object",
+          properties: {
+            user: {
+              type: "object",
+              properties: {
+                id: { type: "string", format: "uuid" },
+                email: { type: "string", nullable: true },
+              },
+            },
+            header: {
+              type: "object",
+              properties: {
+                displayName: { type: "string", example: "Спортивная Капибара" },
+                avatarUrl: { type: "string", example: "/avatars/default-1.svg" },
+                stats: { $ref: "#/components/schemas/ProfileStats" },
+              },
+            },
+            profileData: { $ref: "#/components/schemas/ProfileData" },
+          },
+        },
+
+        ProfileStats: {
+          type: "object",
+          nullable: true,
+          properties: {
+            workouts_count: { type: "number", nullable: true },
+            total_hours: { type: "number", nullable: true },
+            total_distance_km: { type: "number", nullable: true },
+            last_workout_at: { type: "string", format: "date-time", nullable: true },
+            primary_sport: { type: "string", nullable: true },
+            updated_at: { type: "string", format: "date-time", nullable: true },
+          },
+        },
+
+        ProfileData: {
+          type: "object",
+          properties: {
+            userId: { type: "string", format: "uuid" },
+            age: { type: "number", nullable: true },
+            workoutsCount: { type: "number", nullable: true },
+            gender: { type: "string", nullable: true },
+            weight: { type: "number", nullable: true },
+            height: { type: "number", nullable: true },
+            max_hr: { type: "number", nullable: true },
+            hr_zones: { type: "object", nullable: true, additionalProperties: true },
+            country_code: { type: "string", nullable: true },
+            city: { type: "string", nullable: true },
+          },
+        },
+
+        ProfileEditState: {
+          type: "object",
+          properties: {
+            user_id: { type: "string", format: "uuid" },
+            display_name: { type: "string", nullable: true, example: "Ivan" },
+            avatar_url: { type: "string", nullable: true },
+            sex: { type: "string", nullable: true, example: "male" },
+            birth_date: { type: "string", format: "date", nullable: true },
+            height_cm: { type: "number", nullable: true, example: 180 },
+            weight_kg: { type: "number", nullable: true, example: 75 },
+            hr_rest: { type: "number", nullable: true, example: 48 },
+            hr_max: { type: "number", nullable: true, example: 190 },
+            country_code: { type: "string", nullable: true, example: "DE" },
+            city: { type: "string", nullable: true, example: "Frankfurt" },
+          },
+        },
+
+        ExternalAccount: {
+          type: "object",
+          properties: {
+            id: { type: "string", format: "uuid" },
+            provider: { type: "string", example: "strava" },
+            status: { type: "string", nullable: true, example: "connected" },
+            created_at: { type: "string", format: "date-time", nullable: true },
+            updated_at: { type: "string", format: "date-time", nullable: true },
+            last_synced_at: { type: "string", format: "date-time", nullable: true },
+            error_message: { type: "string", nullable: true },
+          },
+        },
+
+        CoachBootstrapResponse: {
+          type: "object",
+          properties: {
+            user: {
+              type: "object",
+              properties: {
+                id: { type: "string", format: "uuid" },
+              },
+            },
+            thread: { $ref: "#/components/schemas/CoachThread" },
+            messages: {
+              type: "array",
+              items: { $ref: "#/components/schemas/CoachMessage" },
+            },
+            hasMoreMessages: { type: "boolean", example: false },
+            unreadCount: { type: "number", example: 0 },
+          },
+        },
+
+        CoachThread: {
+          type: "object",
+          properties: {
+            id: { type: "string", format: "uuid" },
+            user_id: { type: "string", format: "uuid" },
+            subject: { type: "string", nullable: true },
+            scope: { type: "string", example: "general" },
+            created_by: { type: "string", format: "uuid", nullable: true },
+            created_at: { type: "string", format: "date-time", nullable: true },
+          },
+        },
+
+        GoalsOnboardingStateResponse: {
+          type: "object",
+          properties: {
+            initialProfile: {
+              type: "object",
+              properties: {
+                sex: { type: "string", nullable: true },
+                age: { type: "number", nullable: true },
+                birth_date: { type: "string", format: "date", nullable: true },
+                height_cm: { type: "number", nullable: true },
+                weight_kg: { type: "number", nullable: true },
+              },
+            },
+            editGoal: {
+              type: "object",
+              nullable: true,
+              additionalProperties: true,
+            },
+          },
+        },
         OkResponse: {
           type: "object",
           properties: {
             ok: { type: "boolean", example: true },
+          },
+        },
+
+        OnboardingStateResponse: {
+          type: "object",
+          properties: {
+            user: {
+              type: "object",
+              properties: {
+                id: { type: "string", format: "uuid" },
+                email: { type: "string", nullable: true, example: "runner@example.com" },
+              },
+            },
+            profile: {
+              type: "object",
+              nullable: true,
+              properties: {
+                user_id: { type: "string", format: "uuid" },
+                onboarding: { type: "object", additionalProperties: true },
+                onboarding_completed_at: { type: "string", format: "date-time", nullable: true },
+                sex: { type: "string", nullable: true },
+                birth_date: { type: "string", format: "date", nullable: true },
+                height_cm: { type: "number", nullable: true },
+                weight_kg: { type: "number", nullable: true },
+                hr_rest: { type: "number", nullable: true },
+                hr_max: { type: "number", nullable: true },
+                display_name: { type: "string", nullable: true },
+                avatar_url: { type: "string", nullable: true },
+                country_code: { type: "string", nullable: true },
+                city: { type: "string", nullable: true },
+              },
+            },
           },
         },
         ErrorResponse: {

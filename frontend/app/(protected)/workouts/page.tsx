@@ -51,7 +51,7 @@ export default async function WorkoutsPage() {
   const supabase = await createSupabaseServerClient();
 
   // 1) Пытаемся получить user из sb-кук
-  let {
+  const {
     data: { user },
   } = await supabase.auth.getUser();
 

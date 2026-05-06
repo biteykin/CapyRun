@@ -1,28 +1,38 @@
 //frontend/app/(protected)/onboarding/page.tsx
 
-import { createSupabaseServerClient } from "@/lib/supabaseServerApp";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import GoalsOnboardingFlow from "@/components/goals/GoalsOnboardingFlow.client";
 import OnboardingProfileStep from "@/components/onboarding/OnboardingProfileStep.client";
+
+async function getBaseUrl() {
+  const h = await headers();
+  const host = h.get("host");
+  const proto = h.get("x-forwarded-proto") ?? "http";
+  return `${proto}://${host}`;
+}
 
 export default async function OnboardingPage({
   searchParams,
 }: {
   searchParams?: Record<string, string | string[] | undefined>;
 }) {
-  const supabase = await createSupabaseServerClient();
+  const h = await headers();
+  const cookie = h.get("cookie") ?? "";
+  const baseUrl = await getBaseUrl();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const res = await fetch(`${baseUrl}/api/onboarding/state`, {
+    method: "GET",
+    headers: { cookie },
+    cache: "no-store",
+  });
 
-  if (!user) redirect("/login");
+  if (res.status === 401) redirect("/login");
+  if (!res.ok) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("user_id, onboarding, onboarding_completed_at, sex, birth_date, height_cm, weight_kg, hr_rest, hr_max, display_name, avatar_url, country_code, city")
-    .eq("user_id", user.id)
-    .single();
+  const json = await res.json();
+  const user = json.user;
+  const profile = json.profile;
 
   const onboarding = profile?.onboarding ?? {};
   const requestedStep =

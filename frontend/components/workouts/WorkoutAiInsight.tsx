@@ -58,18 +58,6 @@ const MONTHS_RU_SHORT = [
   "дек.",
 ];
 
-function fmtUpdatedRu(iso?: string | null) {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  const dd = d.getDate();
-  const mon = MONTHS_RU_SHORT[d.getMonth()];
-  const yyyy = d.getFullYear();
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  return `Обновлено: ${dd} ${mon} ${yyyy}, ${hh}:${mm}`;
-}
-
 function normalizeMd(md: string) {
   return (md ?? "").replace(/\r/g, "").trim();
 }
@@ -219,28 +207,6 @@ function AiPulse() {
   );
 }
 
-function SoftProgress({ active }: { active: boolean }) {
-  if (!active) return null;
-  return (
-    <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-      <div className="h-full w-1/3 rounded-full bg-muted-foreground/35 animate-[cr-ai-progress_1.2s_ease-in-out_infinite]" />
-      <style jsx>{`
-        @keyframes cr-ai-progress {
-          0% {
-            transform: translateX(-45%);
-          }
-          50% {
-            transform: translateX(155%);
-          }
-          100% {
-            transform: translateX(-45%);
-          }
-        }
-      `}</style>
-    </div>
-  );
-}
-
 function MiniCard({
   title,
   icon,
@@ -361,14 +327,13 @@ export default function WorkoutAiInsight({ workoutId }: { workoutId: string }) {
 
       await load();
 
-    } catch (e: any) {
-      setErr(e?.message ?? "Не удалось сгенерировать инсайт");
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "Не удалось сгенерировать инсайт");
     } finally {
       setGenerating(false);
     }
   }
 
-  const hasInsight = !!row && !loading && !err;
   const parsed = React.useMemo(() => {
     if (!row) return null;
     return parseSections(row.summary ?? "", row.content_md ?? "");

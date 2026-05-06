@@ -98,7 +98,6 @@ const C = {
 } as const;
 
 // ordered data colours for pie slices
-const PIE_COLORS = [C.blue, C.purple, C.green, C.yellow, C.teal, C.navy];
 const WEEKDAY_ANALYTICS_COLORS = [
   { solid: C.blue,   light: C.blueLight },
   { solid: C.purple, light: C.purpleLight },
@@ -264,8 +263,8 @@ export default function MyWorkoutsDashboardClient({ daysDefault = 30 }: { daysDe
         setMix((sportMixJson.data ?? []) as MixRow[]);
         setZoneRows((zonesJson.data ?? []) as WorkoutZoneRow[]);
         setNextPlannedWorkout((nextPlannedJson.data ?? null) as NextPlannedWorkoutRow | null);
-      } catch (e: any) {
-        if (!canceled) setErr(e?.message ?? String(e));
+      } catch (e: unknown) {
+        if (!canceled) setErr(e instanceof Error ? e.message : String(e));
       } finally {
         if (!canceled) setLoading(false);
       }
@@ -717,7 +716,7 @@ export default function MyWorkoutsDashboardClient({ daysDefault = 30 }: { daysDe
                     >
                       <XAxis dataKey="zone" tickLine={false} axisLine={false} tickMargin={8} tick={{ fontSize: 11 }} />
                       <YAxis tickLine={false} axisLine={false} width={32} tick={{ fontSize: 11 }} />
-                      <Tooltip formatter={(v: any) => [`${v} мин`, "Время"]} />
+                      <Tooltip formatter={(v: unknown) => [`${v} мин`, "Время"]} />
                       <Bar dataKey="minutes" radius={[6, 6, 0, 0]}>
                         {hrZones.rows.map((row) => (
                           <Cell
@@ -772,7 +771,7 @@ export default function MyWorkoutsDashboardClient({ daysDefault = 30 }: { daysDe
                 >
                   <XAxis dataKey="w" tickLine={false} axisLine={false} tickMargin={8} tick={{ fontSize: 10 }} />
                   <YAxis tickLine={false} axisLine={false} width={28} tick={{ fontSize: 11 }} />
-                  <Tooltip formatter={(v: any) => [`${v} ч`, "Время"]} />
+                  <Tooltip formatter={(v: unknown) => [`${v} ч`, "Время"]} />
                   <Bar dataKey="hours" radius={[6, 6, 0, 0]} fill={C.blue} />
                 </BarChart>
               </ResponsiveContainer>
@@ -814,7 +813,7 @@ export default function MyWorkoutsDashboardClient({ daysDefault = 30 }: { daysDe
                   <XAxis dataKey="d" tickLine={false} axisLine={false} tickMargin={8} tick={{ fontSize: 11 }} />
                   <YAxis tickLine={false} axisLine={false} width={32} tick={{ fontSize: 11 }} />
                   <Tooltip
-                    formatter={(v: any, name: any) =>
+                    formatter={(v: unknown, name: unknown) =>
                       name === "time_h" ? [`${v} ч`, "Время"] : [v, "Тренировок"]
                     }
                   />
@@ -855,7 +854,7 @@ export default function MyWorkoutsDashboardClient({ daysDefault = 30 }: { daysDe
                   </defs>
                   <XAxis dataKey="d" tickLine={false} axisLine={false} tickMargin={8} tick={{ fontSize: 11 }} />
                   <YAxis tickLine={false} axisLine={false} width={36} tick={{ fontSize: 11 }} />
-                  <Tooltip formatter={(v: any) => [`${v} ккал`, "Калории"]} />
+                  <Tooltip formatter={(v: unknown) => [`${v} ккал`, "Калории"]} />
                   <Area
                     type="monotone"
                     dataKey="kcal"
@@ -908,7 +907,7 @@ export default function MyWorkoutsDashboardClient({ daysDefault = 30 }: { daysDe
                   <YAxis yAxisId="left" tickLine={false} axisLine={false} width={28} tick={{ fontSize: 11 }} />
                   <YAxis yAxisId="right" orientation="right" tickLine={false} axisLine={false} width={28} tick={{ fontSize: 11 }} />
                   <Tooltip
-                    formatter={(v: any, name: any) =>
+                    formatter={(v: unknown, name: unknown) =>
                       name === "h" ? [`${v} ч`, "Время"] : [v, "Тренировки"]
                     }
                   />
@@ -969,7 +968,7 @@ export default function MyWorkoutsDashboardClient({ daysDefault = 30 }: { daysDe
                       <Cell key={i} fill={sportColor(m?.sport)} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(v: any) => [fmtTime(Number(v)), "Время"]} />
+                  <Tooltip formatter={(v: unknown) => [fmtTime(Number(v)), "Время"]} />
                   <Legend iconSize={10} />
                 </PieChart>
               </ResponsiveContainer>

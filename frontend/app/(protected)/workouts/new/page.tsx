@@ -194,7 +194,7 @@ export default function NewWorkoutPage() {
     e.preventDefault();
     setSaving(true); setError(null);
 
-    const patch: any = {
+    const patch: Record<string, string | number | null> = {
       name: name || null,
       description: description || null,
       sport: sport || null,

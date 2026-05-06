@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabaseServerApp";
+import { apiGet } from "@/lib/server/apiFetch";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
 import StravaSyncButton, { StravaSyncGroup } from "@/components/settings/strava-sync-button";
@@ -27,14 +28,18 @@ export default async function SettingsPage({
 
   if (!user) redirect("/login");
 
-  const { data: conn } = await supabase
-    .from("external_accounts")
-    .select("id, provider, status, created_at, updated_at, last_synced_at, error_message")
-    .eq("user_id", user.id)
-    .eq("provider", "strava")
-    .maybeSingle();
-
-  const isConnected = !!conn && conn.status === "connected";
+  const { conn, isConnected } = await apiGet<{
+    conn: {
+      id: string;
+      provider: string;
+      status: string | null;
+      created_at: string | null;
+      updated_at: string | null;
+      last_synced_at: string | null;
+      error_message: string | null;
+    } | null;
+    isConnected: boolean;
+  }>("/api/integrations/strava-status");
   const autosync = searchParams?.autosync === "1";
 
   return (

@@ -26,12 +26,6 @@ type StreamsPreview = {
   pace_s_per_km: Array<number | null>;
 };
 
-type PreviewRow = {
-  s: any; // jsonb
-  updated_at?: string | null;
-  created_at?: string | null;
-};
-
 type HrZone = { name: string; from: number; to: number };
 
 const HR_COLOR = "#EF3707"; // bg-red
@@ -91,28 +85,30 @@ function maxv(values: Array<number | null | undefined>) {
 }
 
 // пытаемся вытащить зоны из profile.hr_zones в разных форматах
-function parseHrZones(raw: any, hrMaxFallback?: number | null): HrZone[] {
+function parseHrZones(raw: unknown, hrMaxFallback?: number | null): HrZone[] {
   if (!raw || typeof raw !== "object") return [];
+  const obj = raw as Record<string, unknown>;
 
   // Формат CapyRun: { Z1: { name, min, max }, Z2: { name, min, max } }
-  const objectZones = Object.entries(raw)
+  const objectZones = Object.entries(obj)
     .filter(([k]) => /^z\d+$/i.test(k))
-    .map(([k, v]: any) => {
-      const from = isNum(v?.min) ? Number(v.min) : null;
-      const to = isNum(v?.max) ? Number(v.max) : null;
+    .map(([k, v]) => {
+      const zone = v && typeof v === "object" ? (v as Record<string, unknown>) : null;
+      const from = isNum(zone?.min) ? Number(zone.min) : null;
+      const to = isNum(zone?.max) ? Number(zone.max) : null;
       if (from == null || to == null) return null;
-      return { name: String(v?.name ?? k).toUpperCase(), from, to };
+      return { name: String(zone?.name ?? k).toUpperCase(), from, to };
     })
     .filter(Boolean) as HrZone[];
 
   if (objectZones.length) return objectZones;
 
   // Формат A: { Z1: [120, 140], Z2: [141, 155], ... }
-  const keys = Object.keys(raw);
+  const keys = Object.keys(obj);
   if (keys.some((k) => /^z\d+$/i.test(k))) {
     const zones: HrZone[] = [];
     for (const k of keys.sort((a, b) => a.localeCompare(b))) {
-      const v = raw[k];
+      const v = obj[k];
       if (Array.isArray(v) && v.length >= 2 && isNum(v[0]) && isNum(v[1])) {
         zones.push({ name: k.toUpperCase(), from: Number(v[0]), to: Number(v[1]) });
       }
@@ -121,12 +117,14 @@ function parseHrZones(raw: any, hrMaxFallback?: number | null): HrZone[] {
   }
 
   // Формат B: { zones: [{name,min,max}] }
-  if (Array.isArray(raw.zones)) {
-    const zones: HrZone[] = raw.zones
-      .map((z: any, i: number) => {
-        const name = String(z?.name ?? `Z${i + 1}`).toUpperCase();
-        const from = isNum(z?.min) ? Number(z.min) : null;
-        const to = isNum(z?.max) ? Number(z.max) : null;
+  const rawZones = obj.zones;
+  if (Array.isArray(rawZones)) {
+    const zones: HrZone[] = rawZones
+      .map((z: unknown, i: number) => {
+        const zone = z && typeof z === "object" ? (z as Record<string, unknown>) : null;
+        const name = String(zone?.name ?? `Z${i + 1}`).toUpperCase();
+        const from = isNum(zone?.min) ? Number(zone.min) : null;
+        const to = isNum(zone?.max) ? Number(zone.max) : null;
         if (from == null || to == null) return null;
         return { name, from, to };
       })
@@ -135,11 +133,11 @@ function parseHrZones(raw: any, hrMaxFallback?: number | null): HrZone[] {
   }
 
   // Формат C (проценты): { Z1: [0.6, 0.7], ... } + hrMax
-  const hrMax = isNum(raw.hr_max) ? Number(raw.hr_max) : hrMaxFallback;
+  const hrMax = isNum(obj.hr_max) ? Number(obj.hr_max) : hrMaxFallback;
   if (hrMax && keys.some((k) => /^z\d+$/i.test(k))) {
     const zones: HrZone[] = [];
     for (const k of keys.sort((a, b) => a.localeCompare(b))) {
-      const v = raw[k];
+      const v = obj[k];
       if (Array.isArray(v) && v.length >= 2 && isNum(v[0]) && isNum(v[1])) {
         const from = Math.round(Number(v[0]) * hrMax);
         const to = Math.round(Number(v[1]) * hrMax);
@@ -232,7 +230,7 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
     hr: [],
     pace_s_per_km: [],
   });
-  const [hrMax, setHrMax] = React.useState<number | null>(null);
+  const [, setHrMax] = React.useState<number | null>(null);
   const [hrZones, setHrZones] = React.useState<HrZone[]>([]);
   const [mode, setMode] = React.useState<Mode>("both");
 
@@ -316,9 +314,9 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
           const zones = parseHrZones(prof?.hr_zones, isNum(maxHr) ? maxHr : null);
           setHrZones(zones);
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!cancelled) {
-          const msg = String(e?.message || e);
+          const msg = e instanceof Error ? e.message : String(e);
           setErr(`Не удалось получить превью рядов: ${msg}`);
           setStreams({ time_s: [], hr: [], pace_s_per_km: [] });
         }
@@ -364,8 +362,8 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
 
   // X-domain для “зумнутого” окна
   const xDomain = React.useMemo(() => {
-    if (!chartData.length) return [0, "dataMax"] as any;
-    if (!brush) return [0, "dataMax"] as any;
+    if (!chartData.length) return [0, "dataMax"] as [number, string];
+    if (!brush) return [0, "dataMax"] as [number, string];
 
     const maxIdx = chartData.length - 1;
     const a = clamp(Math.min(brush.startIndex, brush.endIndex), 0, maxIdx);
@@ -373,7 +371,7 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
 
     const x1 = chartData[a]?.tMin ?? 0;
     const x2 = chartData[b]?.tMin ?? chartData[maxIdx]?.tMin ?? "dataMax";
-    return [x1, x2] as any;
+    return [x1, x2] as [number, number | string];
   }, [chartData, brush]);
 
   // derived
@@ -488,7 +486,7 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
     return [Math.max(0, minH - pad), maxH + pad] as [number, number];
   }, [hrValues]);
 
-  const SexyTooltip = ({ active, payload }: any) => {
+  const SexyTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ payload?: { t?: unknown; hr?: unknown; pace?: unknown } }> }) => {
     if (!active || !payload?.length) return null;
     const p = payload?.[0]?.payload;
     const tSec = p?.t;
@@ -683,7 +681,7 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
                     hide={mode === "hr"}
                   />
 
-                  <Tooltip cursor={cursorStyle as any} content={<SexyTooltip />} />
+                  <Tooltip cursor={cursorStyle} content={<SexyTooltip />} />
 
                   {mode !== "pace" &&
                     zoneBands.map((z) => (
@@ -808,7 +806,7 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
                       travellerWidth={10}
                       startIndex={brush ? brush.startIndex : 0}
                       endIndex={brush ? brush.endIndex : Math.max(0, chartData.length - 1)}
-                      onChange={(v: any) => {
+                      onChange={(v: { startIndex?: number; endIndex?: number } | undefined) => {
                         if (!v) return;
 
                         const maxIdx = Math.max(0, chartData.length - 1);

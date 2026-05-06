@@ -21,7 +21,7 @@ type FileRow = {
 
 export default function WorkoutsAnalytics({
   workouts,
-  files,
+  files: _files,
 }: {
   workouts: WorkoutRow[];
   files: FileRow[];

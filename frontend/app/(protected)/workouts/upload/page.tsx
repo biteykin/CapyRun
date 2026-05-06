@@ -142,7 +142,7 @@ export default function WorkoutUploadPage() {
           console.error("[upload] failed:", file.name, res.error);
           // минимально — показать пользователю
           alert(`Не удалось загрузить ${file.name}: ${res.error}`);
-        } else if ((res as any).duplicate) {
+        } else if ((res as { duplicate?: boolean }).duplicate) {
           console.log("[upload] duplicate:", file.name, "id:", res.id);
         } else {
           console.log("[upload] ok:", file.name, "id:", res.id);

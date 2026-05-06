@@ -264,7 +264,8 @@ export default function WorkoutDetailPage() {
           setNoteDirty(false);
         }
       } catch (e: unknown) {
-        if (!canceled) setErr((e as any)?.message ?? String(e));
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!canceled) setErr(msg);
       } finally {
         if (!canceled) setLoading(false);
       }
@@ -327,9 +328,8 @@ export default function WorkoutDetailPage() {
       setNoteDirty(false);
       setNoteSavedAt(new Date());
       setRow({ ...row, description: note });
-    } catch (e) {
-      // eslint-disable-next-line no-alert
-      alert((e as any)?.message ?? "Не удалось сохранить заметку");
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "Не удалось сохранить заметку");
     } finally {
       setNoteSaving(false);
     }
@@ -337,10 +337,6 @@ export default function WorkoutDetailPage() {
 
   const computedSpeed = fmtSpeedKmh(
     row?.distance_m ?? null,
-    row?.moving_time_sec ?? row?.duration_sec ?? null
-  );
-  const computedClimbRate = fmtClimbRate(
-    row?.elev_gain_m ?? null,
     row?.moving_time_sec ?? row?.duration_sec ?? null
   );
 
@@ -714,8 +710,8 @@ export default function WorkoutDetailPage() {
                     <XAxis dataKey="zone" tickLine={false} axisLine={false} tickMargin={8} />
                     <Tooltip
                       cursor={false}
-                      formatter={(v: any) => [`${v} мин`, "Время"]}
-                      labelFormatter={(l: any) => `Зона: ${l}`}
+                      formatter={(v: unknown) => [`${String(v)} мин`, "Время"]}
+                      labelFormatter={(l: unknown) => `Зона: ${String(l)}`}
                     />
                     <Bar dataKey="minutes" radius={8} fill="hsl(var(--chart-1))" />
                   </BarChart>

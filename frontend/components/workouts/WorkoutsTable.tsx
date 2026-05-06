@@ -10,6 +10,7 @@ import { SportPill } from "@/components/ui/sport-badge";
 
 import {
   ColumnDef,
+  type Column,
   flexRender,
   getCoreRowModel,
   getSortedRowModel,
@@ -176,8 +177,8 @@ export default function WorkoutsTable({
           setRows(arr);
           setTotalCount?.(arr.length);
         }
-      } catch (e: any) {
-        if (!cancelled) setError(e?.message || "Не удалось загрузить тренировки");
+      } catch (e: unknown) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Не удалось загрузить тренировки");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -560,7 +561,7 @@ export default function WorkoutsTable({
 }
 
 /** Заголовок-сплиттер с сортировкой (в духе shadcn data-table) */
-function SortHeader({ column, label, alignRight }: { column: any; label: string; alignRight?: boolean }) {
+function SortHeader({ column, label, alignRight }: { column: Column<Workout, unknown>; label: string; alignRight?: boolean }) {
   const isSorted = column.getIsSorted(); // 'asc' | 'desc' | false
   return (
     <button
@@ -615,8 +616,8 @@ function RowActions({
       if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
       onDeleted(workoutId);
       setConfirmOpen(false);
-    } catch (e: any) {
-      alert(e?.message || "Не удалось удалить тренировку");
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "Не удалось удалить тренировку");
     } finally {
       setDeleting(false);
     }

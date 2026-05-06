@@ -1,5 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
-import { createClientWithCookies } from "@/lib/supabase/server";
+import { NextResponse } from "next/server";
+import { createSupabaseServerClient } from "@/lib/supabaseServerApp";
+
+type AnyRow = Record<string, unknown>;
 
 const SUB_FALLBACKS: Record<string, string[]> = {
   run: ["road", "trail", "treadmill", "track", "indoor"],
@@ -16,48 +18,41 @@ const SUB_FALLBACKS: Record<string, string[]> = {
   other: [],
 };
 
-export async function GET(req: NextRequest) {
-  const supabase = await createClientWithCookies();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const sport = (searchParams.get("sport") || "run").toLowerCase();
 
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const supabase = await createSupabaseServerClient();
 
-  const sport = (new URL(req.url).searchParams.get("sport") || "run").toLowerCase();
   let items: Array<{ value: string; label: string }> = [];
 
-  const { data: refRows } = await supabase
+  const { data } = await supabase
     .from("sport_subtypes")
     .select("*")
     .eq("sport", sport)
     .order("order", { ascending: true });
 
-  if (Array.isArray(refRows) && refRows.length) {
-    items = refRows
-      .map((r: any) => {
-        const value = r.code ?? r.key ?? r.value ?? r.sub_sport ?? r.slug ?? r.id ?? "";
-        const label = r.name_ru ?? r.label_ru ?? r.title_ru ?? r.label ?? r.title ?? r.name ?? value;
+  if (Array.isArray(data) && data.length) {
+    items = data
+      .map((r: AnyRow) => {
+        const value =
+          r.code ?? r.key ?? r.value ?? r.sub_sport ?? r.slug ?? r.id ?? "";
+        const label =
+          r.name_ru ??
+          r.label_ru ??
+          r.title_ru ??
+          r.label ??
+          r.title ??
+          r.name ??
+          value;
         return value ? { value: String(value), label: String(label) } : null;
       })
-      .filter(Boolean) as Array<{ value: string; label: string }>;
+      .filter((v): v is { value: string; label: string } => !!v);
   }
 
   if (!items.length) {
-    const { data } = await supabase
-      .from("workouts")
-      .select("sub_sport")
-      .eq("user_id", user.id)
-      .eq("sport", sport)
-      .not("sub_sport", "is", null)
-      .limit(1000);
-
-    const uniq = Array.from(new Set((data ?? []).map((x: any) => x.sub_sport).filter(Boolean)));
-    items = uniq.map((v) => ({ value: String(v), label: String(v) }));
-  }
-
-  if (!items.length) {
-    items = (SUB_FALLBACKS[sport] || []).map((v) => ({ value: v, label: v }));
+    const fallback = SUB_FALLBACKS[sport] ?? [];
+    items = fallback.map((v) => ({ value: v, label: v }));
   }
 
   return NextResponse.json({ items });

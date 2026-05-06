@@ -3,7 +3,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { supabase } from "@/lib/supabaseBrowser";
 import posthog from "posthog-js";
 // ⚠️ относительный импорт исключает проблемы алиаса `@` в сборках Sentry/CI
 import { uploadWorkoutFile } from "../../lib/uploadWorkoutFile";
@@ -33,28 +32,36 @@ export default function UploadFits() {
 
   useEffect(() => {
     (async () => {
-      const { data } = await supabase.auth.getUser();
-      const uid = data.user?.id ?? null;
+      const res = await fetch("/api/auth/session", {
+        method: "GET",
+        credentials: "include",
+        cache: "no-store",
+      });
+      const json = await res.json().catch(() => null);
+      const uid = json?.user?.id ?? json?.profile?.user_id ?? null;
       setUserId(uid);
-      if (uid) await refresh(uid);
+      if (uid) await refresh();
       setLoading(false);
     })();
   }, []);
 
-  async function refresh(uid: string) {
+  async function refresh() {
     setError(null);
-    const { data, error } = await supabase
-      .from("workout_files")
-      .select(
-        "id, filename, storage_bucket, storage_path, size_bytes, status, uploaded_at, processed_at, error_message, kind, content_type, workout_id"
-      )
-      .eq("user_id", uid)
-      .is("deleted_at", null)
-      .order("uploaded_at", { ascending: false })
-      .limit(200);
+    const res = await fetch("/api/workout-files?limit=200", {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+    });
+    const json = await res.json().catch(() => null);
 
-    if (error) setError(error.message);
-    setItems((data as Wf[]) ?? []);
+    if (!res.ok) {
+      setError(json?.error ?? `HTTP ${res.status}`);
+      setItems([]);
+      return;
+    }
+
+    const files = json?.files ?? json?.items ?? json?.data ?? [];
+    setItems((Array.isArray(files) ? files : []) as Wf[]);
   }
 
   function fmtBytes(b?: number | null) {
@@ -98,7 +105,8 @@ export default function UploadFits() {
         const res = await uploadWorkoutFile(f, { bucket: "fits" });
         if (!res.ok) {
           failed++;
-          const msg = (res as any).error || "Ошибка загрузки";
+          const msg =
+            "error" in res && typeof res.error === "string" ? res.error : "Ошибка загрузки";
           setError(msg);
           console.error("upload error:", msg);
           continue;
@@ -107,10 +115,10 @@ export default function UploadFits() {
         else ok++;
       }
       posthog.capture("fit_upload_succeeded", { ok, dup, failed });
-      await refresh(userId);
-    } catch (e: any) {
+      await refresh();
+    } catch (e: unknown) {
       failed++;
-      const msg = e?.message ?? "Ошибка загрузки";
+      const msg = e instanceof Error ? e.message : "Ошибка загрузки";
       setError(msg);
       posthog.capture("fit_upload_failed", { message: String(msg) });
       console.error("upload exception:", e);
@@ -126,20 +134,15 @@ export default function UploadFits() {
     if (!userId) return;
     if (!confirm("Удалить файл?")) return;
 
-    // 1) remove from Storage (best-effort)
-    const _storage = await supabase.storage.from(row.storage_bucket).remove([row.storage_path]);
-    if (_storage.error) {
-      console.warn("storage.remove error:", _storage.error.message);
-    }
+    const res = await fetch(`/api/workout-files/${row.id}`, {
+      method: "DELETE",
+      credentials: "include",
+      cache: "no-store",
+    });
+    const json = await res.json().catch(() => null);
 
-    // 2) soft-delete DB row
-    const { error } = await supabase
-      .from("workout_files")
-      .update({ deleted_at: new Date().toISOString(), status: "archived" })
-      .eq("id", row.id);
-
-    if (error) {
-      setError(error.message);
+    if (!res.ok) {
+      setError(json?.error ?? `HTTP ${res.status}`);
       return;
     }
 
@@ -175,7 +178,7 @@ export default function UploadFits() {
                 disabled={!userId || busy}
               />
             </label>
-            <button className="btn btn-ghost" onClick={() => userId && refresh(userId)} disabled={!userId || busy}>
+            <button className="btn btn-ghost" onClick={() => userId && refresh()} disabled={!userId || busy}>
               Обновить список
             </button>
           </div>

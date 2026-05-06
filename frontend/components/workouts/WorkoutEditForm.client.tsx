@@ -125,7 +125,7 @@ export default function WorkoutEditForm({
     setSaving(true);
     setError(null);
 
-    const patch: any = {
+    const patch: Partial<Workout> = {
       name: name || null,
       sport: sport || null,
       sub_sport: subSport || null,

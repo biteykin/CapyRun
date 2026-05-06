@@ -145,7 +145,7 @@ export async function analyzeWorkout({
     .from("notes")
     .select("content")
     .eq("user_id", userId)
-    .eq("entity_type", "workout")
+    .eq("scope", "workout")
     .eq("entity_id", workoutId)
     .order("created_at", { ascending: false })
     .limit(10);
