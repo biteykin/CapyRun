@@ -1,3 +1,5 @@
+//frontend/components/marketing/Footer.tsx
+
 import Link from "next/link";
 
 const navLinks = [

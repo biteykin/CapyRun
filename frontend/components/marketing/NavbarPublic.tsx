@@ -1,3 +1,5 @@
+//frontend/components/marketing/NavbarPublic.tsx
+
 "use client";
 
 import Link from "next/link";

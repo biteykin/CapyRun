@@ -1,3 +1,5 @@
+//frontend/app/(public)/layout.tsx
+
 import PublicTopbar from "@/components/PublicTopbar";
 
 export default function PublicLayout({ children }: { children: React.ReactNode }) {

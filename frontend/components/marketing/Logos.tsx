@@ -1,3 +1,5 @@
+//frontend/components/marketing/Logos.tsx
+
 export default function Logos() {
     const logos = [
       { name: "Garmin",  w: 84 },
@@ -8,7 +10,7 @@ export default function Logos() {
     ];
     return (
       <section className="mx-auto max-w-6xl px-4 py-10 md:py-12">
-        <div className="text-center text-sm text-[var(--text-secondary)]">Интеграции — скоро</div>
+        <div className="text-center text-sm text-[var(--text-secondary)]">Работаем с популярными беговыми источниками</div>
         <div className="mt-4 flex flex-wrap items-center justify-center gap-6 md:gap-10">
           {logos.map((l) => (
             <div

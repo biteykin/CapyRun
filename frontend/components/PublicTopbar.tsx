@@ -1,17 +1,23 @@
+//frontend/components/PublicTopbar.tsx
+
 "use client";
 
 import Link from "next/link";
 
 export default function PublicTopbar() {
   return (
-    <div className="mx-auto flex h-14 w-full max-w-7xl items-center justify-between px-3">
-      <Link href="/public" className="flex items-center gap-2">
+    <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-4">
+      <Link href="/public" className="flex items-center gap-3">
         <span
           aria-hidden
-          className="inline-block h-6 w-6 rounded-md"
-          style={{ background: "linear-gradient(135deg,#FFD699,#DF6133)" }}
-        />
-        <span className="h-display font-semibold">CapyRun</span>
+          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border-2 border-[#0E0E0E] bg-[#FFD600] text-lg shadow-[3px_3px_0_#0E0E0E]"
+        >
+          🦫
+        </span>
+        <span>
+          <span className="h-display block text-base font-black leading-none">CapyRun</span>
+          <span className="hidden text-xs text-[#595958] sm:block">AI running coach</span>
+        </span>
       </Link>
 
       <div className="flex items-center gap-2">
