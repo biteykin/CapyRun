@@ -774,6 +774,45 @@ export async function GET() {
         },
       },
 
+      "/api/plan/calendar": {
+        get: {
+          tags: ["Plan"],
+          summary: "Get plan calendar",
+          description:
+            "Returns normalized calendar events for plan sessions, completed workouts and active goal dates. Used by /plan page instead of direct Supabase access.",
+          operationId: "getPlanCalendar",
+          security: [{ cookieAuth: [] }],
+          responses: {
+            "200": {
+              description: "Plan calendar payload",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      events: {
+                        type: "array",
+                        items: { $ref: "#/components/schemas/PlanCalendarEvent" },
+                      },
+                      activeGoal: {
+                        nullable: true,
+                        allOf: [{ $ref: "#/components/schemas/PlanActiveGoal" }],
+                      },
+                      initialMonthISO: {
+                        type: "string",
+                        format: "date-time",
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
+      },
+
       "/api/plan/sessions/{id}": {
         delete: {
           tags: ["Plan"],
@@ -1819,6 +1858,8 @@ export async function GET() {
         get: {
           tags: ["Workouts"],
           summary: "Get current user's workouts",
+          description:
+            "Returns current user's workouts. Used by /workouts page instead of direct Supabase access.",
           operationId: "getWorkouts",
           security: [{ cookieAuth: [] }],
           parameters: [
@@ -1907,6 +1948,36 @@ export async function GET() {
             },
             "400": { $ref: "#/components/responses/BadRequest" },
             "401": { $ref: "#/components/responses/Unauthorized" },
+          },
+        },
+      },
+
+      "/api/workouts/demo": {
+        get: {
+          tags: ["Workouts"],
+          summary: "Get demo workout id",
+          description:
+            "Returns a public or unlisted demo workout id for the empty workouts state.",
+          operationId: "getDemoWorkout",
+          responses: {
+            "200": {
+              description: "Demo workout payload",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      demoWorkoutId: {
+                        type: "string",
+                        format: "uuid",
+                        nullable: true,
+                        example: "11111111-1111-4111-8111-111111111111",
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -2597,6 +2668,16 @@ export async function GET() {
           scheme: "bearer",
           bearerFormat: "JWT",
           description: "For future mobile clients.",
+        },
+      },
+      responses: {
+        InternalServerError: {
+          description: "Internal server error",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/ErrorResponse" },
+            },
+          },
         },
       },
       parameters: {
@@ -3396,6 +3477,59 @@ export async function GET() {
               },
             },
             editGoal: {
+              type: "object",
+              nullable: true,
+              additionalProperties: true,
+            },
+          },
+        },
+
+        PlanActiveGoal: {
+          type: "object",
+          properties: {
+            id: { type: "string", format: "uuid" },
+            title: { type: "string", nullable: true },
+            type: { type: "string", nullable: true },
+            sport: { type: "string", nullable: true },
+            date_to: { type: "string", format: "date", nullable: true },
+          },
+        },
+
+        PlanCalendarEvent: {
+          type: "object",
+          required: ["id", "date", "title", "kind", "source"],
+          additionalProperties: true,
+          properties: {
+            id: { type: "string" },
+            date: { type: "string", format: "date" },
+            title: { type: "string" },
+            kind: {
+              type: "string",
+              enum: ["goal", "planned", "workout"],
+            },
+            status: { type: "string", nullable: true },
+            sport: { type: "string", nullable: true },
+            source: {
+              type: "string",
+              enum: ["goal", "plan", "workout"],
+            },
+            description: { type: "string", nullable: true },
+            link_workout_id: { type: "string", format: "uuid", nullable: true },
+            user_plan_id: { type: "string", format: "uuid", nullable: true },
+            goal_id: { type: "string", format: "uuid", nullable: true },
+            goal_type: { type: "string", nullable: true },
+            goal_icon: { type: "string", nullable: true },
+            distance_m: { type: "number", nullable: true },
+            duration_sec: { type: "number", nullable: true },
+            planned_date: { type: "string", format: "date", nullable: true },
+            planned_distance_km: { type: "number", nullable: true },
+            planned_duration_min: { type: "number", nullable: true },
+            structure: {
+              type: "object",
+              nullable: true,
+              additionalProperties: true,
+            },
+            target_json: {
               type: "object",
               nullable: true,
               additionalProperties: true,

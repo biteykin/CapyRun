@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 import { cookies } from "next/headers";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import WorkoutsTable from "@/components/workouts/WorkoutsTable";
 import WorkoutsEmptyState from "@/components/workouts/WorkoutsEmptyState";
@@ -24,6 +25,26 @@ type WorkoutRow = {
   visibility: string | null;
   weekday_iso: number | null;
 };
+
+async function apiUrl(path: string) {
+  const h = await headers();
+  const proto = h.get("x-forwarded-proto") ?? "http";
+  const host = h.get("host");
+  return `${proto}://${host}${path}`;
+}
+
+async function apiGet<T>(path: string): Promise<T | null> {
+  const cookieStore = await cookies();
+  const cookie = cookieStore.toString();
+  const res = await fetch(await apiUrl(path), {
+    method: "GET",
+    cache: "no-store",
+    headers: cookie ? { cookie } : undefined,
+  });
+
+  if (!res.ok) return null;
+  return (await res.json().catch(() => null)) as T | null;
+}
 
 // Парсим твою capyrun.auth (base64-JSON) и вытаскиваем токены
 async function readLegacyTokensFromCapyCookie() {
@@ -68,95 +89,32 @@ export default async function WorkoutsPage() {
 
   // 3) Если сервак всё ещё не видит юзера — показываем заглушку (после первого ответа браузер пошлёт sb-куки, и всё встанет)
   if (!uid) {
-    // Подтянем демо, если есть
-    const DEMO_ID = "11111111-1111-4111-8111-111111111111";
-    let demoWorkoutId: string | null = null;
-
-    const { data: fixedDemo } = await supabase
-      .from("workouts")
-      .select("id")
-      .eq("id", DEMO_ID)
-      .in("visibility", ["public", "unlisted"])
-      .limit(1);
-
-    if (fixedDemo?.length) {
-      demoWorkoutId = fixedDemo[0].id;
-    } else {
-      const { data: anyPublic } = await supabase
-        .from("workouts")
-        .select("id")
-        .in("visibility", ["public", "unlisted"])
-        .order("created_at", { ascending: false })
-        .limit(1);
-      demoWorkoutId = anyPublic?.[0]?.id ?? null;
-    }
+    const demo = await apiGet<{ demoWorkoutId: string | null }>("/api/workouts/demo");
+    const demoWorkoutId = demo?.demoWorkoutId ?? null;
 
     return <WorkoutsEmptyState demoWorkoutId={demoWorkoutId} />;
   }
 
-  // 4) Считаем ТОЛЬКО свои тренировки
-  const { count } = await supabase
-    .from("workouts")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", uid)
-    .is("deleted_at", null);
-  const workoutsCount = count ?? 0;
+  const workoutsJson = await apiGet<{
+    workouts?: WorkoutRow[];
+    items?: WorkoutRow[];
+    data?: WorkoutRow[];
+  }>("/api/workouts?limit=1000");
+
+  const rows =
+    workoutsJson?.workouts ??
+    workoutsJson?.items ??
+    workoutsJson?.data ??
+    [];
+
+  const workoutsCount = rows.length;
 
   // 5) 0 → заглушка с демо
   if (workoutsCount === 0) {
-    const DEMO_ID = "11111111-1111-4111-8111-111111111111";
-    let demoWorkoutId: string | null = null;
-
-    const { data: fixedDemo } = await supabase
-      .from("workouts")
-      .select("id")
-      .eq("id", DEMO_ID)
-      .in("visibility", ["public", "unlisted"])
-      .limit(1);
-
-    if (fixedDemo?.length) {
-      demoWorkoutId = fixedDemo[0].id;
-    } else {
-      const { data: anyPublic } = await supabase
-        .from("workouts")
-        .select("id")
-        .in("visibility", ["public", "unlisted"])
-        .order("created_at", { ascending: false })
-        .limit(1);
-      demoWorkoutId = anyPublic?.[0]?.id ?? null;
-    }
+    const demo = await apiGet<{ demoWorkoutId: string | null }>("/api/workouts/demo");
+    const demoWorkoutId = demo?.demoWorkoutId ?? null;
 
     return <WorkoutsEmptyState demoWorkoutId={demoWorkoutId} />;
-  }
-
-  // 6) >0 → выбираем строго свои записи и показываем таблицу
-  const { data: rows, error: selectErr } = await supabase
-    .from("workouts")
-    .select(`
-      id,
-      user_id,
-      start_time,
-      local_date,
-      uploaded_at,
-      sport,
-      sub_sport,
-      duration_sec,
-      distance_m,
-      avg_hr,
-      calories_kcal,
-      name,
-      visibility,
-      weekday_iso
-    `)
-    .eq("user_id", uid)
-    .is("deleted_at", null)
-    .order("start_time", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false })
-    // TODO: заменить на пагинацию/инфинит-скролл
-    .limit(1000);
-
-  if (selectErr) {
-    console.error("workouts select error:", selectErr);
   }
 
   // читаем предпочитаемый размер страницы из cookie (5..50, по умолчанию 10)
@@ -171,7 +129,7 @@ export default async function WorkoutsPage() {
   return (
     <main>
       <WorkoutsTable
-        initialRows={(rows ?? []) as WorkoutRow[]}
+        initialRows={rows}
         showEmptyState={false}
         initialPageSize={initialPageSize}
       />
