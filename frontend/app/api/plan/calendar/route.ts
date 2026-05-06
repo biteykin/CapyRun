@@ -150,6 +150,7 @@ export async function GET() {
     .from("workouts")
     .select("id, user_id, local_date, sport, name, distance_m, duration_sec")
     .eq("user_id", user.id)
+    .is("deleted_at", null)
     .gte("local_date", fromISO)
     .lte("local_date", toISO);
 
