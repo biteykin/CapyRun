@@ -2225,6 +2225,31 @@ export async function GET() {
         },
       },
 
+      "/api/workouts/{id}/visuals": {
+        get: {
+          tags: ["Workouts"],
+          summary: "Get workout visual data bundle",
+          description:
+            "Returns streams, GPS track and profile HR settings for workout detail visualizations in one request.",
+          operationId: "getWorkoutVisuals",
+          security: [{ cookieAuth: [] }],
+          parameters: [{ $ref: "#/components/parameters/WorkoutId" }],
+          responses: {
+            "200": {
+              description: "Workout visual data bundle",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/WorkoutVisuals" },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "404": { $ref: "#/components/responses/NotFound" },
+            "500": { $ref: "#/components/responses/InternalServerError" },
+          },
+        },
+      },
+
       "/api/workouts/{id}/ai-insight": {
         get: {
           tags: ["Workouts"],
@@ -3240,6 +3265,36 @@ export async function GET() {
             gym_sets_count: { type: "number", nullable: true },
             gym_reps_total: { type: "number", nullable: true },
             gym_volume_kg: { type: "number", nullable: true },
+          },
+        },
+
+        WorkoutVisuals: {
+          type: "object",
+          properties: {
+            streams: {
+              type: "object",
+              nullable: true,
+              description: "Row from workout_streams_preview",
+              additionalProperties: true,
+            },
+            gps: {
+              type: "object",
+              nullable: true,
+              description: "Row from workout_gps_streams",
+              additionalProperties: true,
+            },
+            profile: {
+              type: "object",
+              nullable: true,
+              properties: {
+                hr_max: { type: "number", nullable: true },
+                hr_zones: {
+                  type: "object",
+                  nullable: true,
+                  additionalProperties: true,
+                },
+              },
+            },
           },
         },
 

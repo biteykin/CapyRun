@@ -19,6 +19,7 @@ import {
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { loadWorkoutVisuals } from "@/lib/workouts/visualsClient";
 
 type StreamsPreview = {
   time_s: number[];
@@ -43,6 +44,10 @@ const PACE_MAX_SEC_PER_KM = 4 * 60 * 60; // 4 часа/км — явно мус�
 
 function isNum(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v);
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === "object" && !Array.isArray(v);
 }
 
 function clamp(n: number, a: number, b: number) {
@@ -230,7 +235,6 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
     hr: [],
     pace_s_per_km: [],
   });
-  const [, setHrMax] = React.useState<number | null>(null);
   const [hrZones, setHrZones] = React.useState<HrZone[]>([]);
   const [mode, setMode] = React.useState<Mode>("both");
 
@@ -248,20 +252,8 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
         setLoading(true);
         setErr(null);
 
-        // 1) превью стримов
-        const res = await fetch(`/api/workouts/${workoutId}/streams`, {
-          method: "GET",
-          credentials: "include",
-          cache: "no-store",
-        });
-
-        const json = await res.json().catch(() => null);
-
-        if (!res.ok) {
-          throw new Error(json?.error ?? `HTTP ${res.status}`);
-        }
-
-        const row = json?.streams ?? json?.data ?? json ?? null;
+        const visuals = await loadWorkoutVisuals(workoutId);
+        const row = visuals.streams ?? null;
 
         if (!row) {
           if (!cancelled) {
@@ -270,11 +262,16 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
           }
           return;
         }
-        const s = row?.s ?? null;
+        const s = isRecord(row) ? row.s : null;
+        const sRec = isRecord(s) ? s : null;
 
-        const time_s = Array.isArray(s?.time_s) ? s.time_s : [];
-        const hr = Array.isArray(s?.hr) ? s.hr : [];
-        const pace_s_per_km = Array.isArray(s?.pace_s_per_km) ? s.pace_s_per_km : [];
+        const time_s = Array.isArray(sRec?.time_s)
+          ? (sRec.time_s as unknown[]).filter(isNum)
+          : [];
+        const hr = Array.isArray(sRec?.hr) ? (sRec.hr as unknown[]).filter(isNum) : [];
+        const pace_s_per_km = Array.isArray(sRec?.pace_s_per_km)
+          ? (sRec.pace_s_per_km as unknown[]).map((v) => (isNum(v) ? v : null))
+          : [];
 
         const n = Math.min(time_s.length, hr.length, pace_s_per_km.length);
         if (!n) {
@@ -295,21 +292,10 @@ export default function WorkoutCharts({ workoutId }: { workoutId: string }) {
           setBrush(null);
         }
 
-        // 2) подтянуть hr_max + hr_zones из профиля (для раскраски зон)
-        const profileRes = await fetch("/api/profile/me", {
-          method: "GET",
-          credentials: "include",
-          cache: "no-store",
-        });
-
-        if (!profileRes.ok) return;
-
-        const profileJson = await profileRes.json().catch(() => null);
-        const prof = profileJson?.profile ?? null;
+        const prof = visuals.profile ?? null;
 
         if (!cancelled) {
           const maxHr = prof?.hr_max != null ? Number(prof.hr_max) : null;
-          setHrMax(isNum(maxHr) ? maxHr : null);
 
           const zones = parseHrZones(prof?.hr_zones, isNum(maxHr) ? maxHr : null);
           setHrZones(zones);

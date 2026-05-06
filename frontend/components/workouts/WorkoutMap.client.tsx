@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { DivIcon, Icon, LatLngExpression, LatLngBoundsExpression, Map as LeafletMap } from "leaflet";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { loadWorkoutVisuals } from "@/lib/workouts/visualsClient";
 
 import marker2x from "leaflet/dist/images/marker-icon-2x.png";
 import marker from "leaflet/dist/images/marker-icon.png";
@@ -240,71 +241,36 @@ export default function WorkoutMap(props: {
     };
   }, []);
 
-  // load GPS
+  // load visuals: GPS + preview in one request, shared with charts via client cache
   useEffect(() => {
     let canceled = false;
     (async () => {
       try {
         setGpsErr(null);
         setGps(null);
-
-        const res = await fetch(`/api/workouts/${workoutId}/gps`, {
-          method: "GET",
-          credentials: "include",
-          cache: "no-store",
-        });
-
-        const json = await res.json().catch(() => null);
-
-        if (!res.ok) {
-          throw new Error(json?.error ?? `HTTP ${res.status}`);
-        }
-
-        const row = json?.gps ?? json?.data ?? json ?? null;
-
-        if (!row) return;
-
-        const s = row?.s ?? null;
-        const time_s: number[] = Array.isArray(s?.time_s) ? s.time_s : [];
-        const lat: number[] = Array.isArray(s?.lat) ? s.lat : [];
-        const lon: number[] = Array.isArray(s?.lon) ? s.lon : [];
-
-        const ds = downsampleTriplets(time_s, lat, lon, 2500);
-
-        if (!canceled && ds.t.length) {
-          setGps({ time_s: ds.t, lat: ds.lat, lon: ds.lon });
-          setActiveIdx(0);
-        }
-      } catch (e: unknown) {
-        if (!canceled) setGpsErr(e instanceof Error ? e.message : String(e));
-      }
-    })();
-    return () => {
-      canceled = true;
-    };
-  }, [workoutId]);
-
-  // load preview
-  useEffect(() => {
-    let canceled = false;
-    (async () => {
-      try {
         setPreview(null);
-        const res = await fetch(`/api/workouts/${workoutId}/streams`, {
-          method: "GET",
-          credentials: "include",
-          cache: "no-store",
-        });
 
-        const json = await res.json().catch(() => null);
+        const visuals = await loadWorkoutVisuals(workoutId);
 
-        if (!res.ok) return;
+        const row = visuals.gps ?? null;
+        if (row) {
+          const s = row?.s ?? null;
+          const time_s: number[] = Array.isArray(s?.time_s) ? s.time_s : [];
+          const lat: number[] = Array.isArray(s?.lat) ? s.lat : [];
+          const lon: number[] = Array.isArray(s?.lon) ? s.lon : [];
 
-        const row = json?.streams ?? json?.data ?? json ?? null;
+          const ds = downsampleTriplets(time_s, lat, lon, 1400);
 
-        if (!row) return;
+          if (!canceled && ds.t.length) {
+            setGps({ time_s: ds.t, lat: ds.lat, lon: ds.lon });
+            setActiveIdx(0);
+          }
+        }
 
-        const s = row?.s ?? null;
+        const previewRow = visuals.streams ?? null;
+        if (!previewRow) return;
+
+        const s = previewRow?.s ?? null;
         const time_s: number[] = Array.isArray(s?.time_s) ? s.time_s : [];
         const hr: Array<number | null> = Array.isArray(s?.hr) ? s.hr : [];
         const pace: Array<number | null> = Array.isArray(s?.pace_s_per_km) ? s.pace_s_per_km : [];
@@ -319,8 +285,8 @@ export default function WorkoutMap(props: {
             pace_s_per_km: pace.slice(0, n).map((x) => (isNum(x) ? x : null)),
           });
         }
-      } catch {
-        // ignore
+      } catch (e: unknown) {
+        if (!canceled) setGpsErr(e instanceof Error ? e.message : String(e));
       }
     })();
     return () => {
