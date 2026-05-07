@@ -9,11 +9,10 @@ export const contentType = "image/png";
 
 export default async function Image() {
   // Читаем PNG напрямую из исходной директории. На Vercel
-  // process.cwd() = корень проекта, app/icon.png доступен при page generation.
-  // Вариант через fetch(new URL(...)) ломается, потому что bundler превращает
-  // путь в "/_next/static/media/icon.xxx.png" — относительный URL, который
-  // fetch не может распарсить.
-  const logoBuffer = await readFile(join(process.cwd(), "app", "icon.png"));
+  // process.cwd() = корень проекта, app/icon-512.png доступен при page generation.
+  const logoBuffer = await readFile(
+    join(process.cwd(), "app", "icon-512.png")
+  );
   const logoSrc = `data:image/png;base64,${logoBuffer.toString("base64")}`;
 
   return new ImageResponse(

@@ -1,19 +1,21 @@
-//frontend/components/PublicTopbar.tsx
-
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
+import logo from "@/app/icon-512.png";
 
 export default function PublicTopbar() {
   return (
     <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-4">
       <Link href="/public" className="flex items-center gap-3">
-        <span
-          aria-hidden
-          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border-2 border-[#0E0E0E] bg-[#FFD600] text-lg shadow-[3px_3px_0_#0E0E0E]"
-        >
-          🦫
-        </span>
+        <Image
+          src={logo}
+          alt="CapyRun"
+          width={36}
+          height={36}
+          priority
+          className="h-9 w-9 rounded-xl object-contain"
+        />
         <span>
           <span className="h-display block text-base font-black leading-none">CapyRun</span>
           <span className="hidden text-xs text-[#595958] sm:block">AI running coach</span>

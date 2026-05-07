@@ -10,7 +10,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import logo from "@/app/icon.png";
+import logo from "@/app/icon-512.png";
 
 const ecosystem = ["Strava", "GARMIN", "POLAR", "COROS", "SUUNTO", "Apple Watch"];
 
