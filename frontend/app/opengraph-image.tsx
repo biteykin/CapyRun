@@ -1,11 +1,17 @@
 import { ImageResponse } from "next/og";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
-export const runtime = "edge";
+// Используем Node runtime, чтобы читать локальный icon.png через fs
+export const runtime = "nodejs";
 export const alt = "CapyRun — ИИ-тренер по бегу для начинающих и любителей";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
 export default async function Image() {
+  const logoData = await readFile(join(process.cwd(), "app/icon.png"));
+  const logoSrc = `data:image/png;base64,${logoData.toString("base64")}`;
+
   return new ImageResponse(
     (
       <div
@@ -23,31 +29,16 @@ export default async function Image() {
       >
         {/* Logo + brand */}
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <div
+          <img
+            src={logoSrc}
+            alt=""
+            width={64}
+            height={64}
             style={{
-              width: 56,
-              height: 56,
-              borderRadius: 16,
-              background:
-                "linear-gradient(135deg, #DF6133 0%, #DF8233 60%, #FFD699 100%)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.4)",
+              objectFit: "contain",
+              borderRadius: 14,
             }}
-          >
-            <div
-              style={{
-                width: 24,
-                height: 24,
-                border: "3px solid white",
-                borderRadius: 7,
-                borderTopColor: "transparent",
-                borderRightColor: "transparent",
-                transform: "rotate(-45deg)",
-              }}
-            />
-          </div>
+          />
           <div
             style={{
               fontSize: 36,

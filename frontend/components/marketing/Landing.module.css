@@ -1789,6 +1789,33 @@
 }
 
 /* =====================================================
+   PATCH v5: Logo replacement — use /app/icon.png
+   ===================================================== */
+
+/* Лого как изображение, не как градиентный квадрат */
+.landing .logoMark,
+.footer .logoMark {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: transparent !important;
+  object-fit: contain;
+  display: block;
+  flex-shrink: 0;
+}
+
+/* Footer-логотип — выравнивание с текстом */
+.footerLogo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* =====================================================
    PATCH v4: Living rhythm — atmospheric section backgrounds
    ===================================================== */
 

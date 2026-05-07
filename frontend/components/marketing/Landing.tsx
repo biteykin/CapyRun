@@ -2,6 +2,7 @@
 
 import { useEffect, type ReactNode } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import styles from "./Landing.module.css";
 import {
   Accordion,
@@ -9,6 +10,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
+import logo from "@/app/icon.png";
 
 const ecosystem = ["Strava", "GARMIN", "POLAR", "COROS", "SUUNTO", "Apple Watch"];
 
@@ -817,10 +819,13 @@ export default function Landing() {
           <div className={styles.footerGrid}>
             <div className={styles.footerAbout}>
               <div className={styles.footerLogo}>
-                <span
+                <Image
+                  src={logo}
+                  alt="CapyRun"
+                  width={32}
+                  height={32}
+                  priority
                   className={styles.logoMark}
-                  aria-hidden="true"
-                  style={{ background: "linear-gradient(135deg,#FFD699,#DF6133)" }}
                 />
                 <span className="h-display">CapyRun</span>
               </div>
