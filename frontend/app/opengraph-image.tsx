@@ -1,4 +1,6 @@
 import { ImageResponse } from "next/og";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
 export const runtime = "nodejs";
 export const alt = "CapyRun — ИИ-тренер по бегу для начинающих и любителей";
@@ -6,12 +8,13 @@ export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
 export default async function Image() {
-  // Канонический способ загрузки локальных ассетов в OG-роуте Next.js:
-  // bundler разрешает new URL во время сборки, fetch читает через file://
-  const logoBuffer = await fetch(
-    new URL("./icon.png", import.meta.url)
-  ).then((r) => r.arrayBuffer());
-  const logoSrc = `data:image/png;base64,${Buffer.from(logoBuffer).toString("base64")}`;
+  // Читаем PNG напрямую из исходной директории. На Vercel
+  // process.cwd() = корень проекта, app/icon.png доступен при page generation.
+  // Вариант через fetch(new URL(...)) ломается, потому что bundler превращает
+  // путь в "/_next/static/media/icon.xxx.png" — относительный URL, который
+  // fetch не может распарсить.
+  const logoBuffer = await readFile(join(process.cwd(), "app", "icon.png"));
+  const logoSrc = `data:image/png;base64,${logoBuffer.toString("base64")}`;
 
   return new ImageResponse(
     (
