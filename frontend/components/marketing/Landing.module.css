@@ -101,6 +101,14 @@
   flex-wrap: wrap;
 }
 
+.btnIcon {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
 .heroProof {
   display: flex;
   align-items: center;
@@ -320,6 +328,7 @@
   display: grid;
   place-items: center;
   flex-shrink: 0;
+  overflow: hidden;
 }
 
 .chatHeadText {
@@ -416,6 +425,11 @@
   color: var(--orange);
 }
 
+.floatTag .ic svg {
+  width: 13px;
+  height: 13px;
+}
+
 .ft1 {
   top: 0;
   right: 110px;
@@ -466,12 +480,18 @@
 }
 
 .block {
-  padding: 96px 0;
+  padding: 72px 0;
+}
+
+@media (max-width: 960px) {
+  .landing .block {
+    padding: 56px 0;
+  }
 }
 
 .sectionHead {
   max-width: 720px;
-  margin-bottom: 56px;
+  margin-bottom: 44px;
 }
 
 .sectionEyebrow {
@@ -556,11 +576,58 @@
   place-items: center;
 }
 
-.goalIcon {
-  width: 38px;
-  height: 38px;
-  border-radius: 11px;
+.featIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: #fff1d4;
+  color: #df6133;
+  display: grid;
+  place-items: center;
   margin-bottom: 14px;
+}
+
+.featIcon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.goalIcon {
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  background: #fff1d4;
+  color: #df6133;
+  display: grid;
+  place-items: center;
+  margin-bottom: 16px;
+}
+
+.goalCard.featured .goalIcon {
+  background: rgba(255, 255, 255, 0.6);
+  color: #b84a22;
+}
+
+.goalIcon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.planFeatures .check {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #fff1d4;
+  color: #df6133;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.planFeatures .check svg {
+  width: 14px;
+  height: 14px;
 }
 
 .goalCard h4 {
@@ -893,6 +960,11 @@
   color: white;
 }
 
+.sendBtn svg {
+  width: 14px;
+  height: 14px;
+}
+
 .topicPills {
   display: flex;
   flex-wrap: wrap;
@@ -939,6 +1011,24 @@
   border-radius: 999px;
   font-size: 11.5px;
   font-weight: 700;
+}
+
+.progPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 6px;
+  background: rgba(74, 190, 124, 0.12);
+  color: #1e9258;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.progPillIcon {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
 }
 
 .bigNum {
@@ -988,6 +1078,97 @@
 .faqBlock,
 .finalBlock {
   padding-top: 0;
+}
+
+/* =====================================================
+   PATCH: FAQ wide layout, spacing fixes, icon polish
+   ===================================================== */
+
+/* ---------- 2. FAQ — двухколоночная сетка на всю ширину ---------- */
+.faqGrid {
+  display: grid;
+  grid-template-columns: minmax(280px, 380px) 1fr;
+  gap: 80px;
+  align-items: start;
+}
+
+.faqAside {
+  position: sticky;
+  top: 100px;
+  padding-top: 8px;
+}
+
+.faqAside .sectionTitle {
+  margin-bottom: 16px;
+}
+
+.faqAside .sectionSub {
+  margin-bottom: 20px;
+  max-width: 340px;
+}
+
+/* Если у тебя уже есть .faqList с max-width — переопределяем */
+.faqGrid .faqList {
+  max-width: none;
+  width: 100%;
+  margin-top: 0;
+}
+
+/* Подтянутый внешний вид элементов FAQ */
+.faqGrid .faqItem {
+  padding: 24px 0;
+}
+
+.faqGrid .faqItem summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+}
+
+.faqGrid .faqItem summary > span:first-child {
+  flex: 1;
+}
+
+.faqGrid .faqItem p {
+  max-width: 720px;
+  margin-top: 14px;
+}
+
+/* Адаптив: на планшете ужимаем, на мобилке сворачиваем в одну колонку */
+@media (max-width: 1100px) {
+  .faqGrid {
+    gap: 56px;
+    grid-template-columns: minmax(240px, 320px) 1fr;
+  }
+}
+
+@media (max-width: 860px) {
+  .faqGrid {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+
+  .faqAside {
+    position: static;
+  }
+}
+
+/* ---------- 3. Полировка иконок ---------- */
+
+/* Универсальный размер для всех inline SVG в "иконочных" слотах */
+.featIcon svg,
+.goalIcon svg,
+.privacyIconWrap svg,
+.icToggle svg,
+.check svg,
+.sendBtn svg,
+.btnIcon svg,
+.ic svg,
+.progPillIcon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .convoList {
@@ -1074,24 +1255,51 @@
   width: 100px;
   height: 100px;
   border-radius: 28px;
-  background: linear-gradient(160deg, var(--cream-warm), var(--orange-soft));
+  background: linear-gradient(160deg, #fff8cc, #ffd699);
+  color: #b84a22;
   display: grid;
   place-items: center;
-  color: var(--orange-deep);
   margin: 0 auto;
-  font-size: 42px;
+}
+
+.privacyIconWrap svg {
+  width: 44px;
+  height: 44px;
+}
+
+.faqGrid {
+  display: grid;
+  grid-template-columns: 0.9fr 1.1fr;
+  gap: 56px;
+  align-items: start;
+}
+
+.faqAside {
+  padding-top: 8px;
+}
+
+.faqGrid .faqList {
+  margin-top: 0;
+  max-width: none;
 }
 
 .inlineLink {
   display: inline-flex;
-  margin-top: 16px;
-  color: var(--orange);
-  font-weight: 700;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  color: #df6133;
   text-decoration: none;
+  font-size: 14.5px;
+  font-weight: 500;
+  border-bottom: 1px dashed rgba(223, 97, 51, 0.35);
+  padding-bottom: 2px;
+  transition: color 0.2s, border-color 0.2s;
 }
 
 .inlineLink:hover {
-  text-decoration: underline;
+  color: #b84a22;
+  border-color: #b84a22;
 }
 
 .testimonials {
@@ -1159,6 +1367,11 @@
   color: var(--ink);
 }
 
+.faqQuestion {
+  flex: 1;
+  min-width: 0;
+}
+
 .faqItem summary::-webkit-details-marker {
   display: none;
 }
@@ -1167,13 +1380,20 @@
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  transition: transform 0.25s;
+  background: #fff1d4;
+  color: #df6133;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  transition: transform 0.25s ease, background 0.25s ease;
   flex-shrink: 0;
   margin-left: 16px;
 }
 
 .faqItem[open] .icToggle {
   transform: rotate(45deg);
+  background: #df6133;
+  color: #fff;
 }
 
 .faqItem p {
@@ -1415,4 +1635,518 @@
   .workout {
     font-size: 8px;
   }
+}
+
+/* =====================================================
+   PATCH v2: FAQ full-width, feature icons, polish
+   ===================================================== */
+
+/* ---------- 1. FAQ — заголовок сверху, аккордеон на всю ширину ---------- */
+
+/* Сбрасываем двухколоночную сетку из предыдущего патча, если была */
+.faqGrid {
+  display: block;
+}
+
+.faqAside {
+  position: static;
+}
+
+/* Заголовок секции FAQ — по центру колонки, как в других секциях,
+   но с увеличенной max-width, чтобы строка дышала */
+.faqBlock .sectionHead {
+  max-width: 720px;
+  margin-bottom: 48px;
+}
+
+/* Список FAQ занимает всю ширину контейнера */
+.faqBlock .faqList {
+  width: 100%;
+  max-width: none;
+  margin: 0 auto;
+}
+
+/* Карточный вид элементов — выглядит "продуктово", а не как голый список */
+.faqBlock .faqItem {
+  border: 1px solid rgba(14, 14, 14, 0.08);
+  border-radius: 16px;
+  background: #fff;
+  padding: 0;
+  margin-bottom: 12px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.faqBlock .faqItem:hover {
+  border-color: rgba(223, 97, 51, 0.25);
+}
+
+.faqBlock .faqItem[open] {
+  border-color: rgba(223, 97, 51, 0.3);
+  box-shadow: 0 8px 24px -10px rgba(120, 60, 20, 0.12);
+}
+
+.faqBlock .faqItem summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 22px 28px;
+  font-family: "Fraunces", serif;
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: -0.018em;
+  color: #0e0e0e;
+}
+
+.faqBlock .faqItem summary::-webkit-details-marker {
+  display: none;
+}
+
+.faqBlock .faqQuestion {
+  flex: 1;
+  min-width: 0;
+}
+
+.faqBlock .faqItem p {
+  margin: 0;
+  padding: 0 28px 24px;
+  color: #595958;
+  font-size: 15.5px;
+  line-height: 1.6;
+  max-width: 760px;
+}
+
+/* Мобильная адаптация */
+@media (max-width: 720px) {
+  .faqBlock .sectionHead {
+    margin-bottom: 32px;
+  }
+
+  .faqBlock .faqItem summary {
+    padding: 18px 20px;
+    font-size: 17px;
+    gap: 14px;
+  }
+
+  .faqBlock .faqItem p {
+    padding: 0 20px 20px;
+    font-size: 14.5px;
+  }
+
+  .faqBlock .icToggle {
+    width: 26px;
+    height: 26px;
+  }
+}
+
+/* ---------- 2. Иконки в блоке "Инструменты" — крупный padding ---------- */
+
+.featuresBlock .featCard {
+  padding: 24px;
+}
+
+.featuresBlock .featIcon {
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  background: linear-gradient(160deg, #fff8cc 0%, #ffe7b5 100%);
+  color: #df6133;
+  display: grid;
+  place-items: center;
+  margin-bottom: 18px;
+  border: 1px solid rgba(223, 97, 51, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  transition: transform 0.25s ease, background 0.25s ease;
+}
+
+/* Сама иконка маленькая внутри большого контейнера — больше воздуха по краям */
+.featuresBlock .featIcon svg {
+  width: 22px;
+  height: 22px;
+  stroke-width: 1.7;
+}
+
+.featuresBlock .featCard:hover .featIcon {
+  transform: translateY(-2px);
+  background: linear-gradient(160deg, #fff1d4 0%, #ffd699 100%);
+}
+
+/* ---------- 3. Inline-link в FAQ subtitle ---------- */
+.faqBlock .inlineLink {
+  color: #df6133;
+  text-decoration: none;
+  font-weight: 500;
+  border-bottom: 1px dashed rgba(223, 97, 51, 0.4);
+  padding-bottom: 1px;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.faqBlock .inlineLink:hover {
+  color: #b84a22;
+  border-color: #b84a22;
+}
+
+/* =====================================================
+   PATCH v4: Living rhythm — atmospheric section backgrounds
+   ===================================================== */
+
+/* ---------- 0. Subtle grain overlay для премиальности ---------- */
+/* Используется на градиентных секциях, чтобы не было "пластикового" вида */
+.landing {
+  position: relative;
+}
+
+/* ---------- 1. Базовый "atmospheric" блок ---------- */
+.atmoBlock {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+/* Мягкие плавающие "orb"-блики на градиентных секциях */
+.atmoBlock::before,
+.atmoBlock::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: -1;
+  filter: blur(60px);
+  opacity: 0.6;
+  animation: floatOrb 18s ease-in-out infinite;
+}
+
+@keyframes floatOrb {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(40px, -30px) scale(1.08);
+  }
+  66% {
+    transform: translate(-30px, 40px) scale(0.95);
+  }
+}
+
+/* Едва уловимая зернистая текстура — превращает плоский градиент в "ткань" */
+.atmoBlock > *::before {
+  pointer-events: none;
+}
+
+.atmoBlock::after {
+  animation-delay: -9s;
+  animation-duration: 22s;
+}
+
+/* ---------- 2. WARM glow — для блока "Goals" ---------- */
+.goalsBlock {
+  background:
+    radial-gradient(1100px 600px at 90% 10%, rgba(255, 175, 105, 0.42) 0%, transparent 55%),
+    radial-gradient(900px 500px at 5% 90%, rgba(255, 220, 150, 0.55) 0%, transparent 60%),
+    linear-gradient(160deg, #fff3d6 0%, #ffe5b8 100%);
+}
+
+.goalsBlock::before {
+  width: 500px;
+  height: 500px;
+  top: -150px;
+  right: -100px;
+  background: radial-gradient(circle, rgba(223, 130, 51, 0.35), transparent 70%);
+}
+
+.goalsBlock::after {
+  width: 400px;
+  height: 400px;
+  bottom: -120px;
+  left: -80px;
+  background: radial-gradient(circle, rgba(255, 214, 153, 0.6), transparent 70%);
+}
+
+/* ---------- 3. SUNSET — для секции "Conversations" ---------- */
+.convoBlock {
+  background:
+    radial-gradient(1000px 500px at 100% 0%, rgba(255, 195, 130, 0.5) 0%, transparent 55%),
+    radial-gradient(800px 400px at 0% 100%, rgba(255, 230, 175, 0.6) 0%, transparent 60%),
+    linear-gradient(180deg, #fff8e5 0%, #ffefc9 100%);
+}
+
+.convoBlock::before {
+  width: 450px;
+  height: 450px;
+  top: 20%;
+  left: -150px;
+  background: radial-gradient(circle, rgba(255, 175, 95, 0.4), transparent 70%);
+}
+
+.convoBlock::after {
+  width: 380px;
+  height: 380px;
+  bottom: 10%;
+  right: -100px;
+  background: radial-gradient(circle, rgba(223, 130, 51, 0.3), transparent 70%);
+}
+
+/* Карточки на атмосферном фоне — чуть более "плавающие" */
+.convoBlock .convoCard {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-color: rgba(255, 255, 255, 0.6);
+  box-shadow:
+    0 4px 12px -2px rgba(120, 60, 20, 0.06),
+    0 16px 40px -12px rgba(120, 60, 20, 0.14);
+}
+
+.convoBlock .convoCard:hover {
+  transform: translateY(-4px);
+  box-shadow:
+    0 4px 12px -2px rgba(120, 60, 20, 0.08),
+    0 28px 50px -12px rgba(120, 60, 20, 0.2);
+}
+
+/* ---------- 4. CREAM — для testimonials ---------- */
+.testimonialsBlock {
+  background:
+    radial-gradient(900px 500px at 50% 0%, rgba(255, 230, 180, 0.45) 0%, transparent 55%),
+    linear-gradient(180deg, #fffbf0 0%, #fff3d6 100%);
+}
+
+.testimonialsBlock::before {
+  width: 600px;
+  height: 400px;
+  top: -100px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: radial-gradient(ellipse, rgba(255, 195, 130, 0.35), transparent 70%);
+}
+
+.testimonialsBlock::after {
+  width: 350px;
+  height: 350px;
+  bottom: -80px;
+  right: 10%;
+  background: radial-gradient(circle, rgba(255, 214, 153, 0.5), transparent 70%);
+}
+
+/* Тестимониалы — приподнятые карточки с лёгкой стеклянной подложкой */
+.testimonialsBlock .testi {
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow:
+    0 4px 12px -2px rgba(120, 60, 20, 0.06),
+    0 20px 50px -16px rgba(120, 60, 20, 0.18);
+}
+
+.testimonialsBlock .testi:nth-child(2) {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(255, 220, 150, 0.5));
+  transform: translateY(-12px);
+}
+
+/* ---------- 5. AI Coach — апгрейд существующего блока ---------- */
+.coachSection {
+  background:
+    radial-gradient(800px 500px at 100% 0%, rgba(255, 175, 105, 0.5) 0%, transparent 55%),
+    radial-gradient(700px 400px at 0% 100%, rgba(255, 230, 175, 0.6) 0%, transparent 60%),
+    linear-gradient(160deg, #fff1d4 0%, #ffd699 100%) !important;
+  border: 1px solid rgba(223, 130, 51, 0.15);
+  box-shadow: 0 30px 80px -30px rgba(184, 74, 34, 0.25);
+}
+
+.coachSection::after {
+  content: "";
+  position: absolute;
+  width: 500px;
+  height: 500px;
+  top: -100px;
+  left: -100px;
+  background: radial-gradient(circle, rgba(255, 195, 130, 0.45), transparent 70%);
+  border-radius: 50%;
+  filter: blur(60px);
+  pointer-events: none;
+  animation: floatOrb 22s ease-in-out infinite;
+  animation-delay: -5s;
+}
+
+/* ---------- 6. Hero — добавляем eye-catcher orb ---------- */
+.hero {
+  position: relative;
+  overflow: hidden;
+}
+
+.hero::before {
+  content: "";
+  position: absolute;
+  width: 700px;
+  height: 700px;
+  top: -300px;
+  right: -200px;
+  background: radial-gradient(circle, rgba(255, 175, 105, 0.35), transparent 65%);
+  border-radius: 50%;
+  filter: blur(80px);
+  pointer-events: none;
+  z-index: 0;
+  animation: floatOrb 25s ease-in-out infinite;
+}
+
+.hero > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ---------- 7. Final CTA — усиливаем драматичность ---------- */
+.finalCta {
+  background:
+    radial-gradient(900px 400px at 20% 0%, rgba(255, 214, 153, 0.6) 0%, transparent 55%),
+    radial-gradient(700px 350px at 80% 100%, rgba(255, 255, 255, 0.25) 0%, transparent 55%),
+    linear-gradient(135deg, #df8233 0%, #df6133 50%, #b84a22 100%) !important;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 30px 80px -20px rgba(184, 74, 34, 0.4);
+}
+
+.finalCta::after {
+  content: "";
+  position: absolute;
+  width: 600px;
+  height: 600px;
+  top: -200px;
+  right: -150px;
+  background: radial-gradient(circle, rgba(255, 230, 175, 0.3), transparent 70%);
+  border-radius: 50%;
+  filter: blur(60px);
+  animation: floatOrb 28s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* ---------- 8. Section dividers — мягкий переход между секциями ---------- */
+.atmoBlock + .block:not(.atmoBlock),
+.block:not(.atmoBlock) + .atmoBlock {
+  position: relative;
+}
+
+/* Скрытый wave-divider в верху atmo-блока для плавного перехода */
+.atmoBlock {
+  margin-top: 0;
+}
+
+/* ---------- 9. Чуть более яркий primary button на фоне ---------- */
+.atmoBlock :global(.btn-primary) {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 2px 4px rgba(184, 74, 34, 0.3),
+    0 14px 30px -8px rgba(223, 97, 51, 0.5);
+}
+
+/* ---------- 10. Адаптив — на мобиле уменьшаем orb'ы ---------- */
+@media (max-width: 720px) {
+  .atmoBlock::before,
+  .atmoBlock::after,
+  .hero::before,
+  .coachSection::after,
+  .finalCta::after {
+    width: 300px !important;
+    height: 300px !important;
+    filter: blur(40px);
+    animation-duration: 30s;
+  }
+}
+
+/* ---------- 11. Reduce-motion: гасим анимации ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .atmoBlock::before,
+  .atmoBlock::after,
+  .hero::before,
+  .coachSection::after,
+  .finalCta::after {
+    animation: none;
+  }
+}
+
+/* =====================================================
+   PATCH v3: bg color, goal icons match features, FAQ cleanup
+   ===================================================== */
+
+/* ---------- 1. Новый цвет фона ---------- */
+.landing {
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(255, 214, 153, 0.5), transparent 60%),
+    radial-gradient(900px 500px at -10% 30%, rgba(255, 248, 204, 0.55), transparent 60%),
+    rgb(253, 253, 249);
+}
+
+/* На случай если фон выставлен на body или html через :global — перекрываем */
+.landing,
+.landing .block,
+.landing .hero {
+  background-color: transparent;
+}
+
+/* ---------- 2. Иконки в блоке "Цели" — как в "Инструментах" ---------- */
+.goalsGrid .goalIcon {
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  background: linear-gradient(160deg, #fff8cc 0%, #ffe7b5 100%);
+  color: #df6133;
+  display: grid;
+  place-items: center;
+  margin-bottom: 18px;
+  border: 1px solid rgba(223, 97, 51, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  transition: transform 0.25s ease, background 0.25s ease;
+}
+
+.goalsGrid .goalIcon svg {
+  width: 22px;
+  height: 22px;
+  stroke-width: 1.7;
+}
+
+.goalsGrid .goalCard:hover .goalIcon {
+  transform: translateY(-2px);
+  background: linear-gradient(160deg, #fff1d4 0%, #ffd699 100%);
+}
+
+/* Featured-карточка — иконка чуть контрастнее, потому что фон у карточки оранжевый */
+.goalsGrid .goalCard.featured .goalIcon {
+  background: rgba(255, 255, 255, 0.7);
+  border-color: rgba(184, 74, 34, 0.15);
+  color: #b84a22;
+}
+
+.goalsGrid .goalCard.featured:hover .goalIcon {
+  background: rgba(255, 255, 255, 0.95);
+}
+
+/* ---------- 3. Очистка старых стилей FAQ-аккордеона ---------- */
+/* shadcn Accordion рендерит свои элементы (button, не details/summary),
+   поэтому убираем визуальные стили старого custom-варианта,
+   чтобы они не конфликтовали и не висели мёртвым кодом */
+.faqBlock .faqItem,
+.faqBlock .faqItem:hover,
+.faqBlock .faqItem[open],
+.faqBlock .faqItem summary,
+.faqBlock .faqItem p,
+.faqBlock .faqQuestion,
+.faqBlock .icToggle {
+  all: unset;
+}
+
+/* Inline-link в подзаголовке FAQ — оставляем, он используется и сейчас */
+.faqBlock .inlineLink {
+  color: #df6133;
+  text-decoration: none;
+  font-weight: 500;
+  border-bottom: 1px dashed rgba(223, 97, 51, 0.4);
+  padding-bottom: 1px;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.faqBlock .inlineLink:hover {
+  color: #b84a22;
+  border-color: #b84a22;
 }
