@@ -1,6 +1,9 @@
 const { withSentryConfig } = require('@sentry/nextjs');
 
 const nextConfig = {
+  images: {
+    remotePatterns: [{ protocol: "https", hostname: "randomuser.me" }],
+  },
   eslint: {
     ignoreDuringBuilds: true,
   },

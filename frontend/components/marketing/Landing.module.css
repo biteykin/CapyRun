@@ -331,6 +331,12 @@
   overflow: hidden;
 }
 
+.capyAvatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .chatHeadText {
   flex: 1;
 }
@@ -2176,4 +2182,226 @@
 .faqBlock .inlineLink:hover {
   color: #b84a22;
   border-color: #b84a22;
+}
+
+/* =====================================================
+   PATCH v6: spacing, eyebrows, color rhythm,
+   final-CTA accent, real avatars, footer cleanup
+   ===================================================== */
+
+/* ---------- 1. Hero — отступ между CTA и proof ---------- */
+.landing .heroCtaRow {
+  margin-bottom: 36px;
+}
+
+.landing .heroProof {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.landing .heroProof .avatarStack {
+  flex-shrink: 0;
+}
+
+/* ---------- 2. Eyebrow letter-spacing — нормальный ---------- */
+.landing .sectionEyebrow {
+  letter-spacing: 0.04em;
+  font-size: 12px;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: #df6133;
+}
+
+.landing .worksLabel {
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 12px;
+  color: #8a8a87;
+}
+
+.landing .convoTag,
+.landing .lbl,
+.landing .week,
+.landing .roadmapStep .week {
+  letter-spacing: 0.04em !important;
+}
+
+/* ---------- 3. Final CTA — акцентный цвет italic ---------- */
+/* «Спокойнее.» на оранжевом фоне — мягкий тёплый кремовый,
+   контрастный, но не белый */
+.landing .finalAccent {
+  color: #ffe7b5;
+  font-style: italic;
+  background: linear-gradient(135deg, #fff6de 0%, #ffd699 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.08);
+}
+
+/* ---------- 4. Восстанавливаем нормальные отступы между секциями ---------- */
+/* В предыдущих патчах мы занулили padding-top для подряд идущих секций.
+   Возвращаем их обратно, чтобы был воздух */
+.landing .featuresBlock,
+.landing .convoBlock,
+.landing .privacyBlock,
+.landing .faqBlock {
+  padding-top: 72px;
+}
+
+.landing .finalBlock {
+  padding-top: 16px;
+}
+
+@media (max-width: 960px) {
+  .landing .featuresBlock,
+  .landing .convoBlock,
+  .landing .privacyBlock,
+  .landing .faqBlock {
+    padding-top: 56px;
+  }
+}
+
+/* ---------- 5. Цветовой ритм — Conversations переводим в peach/coral ---------- */
+/* Чтобы не было двух подряд "близких по тону" секций */
+.landing .convoBlock {
+  background:
+    radial-gradient(1000px 500px at 100% 0%, rgba(255, 165, 120, 0.45) 0%, transparent 55%),
+    radial-gradient(800px 400px at 0% 100%, rgba(255, 200, 165, 0.55) 0%, transparent 60%),
+    linear-gradient(160deg, #ffeddc 0%, #ffd9c0 100%);
+}
+
+.landing .convoBlock::before {
+  background: radial-gradient(circle, rgba(255, 145, 95, 0.35), transparent 70%);
+}
+
+.landing .convoBlock::after {
+  background: radial-gradient(circle, rgba(223, 110, 70, 0.3), transparent 70%);
+}
+
+/* Testimonials — чуть смещаем в холодный кремовый, чтобы отличался от convo */
+.landing .testimonialsBlock {
+  background:
+    radial-gradient(900px 500px at 50% 0%, rgba(255, 235, 195, 0.4) 0%, transparent 55%),
+    linear-gradient(180deg, #fffdf6 0%, #fff5dc 100%);
+}
+
+/* ---------- 6. Real photo avatars (testimonials + hero proof) ---------- */
+/* randomuser.me даёт реалистичные стоковые портреты, бесплатно */
+
+.landing .avi {
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-color: #ffe7b5;
+  border: 2px solid #fff;
+}
+
+/* Hero proof — 4 разных лица */
+.landing .avi1 {
+  background-image: url("https://randomuser.me/api/portraits/women/44.jpg") !important;
+}
+
+.landing .avi2 {
+  background-image: url("https://randomuser.me/api/portraits/men/32.jpg") !important;
+}
+
+.landing .avi3 {
+  background-image: url("https://randomuser.me/api/portraits/women/65.jpg") !important;
+}
+
+.landing .avi4 {
+  background-image: url("https://randomuser.me/api/portraits/men/85.jpg") !important;
+}
+
+/* Testimonials используют avi2 / avi3 / avi4 — переопределим
+   через .testi-author, чтобы не пересекалось с hero */
+.landing .testimonialsBlock .testi:nth-child(1) .testiAuthor .avi {
+  background-image: url("https://randomuser.me/api/portraits/women/44.jpg");
+}
+
+.landing .testimonialsBlock .testi:nth-child(2) .testiAuthor .avi {
+  background-image: url("https://randomuser.me/api/portraits/men/32.jpg");
+}
+
+.landing .testimonialsBlock .testi:nth-child(3) .testiAuthor .avi {
+  background-image: url("https://randomuser.me/api/portraits/women/65.jpg");
+}
+
+.landing .testiAuthor .avi {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ---------- 7. Footer — упрощённый ---------- */
+.landing .footer {
+  padding: 40px 0;
+  border-top: 1px solid rgba(14, 14, 14, 0.08);
+}
+
+.landing .footerSimple {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  text-align: center;
+  font-size: 13.5px;
+  color: #8a8a87;
+  letter-spacing: -0.005em;
+}
+
+.landing .footerSimple .logoMark {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+@media (max-width: 560px) {
+  .landing .footerSimple {
+    flex-direction: column;
+    gap: 10px;
+    font-size: 13px;
+    padding: 0 16px;
+  }
+}
+
+/* ---------- 8. Capybara avatar (теперь логотип) ---------- */
+.landing .capyAvatar {
+  background: linear-gradient(135deg, #fff6de, #ffd699);
+  padding: 4px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.landing .capyAvatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 50%;
+}
+
+/* ---------- 9. shadcn Accordion — полировка ---------- */
+/* Контейнер sectionHead для FAQ — выравнивание по центру */
+.landing .faqBlock .sectionHead {
+  text-align: center;
+  margin-left: auto;
+  margin-right: auto;
+  margin-bottom: 56px;
+}
+
+.landing .faqBlock .sectionHead .sectionSub {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+@media (max-width: 720px) {
+  .landing .faqBlock .sectionHead {
+    text-align: left;
+    margin-bottom: 32px;
+  }
 }

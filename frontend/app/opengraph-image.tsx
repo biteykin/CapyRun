@@ -1,16 +1,17 @@
 import { ImageResponse } from "next/og";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 
-// Используем Node runtime, чтобы читать локальный icon.png через fs
 export const runtime = "nodejs";
 export const alt = "CapyRun — ИИ-тренер по бегу для начинающих и любителей";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
 export default async function Image() {
-  const logoData = await readFile(join(process.cwd(), "app/icon.png"));
-  const logoSrc = `data:image/png;base64,${logoData.toString("base64")}`;
+  // Канонический способ загрузки локальных ассетов в OG-роуте Next.js:
+  // bundler разрешает new URL во время сборки, fetch читает через file://
+  const logoBuffer = await fetch(
+    new URL("./icon.png", import.meta.url)
+  ).then((r) => r.arrayBuffer());
+  const logoSrc = `data:image/png;base64,${Buffer.from(logoBuffer).toString("base64")}`;
 
   return new ImageResponse(
     (
@@ -22,8 +23,11 @@ export default async function Image() {
           flexDirection: "column",
           justifyContent: "space-between",
           padding: "80px 80px 64px",
-          background:
-            "radial-gradient(900px 500px at 90% 0%, #FFD699 0%, transparent 60%), radial-gradient(700px 400px at 0% 100%, #FFF8CC 0%, transparent 60%), #FFF6DE",
+          // Satori не парсит background-shorthand с hex-цветом в конце —
+          // нужно разделить на backgroundColor + backgroundImage
+          backgroundColor: "#FFF6DE",
+          backgroundImage:
+            "radial-gradient(900px 500px at 90% 0%, #FFD699 0%, transparent 60%), radial-gradient(700px 400px at 0% 100%, #FFF8CC 0%, transparent 60%)",
           fontFamily: "sans-serif",
         }}
       >
@@ -86,12 +90,13 @@ export default async function Image() {
               letterSpacing: "-0.035em",
               lineHeight: 1,
               maxWidth: 1000,
+              display: "flex",
+              flexWrap: "wrap",
+              gap: "0 16px",
             }}
           >
-            Бегайте умнее{" "}
-            <span style={{ color: "#DF6133", fontStyle: "italic" }}>
-              без живого тренера
-            </span>
+            <span>Бегайте умнее</span>
+            <span style={{ color: "#DF6133", fontStyle: "italic" }}>без живого тренера</span>
           </div>
 
           <div
@@ -102,8 +107,8 @@ export default async function Image() {
               maxWidth: 900,
             }}
           >
-            План под ваш уровень, понятные тренировки и спокойный ИИ-собеседник,
-            который всегда на связи.
+            План под ваш уровень, понятные тренировки и спокойный
+            ИИ-собеседник, который всегда на связи.
           </div>
         </div>
 
@@ -130,7 +135,7 @@ export default async function Image() {
               alignItems: "center",
               gap: 10,
               padding: "12px 22px",
-              background:
+              backgroundImage:
                 "linear-gradient(180deg, #E97644 0%, #DF6133 55%, #C9521F 100%)",
               color: "white",
               borderRadius: 999,

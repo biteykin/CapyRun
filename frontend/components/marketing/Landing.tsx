@@ -223,19 +223,19 @@ const featureCards: Array<[ReactNode, string, string]> = [
 
 const testimonials = [
   {
-    quote: "Я наконец понял, как бегать легко. Раньше каждая тренировка превращалась в гонку.",
-    name: "Марта · 34",
-    meta: "Берлин · бегает 2 года",
+    quote: "Я наконец поняла, как бегать легко. Раньше каждая тренировка превращалась в гонку.",
+    name: "Анна · 34",
+    meta: "Москва · бегает 2 года",
   },
   {
     quote: "Ощущение, что у меня появился спокойный тренер в кармане. Очень не хватало такого формата.",
-    name: "Том · 41",
-    meta: "Манчестер · начал с беты",
+    name: "Дмитрий · 41",
+    meta: "Санкт-Петербург · начал с беты",
   },
   {
     quote: "CapyRun помог мне перестать перегружаться. Колени сказали спасибо уже через пару недель.",
-    name: "Леа · 28",
-    meta: "Лион · возвращается к бегу",
+    name: "Мария · 28",
+    meta: "Екатеринбург · возвращается к бегу",
   },
 ];
 
@@ -707,9 +707,6 @@ export default function Landing() {
                 Мы не продаём ваши данные и не строим рекламные профили. Разговоры с тренером
                 и история тренировок нужны только для плана, прогресса и персональных рекомендаций.
               </p>
-              <Link href="/legal/privacy" className={styles.inlineLink}>
-                Политика конфиденциальности
-              </Link>
             </div>
             <div className={styles.privacyIconWrap} aria-hidden="true">
               {Icon.shield}
@@ -744,47 +741,59 @@ export default function Landing() {
       <section className={`${styles.block} ${styles.faqBlock}`} id="faq" data-reveal>
         <div className={styles.container}>
           <div className={styles.sectionHead}>
-              <div className={styles.sectionEyebrow}>FAQ</div>
-              <h2 className={`h-display ${styles.sectionTitle}`}>
-                Вопросы, <em>спокойно</em> отвеченные
-              </h2>
-              <p className={styles.sectionSub}>
-                Если не нашли ответ — напишите на{" "}
-                <a href="mailto:hello@capyrun.com" className={styles.inlineLink}>
-                  hello@capyrun.com
-                </a>
-                , поможем разобраться.
-              </p>
+            <div className={styles.sectionEyebrow}>FAQ</div>
+            <h2 className={`h-display ${styles.sectionTitle}`}>
+              Вопросы, <em>спокойно</em> отвеченные
+            </h2>
+            <p className={styles.sectionSub}>
+              Если не нашли ответ — напишите на{" "}
+              <a href="mailto:hello@capyrun.com" className={styles.inlineLink}>
+                hello@capyrun.com
+              </a>
+              , поможем разобраться.
+            </p>
           </div>
 
           <Accordion
             type="single"
             collapsible
             defaultValue="faq-0"
-            className="w-full divide-y divide-[rgba(14,14,14,0.08)] border-y border-[rgba(14,14,14,0.08)]"
+            className="w-full"
           >
             {faqs.map((item, index) => (
-              <AccordionItem key={item.question} value={`faq-${index}`} className="border-b-0">
-                <AccordionTrigger className="group py-6 text-left font-display text-[19px] font-medium tracking-[-0.018em] text-[#0E0E0E] hover:no-underline data-[state=open]:text-[#B84A22] sm:text-[21px] [&>svg]:hidden">
-                  <span className="flex-1 pr-6">{item.question}</span>
+              <AccordionItem
+                key={item.question}
+                value={`faq-${index}`}
+                className="group/item relative border-b border-[rgba(14,14,14,0.08)] transition-colors duration-300 hover:border-[rgba(223,97,51,0.3)] data-[state=open]:border-[rgba(223,97,51,0.4)]"
+              >
+                {/* Левая акцентная полоска, проявляется при open */}
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-0 top-1/2 h-0 w-[3px] -translate-y-1/2 rounded-full bg-gradient-to-b from-[#DF8233] to-[#B84A22] transition-all duration-500 ease-out group-data-[state=open]/item:h-[60%]"
+                />
+                <AccordionTrigger
+                  className="group/trigger w-full py-6 pl-4 pr-3 text-left font-display text-[18px] font-medium tracking-[-0.018em] text-[#0E0E0E] transition-all duration-300 hover:pl-6 hover:no-underline data-[state=open]:pl-6 data-[state=open]:text-[#B84A22] sm:py-8 sm:text-[22px] sm:pl-6 sm:pr-4 sm:hover:pl-8 sm:data-[state=open]:pl-8 [&>svg]:hidden"
+                >
+                  <span className="flex-1 pr-4 sm:pr-6">{item.question}</span>
                   <span
                     aria-hidden="true"
-                    className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#FFF1D4] text-[#DF6133] transition-all duration-300 group-hover:bg-[#FFE7B5] group-data-[state=open]:rotate-45 group-data-[state=open]:bg-[#DF6133] group-data-[state=open]:text-white"
+                    className="relative grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[rgba(223,97,51,0.08)] text-[#DF6133] transition-all duration-500 ease-out group-hover/trigger:bg-[rgba(223,97,51,0.15)] group-hover/trigger:scale-110 group-data-[state=open]/trigger:bg-[#DF6133] group-data-[state=open]/trigger:text-white group-data-[state=open]/trigger:scale-110 group-data-[state=open]/trigger:shadow-[0_8px_20px_-4px_rgba(223,97,51,0.5)] sm:h-10 sm:w-10"
                   >
+                    {/* Горизонтальная палочка */}
+                    <span className="absolute h-[2px] w-[14px] rounded-full bg-current sm:w-[16px]" />
+                    {/* Вертикальная палочка — исчезает при open, превращая + в — */}
                     <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.2"
-                      strokeLinecap="round"
-                      className="h-3.5 w-3.5"
+                      aria-hidden="true"
+                      className="absolute h-[14px] w-[2px] rounded-full bg-current transition-all duration-500 ease-out group-data-[state=open]/trigger:rotate-90 group-data-[state=open]/trigger:opacity-0 sm:h-[16px]"
                     >
-                      <path d="M12 5v14M5 12h14" />
+                      <rect width="2" height="14" rx="1" className="fill-current" />
                     </svg>
                   </span>
                 </AccordionTrigger>
-                <AccordionContent className="max-w-3xl pb-6 pr-12 text-[15.5px] leading-[1.6] text-[#595958]">
-                  {item.answer}
+                <AccordionContent className="overflow-hidden pl-6 pr-4 text-[15px] leading-[1.65] text-[#595958] data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down sm:pl-8 sm:pr-12 sm:text-[16px]">
+                  <div className="max-w-3xl pb-7 pt-1 sm:pb-8">
+                    {item.answer}
+                  </div>
                 </AccordionContent>
               </AccordionItem>
             ))}
@@ -796,7 +805,7 @@ export default function Landing() {
         <div className={styles.container}>
           <div className={styles.finalCta}>
             <h2 className="h-display">
-              Бегайте умнее. <em>Спокойнее.</em>
+              Бегайте умнее. <em className={styles.finalAccent}>Спокойнее.</em>
             </h2>
             <p>
               Начните с понятной цели, получите план и обсуждайте прогресс с ИИ-тренером.
@@ -816,58 +825,15 @@ export default function Landing() {
 
       <footer className={styles.footer}>
         <div className={styles.container}>
-          <div className={styles.footerGrid}>
-            <div className={styles.footerAbout}>
-              <div className={styles.footerLogo}>
-                <Image
-                  src={logo}
-                  alt="CapyRun"
-                  width={32}
-                  height={32}
-                  priority
-                  className={styles.logoMark}
-                />
-                <span className="h-display">CapyRun</span>
-              </div>
-              <p>
-                Дружелюбный ИИ-тренер для любителей, которые хотят прогрессировать без хаоса.
-              </p>
-            </div>
-            <div>
-              <h6>Продукт</h6>
-              <ul>
-                <li><a href="#coach">ИИ-тренер</a></li>
-                <li><a href="#how">Планы</a></li>
-                <li><a href="#features">Возможности</a></li>
-                <li><Link href="/pricing">Прайс</Link></li>
-              </ul>
-            </div>
-            <div>
-              <h6>Ресурсы</h6>
-              <ul>
-                <li><a href="#">Блог</a></li>
-                <li><a href="#">Гайд новичка</a></li>
-                <li><a href="#">Помощь</a></li>
-                <li><a href="#">Что нового</a></li>
-              </ul>
-            </div>
-            <div>
-              <h6>Компания</h6>
-              <ul>
-                <li><a href="#">О нас</a></li>
-                <li><Link href="/legal/privacy">Политика</Link></li>
-                <li><a href="#">Условия</a></li>
-                <li><a href="mailto:hello@capyrun.com">Контакты</a></li>
-              </ul>
-            </div>
-          </div>
-          <div className={styles.footerBottom}>
-            <div>© 2026 CapyRun · Сделано с заботой о бегунах</div>
-            <div className={styles.socialLinks}>
-              <a href="#">Twitter</a>
-              <a href="#">Instagram</a>
-              <a href="#">Strava</a>
-            </div>
+          <div className={styles.footerSimple}>
+            <Image
+              src={logo}
+              alt="CapyRun"
+              width={28}
+              height={28}
+              className={styles.logoMark}
+            />
+            <span>CapyRun · Сделано с заботой о бегунах ♥️</span>
           </div>
         </div>
       </footer>
@@ -879,7 +845,12 @@ function ChatHead({ small = false }: { small?: boolean }) {
   return (
     <div className={styles.chatHead}>
       <div className={styles.capyAvatar} aria-hidden="true">
-        {Icon.capy}
+        <Image
+          src={logo}
+          alt=""
+          width={40}
+          height={40}
+        />
       </div>
       <div className={styles.chatHeadText}>
         <div className={styles.name}>{small ? "Capy · тренер" : "Capy"}</div>
