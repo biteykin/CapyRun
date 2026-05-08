@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export const runtime = "nodejs";
-export const alt = "CapyRun — ИИ-тренер по бегу для начинающих и любителей";
+export const alt = "CapyRun — AI-тренер по бегу для начинающих и любителей";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -81,7 +81,7 @@ export default async function Image() {
                 background: "#4ABE7C",
               }}
             />
-            ИИ-тренер по бегу · в бете
+            AI-тренер по бегу · в бете
           </div>
 
           <div
@@ -110,7 +110,7 @@ export default async function Image() {
             }}
           >
             План под ваш уровень, понятные тренировки и спокойный
-            ИИ-собеседник, который всегда на связи.
+            AI-собеседник, который всегда на связи.
           </div>
         </div>
 
@@ -137,12 +137,14 @@ export default async function Image() {
               alignItems: "center",
               gap: 10,
               padding: "12px 22px",
+              // Жёлтый CTA — соответствует кнопкам в продукте
               backgroundImage:
-                "linear-gradient(180deg, #E97644 0%, #DF6133 55%, #C9521F 100%)",
-              color: "white",
+                "linear-gradient(135deg, #FFE08A 0%, #FFB200 100%)",
+              color: "#0E0E0E",
               borderRadius: 999,
               fontWeight: 600,
               fontSize: 22,
+              border: "1px solid #DC9300",
             }}
           >
             capyrun.com

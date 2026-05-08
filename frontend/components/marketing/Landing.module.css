@@ -2405,3 +2405,186 @@
     margin-bottom: 32px;
   }
 }
+
+/* =====================================================
+   PATCH v7: design-system alignment, mobile fixes,
+   avatar fix, conversations bg cleanup
+   ===================================================== */
+
+/* ---------- 1. Убираем ручные font-family из модуля ---------- */
+/* h-display задаёт глобальные шрифты PostHog. Перебиваем все наши
+   "Fraunces" / "Geist" обратно на inherit, чтобы наследовалось из html */
+.landing,
+.landing .display,
+.landing .heroTitle,
+.landing .sectionTitle,
+.landing h1,
+.landing h2,
+.landing h3,
+.landing h4,
+.landing h5,
+.landing h6,
+.landing blockquote,
+.landing .bigNum,
+.landing .stat .val,
+.landing .convoQ,
+.landing .roadmapHead h5,
+.landing .calHead h5,
+.landing .progCard h5 {
+  font-family: inherit;
+}
+
+/* ---------- 2. Радиус из дизайн-системы ---------- */
+/* Используем глобальный --radius (0.625rem = 10px) везде, где можем */
+.landing .btn,
+.landing .featCard,
+.landing .goalCard,
+.landing .convoCard,
+.landing .testi,
+.landing .progCard,
+.landing .device,
+.landing .calendar,
+.landing .roadmap,
+.landing .chatMockup {
+  border-radius: calc(var(--radius) * 2.4); /* ~24px для крупных карточек */
+}
+
+.landing .stat,
+.landing .float-tag,
+.landing .topicPill,
+.landing .day-pill,
+.landing .convoTag,
+.landing .chartBlock {
+  border-radius: var(--radius); /* 10px */
+}
+
+/* ---------- 3. Финальный CTA, footer card используют большой радиус ---------- */
+.landing .finalCta,
+.landing .privacyBand,
+.landing .coachSection {
+  border-radius: calc(var(--radius) * 3); /* 30px */
+}
+
+/* ---------- 4. Тестимониалы — гарантированно правильный пол ---------- */
+/* Анна (ж) → Дмитрий (м) → Мария (ж).
+   !important перебивает старые .avi1-.avi4 из предыдущих патчей */
+.landing .testimonialsBlock .testi:nth-child(1) .testiAuthor .avi {
+  background-image: url("https://randomuser.me/api/portraits/women/68.jpg") !important;
+}
+.landing .testimonialsBlock .testi:nth-child(2) .testiAuthor .avi {
+  background-image: url("https://randomuser.me/api/portraits/men/41.jpg") !important;
+}
+.landing .testimonialsBlock .testi:nth-child(3) .testiAuthor .avi {
+  background-image: url("https://randomuser.me/api/portraits/women/52.jpg") !important;
+}
+
+/* ---------- 5. Conversations — мягкий cream/butter вместо peach ---------- */
+/* Используем cta-from (#FFE08A) на ультра-низкой прозрачности, чтобы
+   секция гармонировала с жёлтыми CTA из дизайн-системы */
+.landing .convoBlock {
+  background:
+    radial-gradient(900px 500px at 50% 0%, rgba(255, 224, 138, 0.22) 0%, transparent 60%),
+    radial-gradient(700px 400px at 100% 100%, rgba(255, 178, 0, 0.10) 0%, transparent 65%),
+    linear-gradient(180deg, #fffcf0 0%, #fff6dc 100%) !important;
+}
+
+.landing .convoBlock::before {
+  background: radial-gradient(circle, rgba(255, 224, 138, 0.45), transparent 70%) !important;
+}
+
+.landing .convoBlock::after {
+  background: radial-gradient(circle, rgba(255, 178, 0, 0.18), transparent 70%) !important;
+}
+
+/* ---------- 6. Mobile fixes для секции "02 — Получите план" ---------- */
+/* Главная причина overflow: 7-колонный календарь на узком экране,
+   плюс длинные strong-теги в plan-features */
+
+.landing .planWrap,
+.landing .calendar,
+.landing .calGrid {
+  min-width: 0;
+}
+
+.landing .calendar {
+  width: 100%;
+  overflow: hidden;
+}
+
+@media (max-width: 720px) {
+  .landing .planWrap {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+
+  .landing .calendar {
+    padding: 18px;
+  }
+
+  .landing .calGrid {
+    gap: 4px;
+  }
+
+  .landing .calCell {
+    padding: 6px 4px;
+    border-radius: 8px;
+  }
+
+  .landing .calCell .dayNum {
+    font-size: 9.5px;
+  }
+
+  .landing .calCell .workout {
+    font-size: 8.5px;
+    line-height: 1.15;
+    letter-spacing: 0.02em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .landing .legend {
+    gap: 10px;
+    font-size: 11px;
+    flex-wrap: wrap;
+  }
+
+  /* Sub-headings внутри plan-features могут вылезать с длинными словами */
+  .landing .planFeatures strong,
+  .landing .planFeatures p {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  /* h2 с em — гарантируем перенос */
+  .landing h2.sectionTitle,
+  .landing h2.sectionTitle em {
+    overflow-wrap: anywhere;
+  }
+}
+
+/* ---------- 7. Глобальный safety net против overflow ---------- */
+.landing,
+.landing section,
+.landing .container {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+.landing .container > * {
+  min-width: 0;
+}
+
+/* ---------- 8. Eyebrows — приближаем цвет к auth-системе ---------- */
+/* Тёплый янтарь (между нашим оранжевым и auth-жёлтым) */
+.landing .sectionEyebrow {
+  color: #c9521f;
+  letter-spacing: 0.04em;
+}
+
+/* ---------- 9. btn-light на лендинге — гарантированный hover ---------- */
+/* В hero и final CTA класс .btn .btn-light использует hsl-токены —
+   убедимся, что текст и иконка унаследовали цвет */
+.landing .btn.btn-light .btnIcon,
+.landing .btn.btn-yellow .btnIcon {
+  color: currentColor;
+}

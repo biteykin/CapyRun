@@ -6,9 +6,9 @@ import PHTrack from "@/components/analytics/PHTrack";
 import Landing from "@/components/marketing/Landing";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://capyrun.com";
-const TITLE = "CapyRun — ИИ-тренер по бегу для начинающих и любителей";
+const TITLE = "CapyRun — AI-тренер по бегу для начинающих и любителей";
 const DESCRIPTION =
-  "Выберите цель, получите понятный план и обсуждайте прогресс с ИИ-тренером. Без давления, без сложной терминологии, без необходимости нанимать человека.";
+  "Личный AI-тренер по бегу для начинающих и любителей. Поможет выбрать цель, соберёт понятный план под ваш уровень, объяснит каждую тренировку простыми словами и ответит на вопросы о темпе, восстановлении, технике и подготовке к стартам. Совместим со Strava, Garmin и Apple Watch.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -16,14 +16,17 @@ export const metadata: Metadata = {
   description: DESCRIPTION,
   applicationName: "CapyRun",
   keywords: [
+    "AI-тренер по бегу",
+    "тренер по бегу онлайн",
     "бег",
-    "ИИ-тренер",
-    "план бега",
+    "план тренировок по бегу",
+    "первые 5 км",
+    "первые 10 км",
+    "подготовка к марафону",
+    "AI running coach",
     "5 км",
     "10 км",
     "Strava",
-    "running coach",
-    "AI coach",
   ],
   authors: [{ name: "CapyRun" }],
   alternates: { canonical: "/" },
@@ -41,7 +44,7 @@ export const metadata: Metadata = {
         url: "/og-image.png",
         width: 1200,
         height: 630,
-        alt: "CapyRun — ИИ-тренер по бегу",
+        alt: "CapyRun — AI-тренер по бегу для начинающих и любителей",
       },
     ],
   },
@@ -50,6 +53,16 @@ export const metadata: Metadata = {
     title: TITLE,
     description: DESCRIPTION,
     images: ["/og-image.png"],
+  },
+  // Telegram-bot протокол парсит обычные OG-теги, но ему помогает
+  // явный thumbnail и чёткое описание длиной 80–200 символов
+  other: {
+    "telegram:channel": "@capyrun",
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: { index: true, follow: true, "max-image-preview": "large" },
   },
   icons: {
     icon: "/favicon.ico",

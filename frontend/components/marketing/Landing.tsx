@@ -298,7 +298,7 @@ export default function Landing() {
             <div className={styles.revealIn}>
               <div className={styles.eyebrow}>
                 <span className={styles.pulse} />
-                ИИ-тренер для начинающих и любителей
+                AI-тренер для начинающих и любителей
               </div>
 
               <h1 className={`h-display ${styles.heroTitle}`}>
@@ -311,7 +311,7 @@ export default function Landing() {
               </p>
 
               <div className={styles.heroCtaRow}>
-                <Link href="/login?mode=signup" className="btn btn-primary">
+                <Link href="/login?mode=signup" className="btn btn-yellow">
                   Попробовать бесплатно
                   <span className={styles.btnIcon}>{Icon.arrowRight}</span>
                 </Link>
@@ -538,7 +538,7 @@ export default function Landing() {
                 </h2>
                 <p className={styles.sectionSub}>
                   Часто рядом нет человека, которому интересно слушать про интервалы,
-                  тяжёлые ноги, пульс, питание и волнение перед стартом. CapyRun — как раз такой собеседник.
+                  тяжёлые ноги, пульс, питание и волнение перед стартом. CapyRun — как раз такой AI-собеседник.
                 </p>
                 <p className={styles.sectionSub}>
                   Можно спросить про темп, усталость, питание, технику, восстановление,
@@ -808,14 +808,14 @@ export default function Landing() {
               Бегайте умнее. <em className={styles.finalAccent}>Спокойнее.</em>
             </h2>
             <p>
-              Начните с понятной цели, получите план и обсуждайте прогресс с ИИ-тренером.
+              Начните с понятной цели, получите план и обсуждайте прогресс с AI-тренером.
             </p>
             <div className={styles.finalCtaBtns}>
-              <Link href="/login?mode=signup" className="btn btn-primary">
+              <Link href="/login?mode=signup" className="btn btn-yellow">
                 Попробовать бесплатно
                 <span className={styles.btnIcon}>{Icon.arrowRight}</span>
               </Link>
-              <Link href="/login?mode=login" className="btn btn-ghost">
+              <Link href="/login?mode=login" className="btn btn-light">
                 У меня есть аккаунт
               </Link>
             </div>
