@@ -11,10 +11,11 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { SidebarMenuButton } from "@/components/ui/sidebar";
+import { SidebarMenuButton, useSidebar } from "@/components/ui/sidebar";
 import { useAppUser } from "@/app/providers";
 import { Skeleton } from "@/components/ui/skeleton";
 import { User, Settings, LogOut } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 type SidebarSessionUser = {
   id: string;
@@ -24,6 +25,8 @@ type SidebarSessionUser = {
 
 export default function SidebarProfile() {
   const { user, setUser } = useAppUser();
+  const { state } = useSidebar();
+  const collapsed = state === "collapsed";
   const [profile, setProfile] = useState<any | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -91,12 +94,23 @@ export default function SidebarProfile() {
 
   if (loading) {
     return (
-      <SidebarMenuButton asChild className="w-full">
-        <div className="w-full px-3 py-2 flex items-center gap-3">
+      <SidebarMenuButton
+        asChild
+        className={cn(
+          "w-full",
+          collapsed && "mx-auto !size-10 !p-0 justify-center"
+        )}
+      >
+        <div
+          className={cn(
+            "flex items-center gap-3",
+            collapsed ? "h-10 w-10 justify-center p-0" : "w-full px-3 py-2"
+          )}
+        >
           <Skeleton
-            className="h-8 w-8 rounded-full shrink-0"
+            className="h-8 w-8 shrink-0 rounded-full"
           />
-          <div className="flex-1">
+          <div className={cn("flex-1", collapsed && "sr-only")}>
             <Skeleton
               className="h-4 w-[160px] rounded"
             />
@@ -111,15 +125,24 @@ export default function SidebarProfile() {
 
   if (!user) {
     return (
-      <SidebarMenuButton asChild className="w-full">
+      <SidebarMenuButton
+        asChild
+        className={cn(
+          "w-full",
+          collapsed && "mx-auto !size-10 !p-0 justify-center"
+        )}
+      >
         <button
-          className="w-full px-3 py-2 flex items-center gap-3 hover:bg-muted rounded-md"
+          className={cn(
+            "flex items-center gap-3 rounded-md hover:bg-muted",
+            collapsed ? "h-10 w-10 justify-center p-0" : "w-full px-3 py-2"
+          )}
           onClick={() => (window.location.href = "/login")}
         >
-          <Avatar className="h-8 w-8">
+          <Avatar className="h-8 w-8 shrink-0">
             <AvatarFallback>U</AvatarFallback>
           </Avatar>
-          <div className="flex-1 text-left">
+          <div className={cn("flex-1 text-left", collapsed && "sr-only")}>
             <div className="text-sm font-medium">Войти</div>
             <div className="text-xs text-muted-foreground">Аккаунт</div>
           </div>
@@ -131,9 +154,15 @@ export default function SidebarProfile() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <SidebarMenuButton className="w-full px-3 py-2 flex items-center gap-3 hover:bg-muted rounded-md">
-          <Avatar className="h-8 w-8">
+        <SidebarMenuButton
+          className={cn(
+            "flex items-center gap-3 rounded-md hover:bg-muted",
+            collapsed ? "mx-auto !size-10 !p-0 justify-center" : "w-full px-3 py-2"
+          )}
+        >
+          <Avatar className="h-8 w-8 shrink-0">
             <AvatarImage
+              className="object-cover"
               src={avatarUrl}
               alt={displayName}
               onError={(e) => {
@@ -146,7 +175,7 @@ export default function SidebarProfile() {
               {(displayName ?? "U").toString().trim().charAt(0) || "U"}
             </AvatarFallback>
           </Avatar>
-          <div className="flex flex-col truncate text-left">
+          <div className={cn("flex flex-col truncate text-left", collapsed && "sr-only")}>
             <span className="text-sm font-medium truncate">{displayName}</span>
             <span className="text-xs text-muted-foreground truncate">
               {user.email ?? ""}
