@@ -1,3 +1,5 @@
+//frontend/app/api/profile/avatar/route.ts
+
 import { NextResponse } from "next/server";
 import { createAdminClient, createClientWithCookies } from "@/lib/supabase/server";
 

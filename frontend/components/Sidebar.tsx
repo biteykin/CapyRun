@@ -3,9 +3,11 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import * as React from "react";
 import { AppTooltip } from "@/components/ui/AppTooltip";
+import logo from "@/app/icon.png";
 import UnreadCountBadge from "@/components/ui/unread-count-badge";
 import {
   Sidebar as UISidebar,
@@ -154,15 +156,16 @@ export default function Sidebar() {
               className={collapsed ? "justify-center px-2 w-8 h-8" : "gap-3"}
             >
               <Link href="/home">
-                <span
-                  aria-hidden
-                  className="inline-block h-6 w-6 rounded-md"
-                  style={{
-                    background: "linear-gradient(135deg,#FFD699,#DF6133)",
-                  }}
+                <Image
+                  src={logo}
+                  alt="CapyRun"
+                  width={28}
+                  height={28}
+                  priority
+                  className="h-7 w-7 shrink-0 rounded-md object-contain"
                 />
                 <span
-                  className={`h-display font-semibold truncate ${
+                  className={`h-display truncate font-semibold ${
                     collapsed ? "sr-only" : ""
                   }`}
                 >

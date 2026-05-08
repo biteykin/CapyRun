@@ -85,7 +85,7 @@ export default function SidebarProfile() {
     return (
       profile?.avatar_url ||
       user?.user_metadata?.avatar_url ||
-      "/avatars/default-1.svg"
+      "/avatars/default-1.png"
     );
   }, [profile?.avatar_url, user?.user_metadata?.avatar_url]);
 
@@ -138,8 +138,8 @@ export default function SidebarProfile() {
               alt={displayName}
               onError={(e) => {
                 const img = e.currentTarget as HTMLImageElement;
-                if (img.src.endsWith("/avatars/default-1.svg")) return;
-                img.src = "/avatars/default-1.svg";
+                if (img.src.endsWith("/avatars/default-1.png")) return;
+                img.src = "/avatars/default-1.png";
               }}
             />
             <AvatarFallback>
