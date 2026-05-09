@@ -1,3 +1,5 @@
+/* frontend/components/marketing/Landing.module.css */
+
 .landing {
   --cream: #fff6de;
   --cream-soft: #fffdf7;
@@ -2587,4 +2589,277 @@
 .landing .btn.btn-light .btnIcon,
 .landing .btn.btn-yellow .btnIcon {
   color: currentColor;
+}
+
+/* =====================================================
+   PATCH v8: container padding, progress badges,
+   avatar styling cleanup
+   ===================================================== */
+
+/* ---------- 1. Больше воздуха слева/справа на странице ---------- */
+.landing .container {
+  padding-left: 48px;
+  padding-right: 48px;
+}
+
+@media (max-width: 960px) {
+  .landing .container {
+    padding-left: 32px;
+    padding-right: 32px;
+  }
+}
+
+@media (max-width: 560px) {
+  .landing .container {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+}
+
+/* Атмосферные секции (coachSection, finalCta, privacyBand) — внутренний
+   паддинг тоже подтягиваем, чтобы карточки не упирались в края */
+.landing .coachSection,
+.landing .finalCta,
+.landing .privacyBand {
+  padding-left: 48px;
+  padding-right: 48px;
+}
+
+@media (max-width: 720px) {
+  .landing .coachSection,
+  .landing .finalCta,
+  .landing .privacyBand {
+    padding-left: 28px;
+    padding-right: 28px;
+  }
+}
+
+/* ---------- 2. Progress pills — иконки видны и аккуратны ---------- */
+.landing .progPill {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px 5px 8px;
+  background: rgba(74, 190, 124, 0.14);
+  color: #1e9258;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+}
+
+.landing .progPillIcon {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.landing .progPillIcon svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2;
+}
+
+/* ---------- 3. Аватары тестимониалов — никаких градиентов ---------- */
+/* Inline-style в JSX задаёт background-image, нам остаётся только
+   гарантировать корректные размеры и обрезку */
+.landing .testimonialsBlock .testiAuthor .avi,
+.landing .testiAuthor .avi {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-color: #ffe7b5;
+  border: 2px solid #fff;
+  flex-shrink: 0;
+}
+
+/* =====================================================
+   PATCH v9: progress badges fix, conversion CTAs,
+   sticky mobile bar, microcopy
+   ===================================================== */
+
+/* ---------- 1. Progress badges fix — главный баг ---------- */
+/* Старый селектор `.progCardHead span` бил по ВСЕМ span'ам внутри,
+   включая иконки. Делаем ему явную область действия — только PILL */
+.landing .progCardHead > span:not(.progPill):not(.progPillIcon) {
+  /* fallback для других span'ов, если появятся — не задеваем */
+  display: inline;
+}
+
+/* Перебиваем все старые «жадные» правила — оставляем оформление только
+   на .progPill, явно нивелируя унаследованное от .progCardHead span */
+.landing .progCardHead .progPillIcon {
+  padding: 0 !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  font-size: inherit !important;
+  width: 14px !important;
+  height: 14px !important;
+  display: inline-grid !important;
+  place-items: center !important;
+  flex-shrink: 0 !important;
+}
+
+.landing .progCardHead .progPillIcon svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2;
+  display: block;
+}
+
+/* Сам PILL — стабильное оформление (ещё раз, на максимальной специфичности) */
+.landing .progCardHead .progPill {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 5px 12px 5px 8px !important;
+  background: rgba(74, 190, 124, 0.14) !important;
+  color: #1e9258 !important;
+  border-radius: 999px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.005em !important;
+  white-space: nowrap !important;
+  line-height: 1 !important;
+}
+
+/* Текст внутри pill — без лишних свойств */
+.landing .progCardHead .progPill > span:not(.progPillIcon) {
+  display: inline;
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+}
+
+/* ---------- 2. CTA microcopy — серая строка под кнопкой ---------- */
+.landing .ctaMicrocopy {
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--ink-3);
+  letter-spacing: -0.005em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.landing .ctaMicrocopyOnDark {
+  color: rgba(255, 255, 255, 0.85);
+  justify-content: center;
+  margin-top: 18px;
+  font-size: 13.5px;
+}
+
+/* ---------- 3. Intermediate mid-page CTA ---------- */
+.landing .midCtaBlock {
+  padding: 56px 0 24px;
+}
+
+.landing .midCta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 32px;
+  padding: 28px 36px;
+  background: linear-gradient(135deg, #fff8e0 0%, #ffe7b5 100%);
+  border: 1px solid rgba(223, 130, 51, 0.18);
+  border-radius: calc(var(--radius) * 2.4);
+  box-shadow:
+    0 4px 12px -2px rgba(120, 60, 20, 0.06),
+    0 18px 40px -16px rgba(120, 60, 20, 0.18);
+}
+
+.landing .midCtaText {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.018em;
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .landing .midCtaBlock {
+    padding: 40px 0 16px;
+  }
+
+  .landing .midCta {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 18px;
+    padding: 24px 22px;
+    text-align: center;
+  }
+
+  .landing .midCtaText {
+    font-size: 17px;
+  }
+}
+
+/* ---------- 4. Sticky mobile bottom CTA ---------- */
+.landing .stickyMobileCta {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  right: 16px;
+  z-index: 50;
+  display: none;
+  flex-direction: column;
+  pointer-events: none; /* фон не ловит клики, только сама кнопка */
+}
+
+.landing .stickyMobileCta :global(.btn) {
+  pointer-events: auto;
+  width: 100%;
+  justify-content: center;
+  padding: 14px 20px;
+  font-size: 15px;
+  box-shadow:
+    0 10px 30px -8px rgba(184, 74, 34, 0.5),
+    0 4px 10px -2px rgba(184, 74, 34, 0.3);
+}
+
+/* Появляется только на мобилке и только когда пользователь скроллил */
+@media (max-width: 720px) {
+  .landing .stickyMobileCta {
+    display: flex;
+    animation: stickyCtaIn 0.4s ease-out 1.5s both;
+  }
+}
+
+/* На самом final CTA — прячем sticky-bar, чтобы не дублировать */
+@media (max-width: 720px) {
+  .landing .finalBlock {
+    padding-bottom: 96px; /* делаем место под sticky-bar */
+  }
+}
+
+@keyframes stickyCtaIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ---------- 5. Hero proof — bold для числа ---------- */
+.landing .heroProof strong {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* ---------- 6. На мобиле убираем подъём средней testimonial карточки ---------- */
+@media (max-width: 720px) {
+  .landing .testimonialsBlock .testi:nth-child(2) {
+    transform: none;
+  }
 }

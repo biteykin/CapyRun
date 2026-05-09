@@ -7,7 +7,7 @@ import logo from "@/app/icon-512.png";
 export default function PublicTopbar() {
   return (
     <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-4">
-      <Link href="/public" className="flex items-center gap-3">
+      <Link href="/" className="flex items-center gap-3">
         <Image
           src={logo}
           alt="CapyRun"

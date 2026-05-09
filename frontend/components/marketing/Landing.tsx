@@ -1,3 +1,5 @@
+//frontend/components/marketing/Landing.tsx
+
 "use client";
 
 import { useEffect, type ReactNode } from "react";
@@ -12,7 +14,7 @@ import {
 } from "@/components/ui/accordion";
 import logo from "@/app/icon-512.png";
 
-const ecosystem = ["Strava", "GARMIN", "POLAR", "COROS", "SUUNTO", "Apple Watch"];
+const ecosystem = ["Strava", "GARMIN", "POLAR", "COROS", "SUUNTO"];
 
 const goals = [
   {
@@ -221,6 +223,18 @@ const featureCards: Array<[ReactNode, string, string]> = [
   [Icon.sprout, "Мотивация без давления", "Мягкие подсказки вместо чувства вины. План должен жить вместе с вашей реальной жизнью."],
 ];
 
+/* Аватарки тестимониалов — детерминированно по полу.
+   Подставляются inline в JSX, чтобы избежать конфликтов CSS-специфичности.
+   Можно заменить на локальные файлы из /public/avatars/anna.jpg и т.д. */
+const testimonialAvatars = [
+  // Анна — женский портрет
+  "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&h=200&fit=crop&auto=format",
+  // Дмитрий — мужской портрет
+  "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&h=200&fit=crop&auto=format",
+  // Мария — женский портрет
+  "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?w=200&h=200&fit=crop&auto=format",
+];
+
 const testimonials = [
   {
     quote: "Я наконец поняла, как бегать легко. Раньше каждая тренировка превращалась в гонку.",
@@ -311,7 +325,7 @@ export default function Landing() {
               </p>
 
               <div className={styles.heroCtaRow}>
-                <Link href="/login?mode=signup" className="btn btn-yellow">
+                <Link href="/login?mode=signup" className="btn btn-primary">
                   Попробовать бесплатно
                   <span className={styles.btnIcon}>{Icon.arrowRight}</span>
                 </Link>
@@ -600,7 +614,10 @@ export default function Landing() {
               <div className={styles.progCardHead}>
                 <h5 className="h-display">Регулярность</h5>
                 <span className={styles.progPill}>
-                  <span className={styles.progPillIcon}>{Icon.trend}</span> +18%
+                  <span className={styles.progPillIcon} aria-hidden="true">
+                    {Icon.trend}
+                  </span>
+                  +18%
                 </span>
               </div>
               <div className={styles.bigNum}>
@@ -618,7 +635,10 @@ export default function Landing() {
               <div className={styles.progCardHead}>
                 <h5 className="h-display">Лёгкий темп</h5>
                 <span className={styles.progPill}>
-                  <span className={styles.progPillIcon}>{Icon.flame}</span> −22 сек/км
+                  <span className={styles.progPillIcon} aria-hidden="true">
+                    {Icon.flame}
+                  </span>
+                  −22 сек/км
                 </span>
               </div>
               <div className={styles.bigNum}>
@@ -726,7 +746,12 @@ export default function Landing() {
               <div key={item.name} className={styles.testi}>
                 <blockquote className="h-display">&ldquo;{item.quote}&rdquo;</blockquote>
                 <div className={styles.testiAuthor}>
-                  <span className={`${styles.avi} ${styles[`avi${index + 2}`]}`} />
+                  <span
+                    className={styles.avi}
+                    style={{
+                      backgroundImage: `url(${testimonialAvatars[index]})`,
+                    }}
+                  />
                   <div>
                     <div className={styles.nm}>{item.name}</div>
                     <div className={styles.ml}>{item.meta}</div>
@@ -811,11 +836,11 @@ export default function Landing() {
               Начните с понятной цели, получите план и обсуждайте прогресс с AI-тренером.
             </p>
             <div className={styles.finalCtaBtns}>
-              <Link href="/login?mode=signup" className="btn btn-yellow">
+              <Link href="/login?mode=signup" className="btn btn-primary">
                 Попробовать бесплатно
                 <span className={styles.btnIcon}>{Icon.arrowRight}</span>
               </Link>
-              <Link href="/login?mode=login" className="btn btn-light">
+              <Link href="/login?mode=login" className="btn btn-ghost">
                 У меня есть аккаунт
               </Link>
             </div>
