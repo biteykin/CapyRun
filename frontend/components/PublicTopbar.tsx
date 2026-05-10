@@ -18,7 +18,6 @@ export default function PublicTopbar() {
         />
         <span>
           <span className="h-display block text-base font-black leading-none">CapyRun</span>
-          <span className="hidden text-xs text-[#595958] sm:block">AI running coach</span>
         </span>
       </Link>
 

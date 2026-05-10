@@ -306,7 +306,8 @@ export default function Landing() {
 
   return (
     <div className={styles.landing}>
-      <section className={styles.hero}>
+      {/* Hero: главный H1 с ключевыми запросами для SEO */}
+      <section className={styles.hero} aria-labelledby="hero-title">
         <div className={styles.container}>
           <div className={styles.heroGrid}>
             <div className={styles.revealIn}>
@@ -315,7 +316,7 @@ export default function Landing() {
                 AI-тренер для начинающих и любителей
               </div>
 
-              <h1 className={`h-display ${styles.heroTitle}`}>
+              <h1 id="hero-title" className={`h-display ${styles.heroTitle}`}>
                 Начните бегать <em>без</em> живого тренера
               </h1>
 
@@ -442,11 +443,11 @@ export default function Landing() {
         </div>
       </section>
 
-      <section className={`${styles.block} ${styles.atmoBlock} ${styles.goalsBlock}`} id="how" data-reveal>
+      <section className={`${styles.block} ${styles.atmoBlock} ${styles.goalsBlock}`} id="how" data-reveal aria-labelledby="goals-title">
         <div className={styles.container}>
           <div className={styles.sectionHead}>
             <div className={styles.sectionEyebrow}>01 — Выберите цель</div>
-            <h2 className={`h-display ${styles.sectionTitle}`}>
+            <h2 id="goals-title" className={`h-display ${styles.sectionTitle}`}>
               Цель, которая <em>подходит</em> вашей жизни
             </h2>
             <p className={styles.sectionSub}>
@@ -499,12 +500,12 @@ export default function Landing() {
         </div>
       </section>
 
-      <section className={`${styles.block} ${styles.planBlock}`} data-reveal>
+      <section className={`${styles.block} ${styles.planBlock}`} data-reveal aria-labelledby="plan-title">
         <div className={styles.container}>
           <div className={styles.planWrap}>
             <div>
               <div className={styles.sectionEyebrow}>02 — Получите план</div>
-              <h2 className={`h-display ${styles.sectionTitle}`}>
+              <h2 id="plan-title" className={`h-display ${styles.sectionTitle}`}>
                 План, который <em>подстраивается</em> под вас
               </h2>
               <p className={styles.sectionSub}>
@@ -541,13 +542,13 @@ export default function Landing() {
         </div>
       </section>
 
-      <section className={styles.block} id="coach" data-reveal>
+      <section className={styles.block} id="coach" data-reveal aria-labelledby="coach-title">
         <div className={styles.container}>
           <div className={styles.coachSection}>
             <div className={styles.coachGrid}>
               <div>
                 <div className={styles.sectionEyebrow}>03 — Общайтесь с тренером</div>
-                <h2 className={`h-display ${styles.sectionTitle}`}>
+                <h2 id="coach-title" className={`h-display ${styles.sectionTitle}`}>
                   Говорите о беге <em>сколько угодно</em>
                 </h2>
                 <p className={styles.sectionSub}>

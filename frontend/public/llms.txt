@@ -1,0 +1,52 @@
+# CapyRun
+
+> CapyRun is an AI running coach for beginner and amateur runners. It builds personalized training plans, explains every workout in plain language, and answers any running question 24/7. Designed for runners who want consistent progress without hiring a personal coach.
+
+## What CapyRun does
+
+- **Personalized training plans** for first 5K, first 10K, half marathon, full marathon, and consistent recreational running
+- **Adaptive scheduling** that adjusts to sleep quality, travel, fatigue, and feel
+- **AI coach chat** available 24/7 for questions about pace, recovery, nutrition, technique, race day strategy, and motivation
+- **Plain-language workouts** without confusing sports terminology
+- **Progress tracking** focused on consistency and trend, not vanity metrics
+- **Integrations** with Strava, Garmin, Polar, Coros, Suunto
+
+## Who it's for
+
+- Beginners who have never run before and want to start
+- Amateur runners who want to progress without hiring a coach
+- Returning runners after break, winter, or injury
+- Recreational runners preparing for first 5K, 10K, half marathon, or marathon
+
+## Pricing
+
+- Free to start, no credit card required
+- Currently in open beta (early 2026)
+
+## Languages
+
+- Russian (primary, ru-RU)
+- English (in development, en-US)
+
+## Key facts
+
+- Founded: 2026
+- Type: AI running coach SaaS / mobile app
+- Audience: beginner and amateur runners worldwide
+- Differentiator: conversational AI coach, not just a static training plan generator
+
+## Important pages
+
+- [Home](https://capyrun.com/): Landing with full product overview
+- [Sign up](https://capyrun.com/login?mode=signup): Free account creation
+- [Sign in](https://capyrun.com/login?mode=login): Existing users
+- [FAQ](https://capyrun.com/#faq): Common questions about beta, plan structure, integrations, privacy
+
+## Common queries CapyRun answers
+
+- "AI running coach for beginners"
+- "Online running coach app"
+- "Couch to 5K AI training plan"
+- "Marathon training plan for amateurs"
+- "Personalized running plan based on Strava"
+- "Running coach without hiring a person"
