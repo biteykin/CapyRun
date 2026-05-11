@@ -1,9 +1,17 @@
 //frontend/components/coach/CoachChat.client.tsx
-
 "use client";
 
 import * as React from "react";
 import { useLayoutEffect, useMemo } from "react";
+import Image from "next/image";
+import {
+  Activity,
+  BarChart3,
+  CalendarDays,
+  Moon,
+  TrendingUp,
+  type LucideIcon,
+} from "lucide-react";
 import { supabase } from "@/lib/supabaseBrowser";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -16,6 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import CoachMessageBubble from "./CoachMessageBubble";
 import CoachPlanActions from "./CoachPlanActions";
+import logo from "@/app/icon-512.png";
 
 type RawMessage = {
   id: string;
@@ -29,13 +38,15 @@ type RawMessage = {
 
 const MESSAGES_PAGE_SIZE = 30;
 
-const QUICK_ACTIONS = [
-  "Разбери последнюю тренировку",
-  "Составь план на неделю",
-  "Как улучшить результат?",
-  "Что у меня по прогрессу?",
-  "Когда лучше отдыхать?",
-] as const;
+type QuickAction = { label: string; Icon: LucideIcon };
+
+const QUICK_ACTIONS: QuickAction[] = [
+  { label: "Разбери последнюю тренировку", Icon: Activity },
+  { label: "Составь план на неделю", Icon: CalendarDays },
+  { label: "Как улучшить результат?", Icon: TrendingUp },
+  { label: "Что у меня по прогрессу?", Icon: BarChart3 },
+  { label: "Когда лучше отдыхать?", Icon: Moon },
+];
 
 function makeNonce() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -53,7 +64,6 @@ function msgKey(m: Partial<RawMessage> & { meta?: any }) {
 
 function mergeDedup(prev: RawMessage[], incoming: RawMessage[]) {
   const map = new Map<string, RawMessage>();
-
   for (const m of prev) map.set(msgKey(m), m);
   for (const m of incoming) map.set(msgKey(m), m);
 
@@ -65,6 +75,36 @@ function mergeDedup(prev: RawMessage[], incoming: RawMessage[]) {
   });
 
   return arr;
+}
+
+function CoachAvatar() {
+  return (
+    <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-black/10 bg-background shadow-sm">
+      <Image
+        src={logo}
+        alt="Капи"
+        width={32}
+        height={32}
+        className="h-full w-full object-cover"
+      />
+    </div>
+  );
+}
+
+function UserAvatar({ src, initials }: { src?: string | null; initials: string }) {
+  if (src) {
+    return (
+      <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-black/10 bg-background shadow-sm">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={src} alt="Вы" className="h-full w-full object-cover" />
+      </div>
+    );
+  }
+  return (
+    <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-black/10 bg-[#f9bd2b] text-[10px] font-bold text-black shadow-sm">
+      {initials}
+    </div>
+  );
 }
 
 const CoachChatInput = React.memo(function CoachChatInput(props: {
@@ -116,13 +156,15 @@ const CoachChatInput = React.memo(function CoachChatInput(props: {
                 +
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-64">
-              {QUICK_ACTIONS.map((action) => (
+            <DropdownMenuContent align="start" className="w-72">
+              {QUICK_ACTIONS.map(({ label, Icon }) => (
                 <DropdownMenuItem
-                  key={action}
-                  onClick={() => void onSend(action)}
+                  key={label}
+                  onClick={() => void onSend(label)}
+                  className="gap-2"
                 >
-                  {action}
+                  <Icon className="size-4 text-muted-foreground" />
+                  <span>{label}</span>
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
@@ -160,8 +202,17 @@ export default function CoachChat(props: {
   initialHasMoreMessages?: boolean;
   currentUserId: string;
   initialUnreadCount?: number;
+  userAvatarUrl?: string | null;
+  userName?: string | null;
 }) {
-  const { threadId, initialMessages, initialHasMoreMessages = false, currentUserId } = props;
+  const {
+    threadId,
+    initialMessages,
+    initialHasMoreMessages = false,
+    currentUserId,
+    userAvatarUrl = null,
+    userName = null,
+  } = props;
 
   const [messages, setMessages] = React.useState<RawMessage[]>(() => {
     return (initialMessages ?? []).map((m: any) => ({
@@ -192,12 +243,8 @@ export default function CoachChat(props: {
       const res = await fetch("/api/coach/mark-read", {
         method: "POST",
         credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          threadId,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ threadId }),
       });
 
       if (!res.ok) {
@@ -316,12 +363,9 @@ export default function CoachChat(props: {
     return typingMessage ? [...displayMessages, typingMessage] : displayMessages;
   }, [displayMessages, typingMessage]);
 
-  const [pendingPlanActionMessageId, setPendingPlanActionMessageId] = React.useState<
-    string | null
-  >(null);
-  const [resolvedPlanMessageIds, setResolvedPlanMessageIds] = React.useState<string[]>(
-    []
-  );
+  const [pendingPlanActionMessageId, setPendingPlanActionMessageId] =
+    React.useState<string | null>(null);
+  const [resolvedPlanMessageIds, setResolvedPlanMessageIds] = React.useState<string[]>([]);
 
   const latestPlanActionMessageId = React.useMemo(() => {
     const actionable = [...messages]
@@ -350,12 +394,8 @@ export default function CoachChat(props: {
     const res = await fetch("/api/coach/mark-read", {
       method: "POST",
       credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        threadId,
-      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ threadId }),
     });
 
     if (!res.ok) {
@@ -434,17 +474,34 @@ export default function CoachChat(props: {
     return "user";
   }
 
+  // Аватары + инициалы
+  const userInitials = useMemo(() => {
+    if (!userName) return "Я";
+    const parts = userName.trim().split(/\s+/);
+    const first = parts[0]?.[0] ?? "";
+    const second = parts[1]?.[0] ?? "";
+    return (first + second).toUpperCase() || "Я";
+  }, [userName]);
+
+  const coachAvatarNode = useMemo(() => <CoachAvatar />, []);
+  const userAvatarNode = useMemo(
+    () => <UserAvatar src={userAvatarUrl} initials={userInitials} />,
+    [userAvatarUrl, userInitials]
+  );
+
   return (
     <Card className="flex h-full min-h-0 flex-col gap-0 py-0 overflow-hidden">
-      <CardContent className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden p-4">
-        <div className="relative min-h-0 flex-1 overflow-hidden rounded-md border bg-muted/10">
-          <div ref={scrollRef} className="h-full overflow-y-auto p-3 space-y-3">
+      <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
+        <div
+          ref={scrollRef}
+          className="min-h-0 flex-1 overflow-y-auto px-1 pb-3 pt-1 space-y-3"
+        >
             {hasMoreMessages && (
               <div className="flex items-center justify-center">
                 <Button
                   type="button"
                   size="sm"
-                  variant="primary"
+                  variant="secondary"
                   disabled={isLoadingOlder}
                   onClick={loadOlderMessages}
                   className="min-w-[180px] rounded-full"
@@ -463,12 +520,42 @@ export default function CoachChat(props: {
             )}
 
             {messages.length === 0 && (
-              <div className="text-xs text-muted-foreground">
-                Пока сообщений нет. Напиши Капи о своей цели, тренировке или плане — разберёмся вместе.
+              <div className="flex h-full flex-col items-center justify-center px-6 py-10 text-center">
+                <div className="mb-4 flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border bg-background shadow-md">
+                  <Image
+                    src={logo}
+                    alt="Капи"
+                    width={80}
+                    height={80}
+                    className="h-full w-full object-cover"
+                  />
+                </div>
+                <div className="text-lg font-bold">Привет! Я Капи</div>
+                <div className="mt-1.5 max-w-md text-sm text-muted-foreground">
+                  Твой AI-тренер. Расскажи о цели, тренировке или просто спроси совета —
+                  разберёмся вместе.
+                </div>
+                <div className="mt-5 flex flex-wrap justify-center gap-2">
+                  {QUICK_ACTIONS.slice(0, 4).map(({ label, Icon }) => (
+                    <button
+                      key={label}
+                      type="button"
+                      onClick={() => void sendMessage(label)}
+                      className="inline-flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-xs font-medium transition hover:bg-muted hover:shadow-sm"
+                    >
+                      <Icon className="size-3.5 text-muted-foreground" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
 
-            {displayMessagesWithTyping.map((m) => {
+            {displayMessagesWithTyping.map((m, i, arr) => {
+              const next = arr[i + 1];
+              const showAvatar =
+                !next || next.author_id !== m.author_id || next.type !== m.type;
+              const role = getRole(m);
               const isTyping = m.meta?.kind === "typing_indicator";
               const isPlanActionableMessage =
                 m.type === "coach" &&
@@ -478,14 +565,24 @@ export default function CoachChat(props: {
                 !resolvedPlanMessageIds.includes(m.id);
 
               const isPlanActionLoading =
-                pendingPlanActionMessageId != null && pendingPlanActionMessageId === m.id;
+                pendingPlanActionMessageId != null &&
+                pendingPlanActionMessageId === m.id;
+
+              const avatar =
+                role === "user"
+                  ? userAvatarNode
+                  : role === "coach"
+                    ? coachAvatarNode
+                    : null;
 
               return (
                 <CoachMessageBubble
                   key={msgKey(m)}
-                  role={getRole(m)}
+                  role={role}
                   createdAt={isTyping ? null : m.created_at}
                   hydrated={hydrated}
+                  showAvatar={showAvatar}
+                  avatar={avatar}
                   afterBody={
                     isPlanActionableMessage ? (
                       <CoachPlanActions
@@ -526,7 +623,6 @@ export default function CoachChat(props: {
             })}
 
             <div className="h-2" />
-          </div>
         </div>
 
         <CoachChatInput isSending={isSending} onSend={sendMessage} />

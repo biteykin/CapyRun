@@ -89,10 +89,11 @@ export default async function WorkoutsPage() {
 
   // 3) Если сервак всё ещё не видит юзера — показываем заглушку (после первого ответа браузер пошлёт sb-куки, и всё встанет)
   if (!uid) {
-    const demo = await apiGet<{ demoWorkoutId: string | null }>("/api/workouts/demo");
-    const demoWorkoutId = demo?.demoWorkoutId ?? null;
-
-    return <WorkoutsEmptyState demoWorkoutId={demoWorkoutId} />;
+    return (
+      <main>
+        <WorkoutsEmptyState />
+      </main>
+    );
   }
 
   const workoutsJson = await apiGet<{
@@ -109,12 +110,13 @@ export default async function WorkoutsPage() {
 
   const workoutsCount = rows.length;
 
-  // 5) 0 → заглушка с демо
+  // 5) 0 → пустое состояние
   if (workoutsCount === 0) {
-    const demo = await apiGet<{ demoWorkoutId: string | null }>("/api/workouts/demo");
-    const demoWorkoutId = demo?.demoWorkoutId ?? null;
-
-    return <WorkoutsEmptyState demoWorkoutId={demoWorkoutId} />;
+    return (
+      <main>
+        <WorkoutsEmptyState />
+      </main>
+    );
   }
 
   // читаем предпочитаемый размер страницы из cookie (5..50, по умолчанию 10)

@@ -1,3 +1,5 @@
+//frontend/app/not-found.tsx
+
 import Link from "next/link";
 import Image from "next/image";
 import logo from "@/app/icon-512.png";

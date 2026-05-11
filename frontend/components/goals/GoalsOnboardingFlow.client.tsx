@@ -28,6 +28,16 @@ import {
 import { CheckCircle2, ChevronRight } from "lucide-react";
 import OnboardingStepHeader from "@/components/onboarding/OnboardingStepHeader";
 
+export type PresetId =
+  | "weight"
+  | "vo2max"
+  | "race-5k"
+  | "race-10k"
+  | "race-hm"
+  | "race-marathon"
+  | "start"
+  | "custom";
+
 export type GoalsOnboardingFlowProps = {
   /** Режим использования:
    *  - "initial" — первый заход, приветственный текст
@@ -38,6 +48,8 @@ export type GoalsOnboardingFlowProps = {
   /** Колбэк после успешного сохранения целей */
   onFinished?: () => void;
   initialStep?: 1 | 2;
+  /** Стартовый пресет для не-edit режима (например, при заходе с пустого экрана с готовым выбором). */
+  initialPreset?: PresetId | null;
   initialProfile?: {
     sex?: "male" | "female" | null;
     age?: number | null;
@@ -56,16 +68,6 @@ export type GoalsOnboardingFlowProps = {
     notes?: string | null;
   } | null;
 };
-
-type PresetId =
-  | "weight"
-  | "vo2max"
-  | "race-5k"
-  | "race-10k"
-  | "race-hm"
-  | "race-marathon"
-  | "start"
-  | "custom";
 
 type Step = 1 | 2;
 
@@ -170,6 +172,7 @@ export default function GoalsOnboardingFlow({
   onFinished,
   initialStep = 1,
   initialProfile,
+  initialPreset = null,
   editGoal = null,
 }: GoalsOnboardingFlowProps) {
   const router = useRouter();
@@ -206,9 +209,14 @@ export default function GoalsOnboardingFlow({
     return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   }
 
-  const [selectedPreset, setSelectedPreset] = React.useState<PresetId | null>(() =>
-    presetFromGoal(editGoal)
-  );
+  const [selectedPreset, setSelectedPreset] = React.useState<PresetId | null>(() => {
+    const fromGoal = presetFromGoal(editGoal);
+    if (fromGoal) return fromGoal;
+    if (initialPreset && PRESETS.some((p) => p.id === initialPreset)) {
+      return initialPreset;
+    }
+    return null;
+  });
   const [goalTitle, setGoalTitle] = React.useState(() => {
     const fromTitle = editGoal?.title;
     const fromPrimary = editGoal?.target_json?.primary;
@@ -216,7 +224,16 @@ export default function GoalsOnboardingFlow({
       (typeof fromTitle === "string" && fromTitle.trim()) ||
       (typeof fromPrimary === "string" && fromPrimary.trim()) ||
       "";
-    return raw;
+    if (raw) return raw;
+    if (
+      !editGoal &&
+      initialPreset &&
+      initialPreset !== "custom" &&
+      DEFAULT_GOAL_TITLES[initialPreset]
+    ) {
+      return DEFAULT_GOAL_TITLES[initialPreset];
+    }
+    return "";
   });
   const [goalDate, setGoalDate] = React.useState(
     editGoal?.date_to ? editGoal.date_to.slice(0, 10) : ""

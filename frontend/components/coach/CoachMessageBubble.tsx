@@ -114,6 +114,8 @@ function CoachMessageBubble(props: {
   className?: string;
   bubbleClassName?: string;
   afterBody?: React.ReactNode;
+  avatar?: React.ReactNode;
+  showAvatar?: boolean;
 }) {
   const {
     role,
@@ -124,6 +126,8 @@ function CoachMessageBubble(props: {
     className,
     bubbleClassName,
     afterBody,
+    avatar,
+    showAvatar = true,
   } = props;
 
   const isUser = role === "user";
@@ -137,14 +141,34 @@ function CoachMessageBubble(props: {
       body
     );
 
+  if (isSystem) {
+    return (
+      <div className={cn("flex w-full justify-center", className)}>
+        <div
+          className={cn(
+            "max-w-[85%] rounded-full bg-muted/70 px-3 py-1 text-center text-[10px] text-muted-foreground",
+            bubbleClassName
+          )}
+        >
+          {bodyNode}
+          {afterBody ? <div className="mt-1">{afterBody}</div> : null}
+        </div>
+      </div>
+    );
+  }
+
+  const avatarNode = showAvatar ? avatar : null;
+
   return (
     <div
       className={cn(
-        "flex w-full",
+        "flex w-full items-end gap-2",
         isUser ? "justify-end" : "justify-start",
         className
       )}
     >
+      {!isUser ? <div className="h-8 w-8 shrink-0">{avatarNode}</div> : null}
+
       <div
         className={cn(
           "max-w-[78%] rounded-[var(--radius)] px-3.5 py-2.5 text-xs leading-relaxed break-words",
@@ -154,31 +178,24 @@ function CoachMessageBubble(props: {
                 "bg-[#f9bd2b] text-black",
                 "shadow-[inset_0_-2px_0_rgba(0,0,0,0.25),0_1px_2px_rgba(0,0,0,0.08)]",
               ]
-            : isSystem
-              ? [
-                  "bg-muted text-muted-foreground",
-                  "shadow-[inset_0_-2px_0_rgba(0,0,0,0.06),0_1px_2px_rgba(0,0,0,0.04)]",
-                ]
-              : [
-                  "bg-white text-black dark:bg-[hsl(var(--btn-light-bg))] dark:text-[hsl(var(--btn-light-text))]",
-                  "shadow-[inset_0_-2px_0_rgba(0,0,0,0.08),0_1px_2px_rgba(0,0,0,0.06)]",
-                ],
+            : [
+                "bg-white text-black dark:bg-[hsl(var(--btn-light-bg))] dark:text-[hsl(var(--btn-light-text))]",
+                "shadow-[inset_0_-2px_0_rgba(0,0,0,0.08),0_1px_2px_rgba(0,0,0,0.06)]",
+              ],
           bubbleClassName
         )}
       >
-        {isCoach && (
+        {isCoach ? (
           <div className="mb-1 text-[10px] font-black uppercase tracking-wide text-muted-foreground">
             {label ?? "Тренер"}
           </div>
-        )}
+        ) : null}
 
-        <div className="min-w-0">
-          {bodyNode}
-        </div>
+        <div className="min-w-0">{bodyNode}</div>
 
         {afterBody ? <div>{afterBody}</div> : null}
 
-        {createdAt ? (
+        {createdAt && showAvatar ? (
           <div
             className={cn(
               "mt-1 text-[9px] opacity-70",
@@ -189,6 +206,8 @@ function CoachMessageBubble(props: {
           </div>
         ) : null}
       </div>
+
+      {isUser ? <div className="h-8 w-8 shrink-0">{avatarNode}</div> : null}
     </div>
   );
 }

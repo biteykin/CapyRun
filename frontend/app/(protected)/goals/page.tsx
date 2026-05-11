@@ -1,3 +1,5 @@
+//frontend/app/(protected)/goals/page.tsx
+
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import GoalsListWithAdd from "@/components/goals/GoalsListWithAdd.client";

@@ -1,15 +1,15 @@
-//frontend/components/workouts/WorkoutsEmptyState.tsx
+// frontend/components/goals/GoalsEmptyState.tsx
+"use client";
 
 import type { ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { FileUp, PencilLine } from "lucide-react";
-import StravaIcon from "@/components/icons/StravaIcon";
+import { Activity, Flag, Target } from "lucide-react";
 
 import logo from "@/app/icon-512.png";
 import { Card, CardContent } from "@/components/ui/card";
 
-export default function WorkoutsEmptyState() {
+export default function GoalsEmptyState() {
   return (
     <Card className="relative overflow-hidden border-dashed">
       <div
@@ -48,38 +48,35 @@ export default function WorkoutsEmptyState() {
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-500 opacity-75" />
             <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
           </span>
-          На старт, внимание, марш!
+          Цель в прицеле
         </div>
 
         <h1 className="max-w-2xl text-3xl font-extrabold tracking-tight sm:text-4xl">
-          Пока ни одной тренировки
+          Пока ни одной цели
         </h1>
 
         <p className="mt-3 max-w-xl text-sm leading-6 text-muted-foreground sm:text-base">
-          Капибара уже размялась и ждёт первый забег. Добавьте тренировку вручную,
-          загрузите файл или подключите Strava — и AI-тренер начнёт разбирать прогресс.
+          Капибара уже разминается на старте. Поставьте цель — забег, регулярную форму или что-то своё — и план тренировок выстроится вокруг неё.
         </p>
 
         <div className="mt-8 grid w-full max-w-3xl gap-3 md:grid-cols-3">
           <EmptyAction
-            href="/workouts/new"
-            icon={<PencilLine className="h-5 w-5" />}
-            title="Добавить вручную"
-            description="Быстро внесём дистанцию, время и ощущения."
+            href="/goals/onboarding?preset=race-5k"
+            icon={<Flag className="h-5 w-5" />}
+            title="Подготовка к забегу"
+            description="10 км, полумарафон, марафон или трейл."
           />
           <EmptyAction
-            href="/workouts/upload"
-            icon={<FileUp className="h-5 w-5" />}
-            title="Загрузить файл"
-            description="Поддержка файлов тренировок для подробного анализа."
+            href="/goals/onboarding?preset=vo2max"
+            icon={<Activity className="h-5 w-5" />}
+            title="Регулярная форма"
+            description="Выносливость, сила, контроль веса."
           />
           <EmptyAction
-            href="/api/strava/connect"
-            icon={
-              <StravaIcon className="h-5 w-5 transition-colors group-hover:text-[#FC4C02]" />
-            }
-            title="Подключить Strava"
-            description="Автоматическая синхронизация тренировок."
+            href="/goals/onboarding?preset=custom"
+            icon={<Target className="h-5 w-5" />}
+            title="Своя цель"
+            description="Опишите цель словами — план подстроится."
           />
         </div>
       </CardContent>
