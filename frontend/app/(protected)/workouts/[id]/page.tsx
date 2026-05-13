@@ -640,13 +640,11 @@ export default function WorkoutDetailPage() {
                 </Card>
               </AppTooltip>
             ))}
-            {weather ? (
-              <WorkoutWeatherKpi
-                weather={weather}
-                variant="compact"
-                animated
-              />
-            ) : null}
+            <WorkoutWeatherKpi
+              weather={weather}
+              variant="compact"
+              animated
+            />
           </div>
         </section>
       )}

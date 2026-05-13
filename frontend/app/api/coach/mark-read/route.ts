@@ -1,3 +1,5 @@
+//frontend/app/api/coach/mark-read/route.ts
+
 import { NextResponse } from "next/server";
 import { createClientWithCookies } from "@/lib/supabase/server";
 

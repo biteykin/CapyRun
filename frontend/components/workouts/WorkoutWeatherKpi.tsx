@@ -57,7 +57,8 @@ type Kind =
 type WindFeel = "headwind" | "tailwind" | "crosswind" | null;
 
 export type WorkoutWeatherKpiProps = {
-  weather: Weather;
+  weather?: Weather | null;
+  workoutId?: string;
   variant?: "default" | "compact";
   course_deg?: number | null;
   wind_from_deg?: number | null;
@@ -276,7 +277,48 @@ function WeatherBackdrop({ kind, intensity = 1 }: { kind: Kind; intensity?: 1 | 
 }
 
 export default function WorkoutWeatherKpi(props: WorkoutWeatherKpiProps) {
-  const { weather, variant = "default", animated = true } = props;
+  const { workoutId, variant = "default", animated = true } = props;
+  const [apiWeather, setApiWeather] = React.useState<Weather | null>(null);
+  const [loading, setLoading] = React.useState(Boolean(workoutId && !props.weather));
+
+  React.useEffect(() => {
+    if (!workoutId || props.weather) return;
+
+    let cancelled = false;
+
+    async function loadWeather() {
+      try {
+        setLoading(true);
+        const res = await fetch(`/api/workouts/${workoutId}/weather`, {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        const json = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+
+        if (!cancelled) {
+          setApiWeather(json?.weather ?? null);
+        }
+      } catch {
+        if (!cancelled) setApiWeather(null);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void loadWeather();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [workoutId, props.weather]);
+
+  const weather = props.weather ?? apiWeather;
+
+  if (loading) return null;
+  if (!weather) return null;
 
   const hasAny =
     isNum(weather.temp_c) ||

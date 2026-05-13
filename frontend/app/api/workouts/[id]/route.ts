@@ -1,3 +1,5 @@
+//frontend/app/api/workouts/[id]/route.ts
+
 import { NextResponse } from "next/server";
 import { createClientWithCookies } from "@/lib/supabase/server";
 
@@ -35,6 +37,29 @@ async function getUser() {
   return { supabase, user, error };
 }
 
+function mapWorkoutWeather(row: any) {
+  if (!row) return null;
+
+  const windMs =
+    typeof row.wind_ms === "number" && Number.isFinite(row.wind_ms)
+      ? row.wind_ms
+      : null;
+
+  return {
+    temp_c: row.temperature_c ?? null,
+    feelslike_c: row.feels_like_c ?? null,
+    wind_kph: windMs == null ? null : windMs * 3.6,
+    precip_mm: row.precipitation_mm ?? null,
+    conditions: row.condition ?? null,
+    uv: row.uv_index ?? null,
+    uv_level: row.uv_level ?? null,
+    source: row.source ?? null,
+    fetched_at: row.fetched_at ?? null,
+    lat: row.lat ?? null,
+    lng: row.lng ?? null,
+  };
+}
+
 export async function GET(
   _req: Request,
   ctx: { params: Promise<{ id: string }> }
@@ -57,7 +82,32 @@ export async function GET(
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!data) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  return NextResponse.json({ workout: data });
+  const { data: weatherRow, error: weatherError } = await supabase
+    .from("workout_weather")
+    .select(
+      [
+        "workout_id",
+        "lat",
+        "lng",
+        "temperature_c",
+        "feels_like_c",
+        "wind_ms",
+        "precipitation_mm",
+        "condition",
+        "uv_index",
+        "uv_level",
+        "source",
+        "fetched_at",
+      ].join(",")
+    )
+    .eq("workout_id", id)
+    .maybeSingle();
+
+  if (weatherError) console.warn("[api/workouts/:id] workout_weather error", weatherError);
+
+  return NextResponse.json({
+    workout: { ...data, weather: mapWorkoutWeather(weatherRow) ?? data.weather },
+  });
 }
 
 export async function PATCH(

@@ -1,3 +1,5 @@
+//frontend/lib/coach/motivation.ts
+
 type MotivationDecision = {
   enabled: boolean;
   reason:
