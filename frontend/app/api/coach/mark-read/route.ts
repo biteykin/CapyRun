@@ -27,7 +27,7 @@ export async function POST(req: Request) {
     }
 
     const { error } = await supabase.rpc("coach_mark_thread_read", {
-      thread_id: threadId,
+      p_thread_id: threadId,
     });
 
     if (error) {

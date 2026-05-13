@@ -1,5 +1,8 @@
+//frontend/app/api/onboarding/profile/route.ts
+
 import { NextResponse } from "next/server";
 import { createClientWithCookies } from "@/lib/supabase/server";
+import { buildEstimatedHrProfile } from "@/lib/training/hr-zones";
 
 function numberOrNull(value: unknown) {
   if (value === null || value === undefined || value === "") return null;
@@ -55,6 +58,11 @@ export async function PATCH(req: Request) {
     const heightCm = numberOrNull(body.height_cm);
     const weightKg = numberOrNull(body.weight_kg);
     const validationError = validateProfileNumbers(heightCm, weightKg);
+    const estimatedHrProfile = buildEstimatedHrProfile({
+      birthDate: body.birth_date ?? null,
+      sex: body.sex ?? null,
+      fallbackToDefault: true,
+    });
 
     if (validationError) {
       return NextResponse.json({ error: validationError }, { status: 400 });
@@ -68,6 +76,12 @@ export async function PATCH(req: Request) {
       birth_date: body.birth_date ?? null,
       height_cm: heightCm,
       weight_kg: weightKg,
+      ...(estimatedHrProfile
+        ? {
+            hr_max: estimatedHrProfile.hrMax,
+            hr_zones: estimatedHrProfile.hrZones,
+          }
+        : {}),
       country_code: body.country_code ?? null,
       city: body.city ?? null,
       timezone: body.timezone ?? null,

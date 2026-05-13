@@ -1,3 +1,5 @@
+//frontend/app/api/profile/summary/route.ts
+
 import { NextResponse } from "next/server";
 import { differenceInYears } from "date-fns";
 import { createSupabaseServerClient } from "@/lib/supabaseServerApp";

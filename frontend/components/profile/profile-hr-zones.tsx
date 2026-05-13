@@ -8,7 +8,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
 import { PencilLine, Sparkles, Save, X } from "lucide-react";
+import { DEFAULT_HR_MAX, buildDefaultHrZones, estimateHrMax } from "@/lib/training/hr-zones";
 
 type Zone = {
   key: string; // Z1..Z5
@@ -32,6 +34,11 @@ function clamp(n: number, a: number, b: number) {
 function asNumber(v: unknown): number | null {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+function inputNumberValue(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value) || value <= 0) return "";
+  return String(value);
 }
 
 /**
@@ -118,10 +125,19 @@ function buildZones(hrMax: number | null, hrZonesRaw: unknown): Zone[] {
 }
 
 function buildSuggestedZones(
-  hrMax: number,
+  hrMax: number | null,
   age: number | null,
   workoutsCount: number | null
 ): Zone[] {
+  if (!hrMax) {
+    return Object.entries(buildDefaultHrZones(DEFAULT_HR_MAX)).map(([key, z]) => ({
+      key,
+      name: z.name,
+      min: z.min,
+      max: z.max,
+    }));
+  }
+
   const level =
     workoutsCount != null && workoutsCount >= 80
       ? "trained"
@@ -191,12 +207,14 @@ function buildSuggestedZones(
 export default function ProfileHrZones({
   userId,
   age,
+  gender,
   workoutsCount,
   maxHr,
   hrZones,
 }: {
   userId: string;
   age?: number | null;
+  gender?: string | null;
   workoutsCount?: number | null;
   maxHr?: number | null;
   hrZones?: unknown | null;
@@ -204,16 +222,29 @@ export default function ProfileHrZones({
   const router = useRouter();
   const hrMax = maxHr != null ? Number(maxHr) : null;
   const zones = React.useMemo(() => buildZones(hrMax, hrZones), [hrMax, hrZones]);
-  const maxForBars = hrMax && hrMax > 0 ? hrMax : 200;
+  const hasHrMax = hrMax != null && Number.isFinite(hrMax) && hrMax > 0;
   const [editing, setEditing] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
   const [draft, setDraft] = React.useState<Zone[]>(zones);
+  const [draftHrMax, setDraftHrMax] = React.useState<number>(
+    hasHrMax && hrMax != null ? hrMax : DEFAULT_HR_MAX
+  );
+
+  const effectiveHrMax =
+    Number.isFinite(draftHrMax) && draftHrMax > 0
+      ? draftHrMax
+      : hasHrMax
+        ? hrMax
+        : DEFAULT_HR_MAX;
+
+  const maxForBars = effectiveHrMax;
 
   React.useEffect(() => {
     setDraft(zones);
-  }, [zones]);
+    setDraftHrMax(hasHrMax && hrMax != null ? hrMax : DEFAULT_HR_MAX);
+  }, [zones, hasHrMax, hrMax]);
 
   function updateZone(index: number, field: "min" | "max", value: string) {
     const n = Number(value);
@@ -230,6 +261,10 @@ export default function ProfileHrZones({
       // кроме последней зоны (Z5), у которой нет смежной сверху
       if (field === "max" && index < next.length - 1) {
         next[index + 1].min = nextValue;
+      }
+
+      if (field === "max" && index === next.length - 1) {
+        setDraftHrMax(nextValue);
       }
 
       // Если меняем низ текущей зоны — тянем верх предыдущей
@@ -265,6 +300,7 @@ export default function ProfileHrZones({
         credentials: "include",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+          hr_max: draftHrMax,
           hr_zones: payload,
         }),
       });
@@ -286,16 +322,43 @@ export default function ProfileHrZones({
   }
 
   function applySuggestedZones() {
-    if (!hrMax) return;
+    const baseHrMax = draftHrMax && draftHrMax > 0 ? draftHrMax : DEFAULT_HR_MAX;
+
     const suggested = buildSuggestedZones(
-      hrMax,
+      baseHrMax,
       age ?? null,
       workoutsCount ?? null
     );
     setDraft(suggested);
+    setDraftHrMax(baseHrMax);
     setEditing(true);
     setError(null);
     setSuccess("Подобрали зоны автоматически. Проверьте и сохраните");
+  }
+
+  function applySuggestedHrMax() {
+    const nextHrMax = estimateHrMax(age ?? null, gender ?? null);
+    setDraftHrMax(nextHrMax);
+    setDraft(buildSuggestedZones(nextHrMax, age ?? null, workoutsCount ?? null));
+    setEditing(true);
+    setError(null);
+    setSuccess("Максимальная частота пульса рассчитана по возрасту. Проверьте зоны и сохраните");
+  }
+
+  function updateDraftHrMax(value: string) {
+    if (value === "") {
+      setDraftHrMax(0);
+      return;
+    }
+
+    const nextHrMax = Number(value);
+    if (!Number.isFinite(nextHrMax)) return;
+
+    setDraftHrMax(nextHrMax);
+
+    if (nextHrMax >= 120 && nextHrMax <= 230) {
+      setDraft(buildSuggestedZones(nextHrMax, age ?? null, workoutsCount ?? null));
+    }
   }
 
   return (
@@ -304,85 +367,108 @@ export default function ProfileHrZones({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <CardTitle>Пульсовые зоны</CardTitle>
-            <CardDescription>
+            <CardDescription className="mt-1.5">
               Диапазоны в BPM. Если зоны не заданы — считаем от HRmax.
             </CardDescription>
           </div>
 
-          {hrMax ? (
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" variant="secondary" size="sm" onClick={applySuggestedZones}>
+              <Sparkles className="mr-2 size-4" />
+              Подобрать зоны
+            </Button>
+            {!editing ? (
               <Button
                 type="button"
                 variant="secondary"
                 size="sm"
-                onClick={applySuggestedZones}
+                onClick={() => {
+                  setDraft(
+                    zones.length ? zones : buildSuggestedZones(null, age ?? null, workoutsCount ?? null)
+                  );
+                  if (zones.length) {
+                    setDraftHrMax(hasHrMax && hrMax != null ? hrMax : DEFAULT_HR_MAX);
+                  }
+                  setEditing(true);
+                  setError(null);
+                  setSuccess(null);
+                }}
               >
-                <Sparkles className="mr-2 size-4" />
-                Подобрать зоны
+                <PencilLine className="mr-2 size-4" />
+                Редактировать зоны
               </Button>
-              {!editing ? (
+            ) : (
+              <>
                 <Button
                   type="button"
                   variant="secondary"
                   size="sm"
                   onClick={() => {
                     setDraft(zones);
-                    setEditing(true);
+                    setDraftHrMax(hasHrMax && hrMax != null ? hrMax : DEFAULT_HR_MAX);
+                    setEditing(false);
                     setError(null);
-                    setSuccess(null);
                   }}
                 >
-                  <PencilLine className="mr-2 size-4" />
-                  Редактировать зоны
+                  <X className="mr-2 size-4" />
+                  Отмена
                 </Button>
-              ) : (
-                <>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      setDraft(zones);
-                      setEditing(false);
-                      setError(null);
-                    }}
-                  >
-                    <X className="mr-2 size-4" />
-                    Отмена
-                  </Button>
-                  <Button type="button" size="sm" onClick={saveZones} disabled={saving}>
-                    <Save className="mr-2 size-4" />
-                    {saving ? "Сохраняем…" : "Сохранить"}
-                  </Button>
-                </>
-              )}
-            </div>
-          ) : null}
+                <Button type="button" size="sm" onClick={saveZones} disabled={saving}>
+                  <Save className="mr-2 size-4" />
+                  {saving ? "Сохраняем…" : "Сохранить"}
+                </Button>
+              </>
+            )}
+          </div>
         </div>
       </CardHeader>
 
       <CardContent className="space-y-3">
-        {!hrMax ? (
-          <EmptyZoneState
-            emoji="🫀"
-            title="Сначала нужен максимальный пульс"
-            description="Заполните HRmax в профиле, и мы автоматически построим пульсовые зоны"
-          />
-        ) : zones.length === 0 ? (
+        <div className="rounded-2xl border bg-muted/15 p-4">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Максимальная частота пульса</Label>
+              <Input
+                type="number"
+                inputMode="numeric"
+                min={120}
+                max={230}
+                disabled={!editing}
+                value={inputNumberValue(draftHrMax)}
+                onChange={(e) => updateDraftHrMax(e.target.value)}
+                className="w-32"
+              />
+            </div>
+
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={!editing}
+              onClick={applySuggestedHrMax}
+            >
+              <Sparkles className="mr-2 size-4" />
+              Рассчитать по возрасту
+            </Button>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Badge variant="secondary">HRmax: {draftHrMax || DEFAULT_HR_MAX} bpm</Badge>
+            <Badge variant="outline">5 зон</Badge>
+          </div>
+
+          {success ? <div className="mt-3 text-sm text-emerald-700">{success}</div> : null}
+        </div>
+
+        {zones.length === 0 && !editing ? (
           <EmptyZoneState
             emoji="📉"
             title="Зоны пока не настроены"
-            description="Мы не нашли сохранённые зоны и не смогли построить их автоматически"
+            description="Можно подобрать базовые зоны автоматически или задать их вручную"
           />
         ) : (
           <>
-            <div className="flex flex-wrap gap-2">
-              <Badge variant="secondary">HRmax: {hrMax} bpm</Badge>
-              <Badge variant="outline">5 зон</Badge>
-            </div>
-
             {error ? <div className="text-sm text-destructive">{error}</div> : null}
-            {success ? <div className="text-sm text-emerald-700">{success}</div> : null}
 
             <div className="space-y-3">
               {(editing ? draft : zones).map((z, idx) => {
@@ -406,7 +492,7 @@ export default function ProfileHrZones({
                           </div>
                         </div>
                         <div className="mt-1 text-xs text-muted-foreground">
-                          {z.min}–{z.max} bpm · {Math.round((z.min / hrMax) * 100)}–{Math.round((z.max / hrMax) * 100)}%
+                          {z.min}–{z.max} bpm · {Math.round((z.min / maxForBars) * 100)}–{Math.round((z.max / maxForBars) * 100)}%
                         </div>
                       </div>
 
@@ -415,14 +501,14 @@ export default function ProfileHrZones({
                           <Input
                             type="number"
                             inputMode="numeric"
-                            value={draft[idx]?.min ?? z.min}
+                            value={inputNumberValue(draft[idx]?.min ?? z.min)}
                             onChange={(e) => updateZone(idx, "min", e.target.value)}
                             className="w-28"
                           />
                           <Input
                             type="number"
                             inputMode="numeric"
-                            value={draft[idx]?.max ?? z.max}
+                            value={inputNumberValue(draft[idx]?.max ?? z.max)}
                             onChange={(e) => updateZone(idx, "max", e.target.value)}
                             className="w-28"
                           />

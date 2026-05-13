@@ -140,7 +140,7 @@ const CoachChatInput = React.memo(function CoachChatInput(props: {
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
         rows={2}
-        placeholder='Напиши Капи… например: "разбери тренировку" или "составь план"'
+        placeholder='Сообщение...'
       />
 
       <div className="flex items-center justify-between gap-2">

@@ -69,6 +69,31 @@ const TYPE_META: Record<string, TypeMetaEntry> = {
   custom:   { emoji: "🎯",  label: "Индивидуальная цель", description: "Цель своими словами." },
 };
 
+const TYPE_ACCENT: Record<string, { progress: string; track: string }> = {
+  // Indigo (бренд) — забеги короткой/средней дистанции
+  "10k":    { progress: "rgb(27,46,201)",   track: "rgba(27,46,201,0.12)" },
+  HM:       { progress: "rgb(27,46,201)",   track: "rgba(27,46,201,0.12)" },
+  custom:   { progress: "rgb(27,46,201)",   track: "rgba(27,46,201,0.12)" },
+  // Фиолетовый — интенсивность / длина
+  M:        { progress: "rgb(124,58,237)",  track: "rgba(124,58,237,0.12)" },
+  strength: { progress: "rgb(124,58,237)",  track: "rgba(124,58,237,0.12)" },
+  // Зелёный (бренд) — outdoor / cardio
+  trail:    { progress: "rgb(26,158,58)",   track: "rgba(26,158,58,0.12)" },
+  ride:     { progress: "rgb(26,158,58)",   track: "rgba(26,158,58,0.12)" },
+  vo2max:   { progress: "rgb(26,158,58)",   track: "rgba(26,158,58,0.12)" },
+  // Голубой — вода
+  swim:     { progress: "rgb(14,165,233)",  track: "rgba(14,165,233,0.12)" },
+  // Оранжевый (бренд) — вес
+  weight:   { progress: "rgb(229,139,33)",  track: "rgba(229,139,33,0.12)" },
+};
+
+function getAccent(type: string, isCompleted: boolean) {
+  if (isCompleted) {
+    return { progress: "rgb(26,158,58)", track: "rgba(26,158,58,0.16)" };
+  }
+  return TYPE_ACCENT[type] ?? TYPE_ACCENT.custom;
+}
+
 // ===================== HELPERS =====================
 
 function formatDate(value?: string | null) {
@@ -147,7 +172,7 @@ function getGoalProgress(goal: GoalRow): GoalProgress {
     const now = Date.now();
     if (!Number.isNaN(start) && !Number.isNaN(end) && end > start) {
       const pct = Math.max(0, Math.min(100, Math.round(((now - start) / (end - start)) * 100)));
-      return { pct, label: "По сроку" };
+      return { pct, label: "Прогресс" };
     }
   }
   return { pct: null, label: null };
@@ -167,68 +192,62 @@ function getPriorityScore(goal: GoalRow) {
   return primary + active + race + date;
 }
 
-// ===================== RADIAL GAUGE =====================
-// Полукруглая дуга. Идея: трэк — половина окружности (strokeDasharray=halfCirc),
-// rotate(180°) переворачивает её в верхнюю полусферу. Прогресс — такая же дуга
-// длиной (pct/100)*halfCirc. Линкап round даёт чистые скруглённые концы.
-function RadialProgress({
+// ===================== GOAL PROGRESS BAR =====================
+function GoalProgressBar({
   value,
-  size = 190,
-  strokeWidth = 15,
-  trackColor = "rgba(255,255,255,0.18)",
-  progressColor = "rgba(255,255,255,0.94)",
+  trackColor = "rgba(27,46,201,0.12)",
+  progressColor = "rgb(27,46,201)",
+  label,
+  compact = false,
 }: {
   value: number;
-  size?: number;
-  strokeWidth?: number;
   trackColor?: string;
   progressColor?: string;
+  label?: string | null;
+  compact?: boolean;
 }) {
-  const r = (size - strokeWidth) / 2;
-  const cx = size / 2;
-  const cy = size / 2;
-  const circumference = 2 * Math.PI * r;
-  const halfCirc = circumference / 2;
   const p = Math.max(0, Math.min(100, value));
-  const progressLen = Math.min((p / 100) * halfCirc, halfCirc);
-  const viewH = size / 2 + strokeWidth;
 
   return (
-    <svg
-      width={size}
-      height={viewH}
-      viewBox={`0 0 ${size} ${viewH}`}
-      aria-hidden
-      className="block"
-    >
-      {/* track — полная верхняя дуга */}
-      <circle
-        cx={cx}
-        cy={cy}
-        r={r}
-        fill="none"
-        stroke={trackColor}
-        strokeWidth={strokeWidth}
-        strokeLinecap="round"
-        strokeDasharray={`${halfCirc} ${circumference}`}
-        transform={`rotate(180, ${cx}, ${cy})`}
-      />
-      {/* progress */}
-      {p > 0 ? (
-        <circle
-          cx={cx}
-          cy={cy}
-          r={r}
-          fill="none"
-          stroke={progressColor}
-          strokeWidth={strokeWidth}
-          strokeLinecap="round"
-          strokeDasharray={`${progressLen} ${circumference}`}
-          transform={`rotate(180, ${cx}, ${cy})`}
-          style={{ transition: "stroke-dasharray 0.6s ease-out" }}
+    <div className={cn("space-y-1", compact ? "pt-0.5" : "pt-0")}>
+      <div className="flex items-center justify-between gap-3">
+        <span
+          className={cn(
+            "font-semibold uppercase tracking-wider text-muted-foreground",
+            compact ? "text-[9px]" : "text-[10px]"
+          )}
+        >
+          {label ?? "Прогресс"}
+        </span>
+        <span
+          className={cn(
+            "font-extrabold tabular-nums",
+            compact ? "text-xs" : "text-sm"
+          )}
+          style={{ color: progressColor }}
+        >
+          {p}%
+        </span>
+      </div>
+
+      <div
+        className={cn(
+          "relative overflow-hidden rounded-full shadow-sm",
+          compact ? "h-2" : "h-3"
+        )}
+        style={{ backgroundColor: trackColor }}
+        aria-label={`${label ?? "Прогресс"} ${p}%`}
+      >
+        <div
+          className="h-full rounded-full transition-[width] duration-700 ease-out"
+          style={{
+            width: `${p}%`,
+            backgroundColor: progressColor,
+          }}
         />
-      ) : null}
-    </svg>
+        <div className="pointer-events-none absolute inset-0 rounded-full ring-1 ring-inset ring-black/5" />
+      </div>
+    </div>
   );
 }
 
@@ -294,68 +313,54 @@ function PrimaryPill() {
   );
 }
 
-// ===================== PROGRESS BAR =====================
-function ProgressBar({
-  value,
-  thick = false,
-  completed = false,
-}: {
-  value: number;
-  thick?: boolean;
-  completed?: boolean;
-}) {
-  const pct = Math.max(0, Math.min(100, value));
-  const isDone = completed || pct >= 100;
-  return (
-    <div className={cn("w-full overflow-hidden rounded-full bg-muted", thick ? "h-2.5" : "h-2")}>
-      <div
-        className={cn(
-          "h-full rounded-full transition-all",
-          isDone ? "bg-[rgb(26,158,58)]" : "bg-[rgb(27,46,201)]"
-        )}
-        style={{ width: `${pct}%` }}
-      />
-    </div>
-  );
-}
-
 // ===================== META BADGE (hero card only) =====================
 function MetaBadge({
   icon,
   label,
   value,
   urgent = false,
+  size = "md",
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
   urgent?: boolean;
+  size?: "sm" | "md";
 }) {
+  const isSm = size === "sm";
   return (
     <div
       className={cn(
-        "flex min-w-0 items-center gap-2.5 rounded-xl border px-3.5 py-2.5",
+        "flex min-w-0 items-center rounded-xl border backdrop-blur-sm",
+        isSm ? "gap-2 px-2.5 py-2" : "gap-2 px-2.5 py-1.5",
         urgent
-          ? "border-amber-300/40 bg-amber-300/15"
-          : "border-white/20 bg-white/10 backdrop-blur"
+          ? "border-[rgba(229,139,33,0.4)] bg-[rgba(229,139,33,0.12)]"
+          : "border-border/70 bg-background/70 shadow-sm"
       )}
     >
-      <div className={cn("shrink-0", urgent ? "text-amber-200" : "text-white/75")}>
+      <div
+        className={cn(
+          "shrink-0",
+          urgent ? "text-[rgb(229,139,33)]" : "text-muted-foreground"
+        )}
+      >
         {icon}
       </div>
       <div className="min-w-0">
         <div
           className={cn(
-            "text-[10px] font-semibold uppercase tracking-wider",
-            urgent ? "text-amber-200/80" : "text-white/55"
+            "font-semibold uppercase tracking-wider",
+            isSm ? "text-[9px]" : "text-[10px]",
+            urgent ? "text-[rgb(229,139,33)]/85" : "text-muted-foreground"
           )}
         >
           {label}
         </div>
         <div
           className={cn(
-            "truncate text-sm font-bold leading-snug",
-            urgent ? "text-amber-100" : "text-white"
+            "truncate font-bold leading-snug",
+            isSm ? "text-xs" : "text-sm",
+            urgent ? "text-[rgb(229,139,33)]" : "text-foreground"
           )}
         >
           {value}
@@ -420,7 +425,18 @@ export default function GoalsList({
   const activeGoals = sorted.filter((g) => g.status === "active");
   const completedGoals = sorted.filter((g) => g.status === "completed");
   const primaryGoal = activeGoals.find((g) => g.is_primary) ?? activeGoals[0] ?? null;
-  const otherGoals = activeGoals.filter((g) => g.id !== primaryGoal?.id);
+  const otherGoals = activeGoals
+    .filter((g) => g.id !== primaryGoal?.id)
+    .sort((a, b) => {
+      const aTime = a.date_to ? new Date(a.date_to).getTime() : Number.POSITIVE_INFINITY;
+      const bTime = b.date_to ? new Date(b.date_to).getTime() : Number.POSITIVE_INFINITY;
+
+      if (Number.isNaN(aTime) && Number.isNaN(bTime)) return 0;
+      if (Number.isNaN(aTime)) return 1;
+      if (Number.isNaN(bTime)) return -1;
+
+      return aTime - bTime;
+    });
   const nearestGoal =
     [...activeGoals].sort(
       (a, b) => new Date(a.date_to).getTime() - new Date(b.date_to).getTime()
@@ -639,70 +655,66 @@ function GoalCard({
   const deadlineSoon = !isCompleted && isDeadlineSoon(goal.date_to);
   const showsPrimaryPill = !primary && goal.is_primary && !isCompleted;
   const pct = progress.pct ?? 0;
+  const accent = getAccent(goal.type, isCompleted); // <- NEW
 
   // ============ HERO ============
   if (primary) {
     return (
-      <Card className="relative overflow-hidden border-0 bg-gradient-to-br from-[rgb(27,46,201)] via-[rgb(34,55,212)] to-[rgb(45,67,220)] text-white shadow-2xl shadow-[rgba(27,46,201,0.4)]">
-        {/* декоративные блики для глубины */}
+      <Card className="relative overflow-hidden border bg-card shadow-sm">
         <div
-          aria-hidden
-          className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-white/5 blur-3xl"
+          className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-yellow-200/50 blur-3xl"
+          aria-hidden="true"
         />
         <div
-          aria-hidden
-          className="pointer-events-none absolute -bottom-20 -left-20 h-48 w-48 rounded-full bg-white/5 blur-2xl"
+          className="pointer-events-none absolute -bottom-24 -left-24 h-64 w-64 rounded-full bg-orange-200/40 blur-3xl"
+          aria-hidden="true"
+        />
+        <div
+          className="pointer-events-none absolute inset-0 opacity-[0.035] [background-image:linear-gradient(currentColor_1px,transparent_1px),linear-gradient(90deg,currentColor_1px,transparent_1px)] [background-size:32px_32px]"
+          aria-hidden="true"
         />
 
-        <CardContent className="relative space-y-5 p-6">
-          {/* badge + status */}
+        <CardContent className="relative space-y-3 px-4 pb-4 pt-2.5">
+          {/* eyebrow + status */}
           <div className="flex items-center justify-between gap-2">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/25 bg-white/15 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-white backdrop-blur">
-              <Trophy className="size-3.5" />
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300/50 bg-background/75 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-800 shadow-sm backdrop-blur">
+              <Trophy className="size-3" />
               Главная цель
             </span>
-            <StatusPill status={goal.status} dark />
+            <StatusPill status={goal.status} />
           </div>
 
-          {/* gauge + info */}
-          <div className="flex flex-col items-center gap-5 sm:flex-row sm:items-start">
-            <div className="relative shrink-0">
-              <RadialProgress
-                value={pct}
-                size={190}
-                strokeWidth={15}
-                trackColor="rgba(255,255,255,0.18)"
-                progressColor="rgba(255,255,255,0.95)"
-              />
-              <div className="absolute inset-x-0 bottom-2 text-center">
-                <div className="flex items-baseline justify-center gap-0.5 tabular-nums">
-                  <span className="text-5xl font-extrabold leading-none">{pct}</span>
-                  <span className="text-xl font-bold text-white/70">%</span>
-                </div>
-                <div className="mt-1 text-[10px] font-semibold uppercase tracking-wider text-white/55">
-                  {progress.label ?? "Прогресс"}
-                </div>
-              </div>
-            </div>
-
-            <div className="min-w-0 flex-1 space-y-2.5 sm:pt-1">
-              <div className="flex items-center gap-2 text-sm font-medium text-white/70">
-                <span className="text-2xl">{meta.emoji}</span>
+          <div className="min-w-0 space-y-2.5">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                <span className="text-xl">{meta.emoji}</span>
                 <span>{meta.label}</span>
               </div>
-              <h2 className="text-2xl font-extrabold leading-tight tracking-tight sm:text-3xl">
+              <h2 className="text-lg font-extrabold leading-tight tracking-tight sm:text-xl">
                 {goal.title || meta.label}
               </h2>
               {summary ? (
-                <p className="line-clamp-3 text-sm leading-relaxed text-white/75">
+                <p className="line-clamp-1 text-sm leading-relaxed text-muted-foreground">
                   {summary}
                 </p>
               ) : null}
             </div>
+
+            <GoalProgressBar
+              value={pct}
+              label={progress.label}
+              trackColor={accent.track}
+              progressColor={accent.progress}
+            />
           </div>
 
           {/* meta badges */}
-          <div className="grid grid-cols-1 gap-2.5 border-t border-white/15 pt-4 sm:grid-cols-3">
+          <div
+            className={cn(
+              "grid gap-2 border-t pt-2.5",
+              goal.sport ? "sm:grid-cols-3" : "sm:grid-cols-2"
+            )}
+          >
             <MetaBadge
               icon={<CalendarDays className="size-4" />}
               label="Финиш"
@@ -720,14 +732,12 @@ function GoalCard({
                 label="Спорт"
                 value={formatSport(goal.sport)}
               />
-            ) : (
-              <div aria-hidden className="hidden sm:block" />
-            )}
+            ) : null}
           </div>
         </CardContent>
 
         {editMode ? (
-          <CardFooter className="relative mt-auto flex flex-wrap justify-between gap-2 border-t border-white/15 bg-white/5 px-4 py-3">
+          <CardFooter className="relative mt-auto flex flex-wrap justify-between gap-2 border-t bg-muted/10 px-4 py-3">
             <Button type="button" variant="secondary" size="sm" onClick={onEdit}>
               <Pencil className="mr-1.5 size-4" />
               Редактировать
@@ -756,18 +766,17 @@ function GoalCard({
           "border-[rgba(26,158,58,0.25)] bg-gradient-to-br from-[rgba(197,237,208,0.35)] via-card to-[rgba(255,246,232,0.25)] hover:border-[rgba(26,158,58,0.35)]"
       )}
     >
-      <CardContent className="flex flex-1 flex-col gap-3.5 p-5">
-        {/* header */}
-        <div className="flex items-start justify-between gap-2">
-          <div
-            className={cn(
-              "flex size-12 shrink-0 items-center justify-center rounded-xl text-2xl shadow-sm transition-transform group-hover:scale-105",
-              isCompleted
-                ? "border border-[rgba(26,158,58,0.2)] bg-[rgba(197,237,208,0.6)]"
-                : "border border-[rgba(27,46,201,0.15)] bg-[rgba(197,206,250,0.5)] group-hover:bg-[rgba(212,219,253,0.7)]"
-            )}
-          >
-            {meta.emoji}
+      <CardContent className="flex flex-1 flex-col gap-2.5 p-4">
+        {/* Top row: title+type+status */}
+        <div className="flex min-w-0 items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h3 className="line-clamp-2 text-sm font-bold leading-snug">
+              {goal.title || meta.label}
+            </h3>
+            <p className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+              <span className="text-sm leading-none">{meta.emoji}</span>
+              <span className="truncate">{meta.label}</span>
+            </p>
           </div>
           <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
             {showsPrimaryPill ? <PrimaryPill /> : null}
@@ -775,46 +784,23 @@ function GoalCard({
           </div>
         </div>
 
-        {/* title */}
-        <div className="min-w-0 space-y-0.5">
-          <h3 className="line-clamp-2 text-base font-bold leading-snug">
-            {goal.title || meta.label}
-          </h3>
-          <p className="text-[11px] font-medium text-muted-foreground">{meta.label}</p>
-        </div>
-
         {summary ? (
-          <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+          <p className="line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
             {summary}
           </p>
         ) : null}
 
+        <GoalProgressBar
+          value={pct}
+          label={progress.label}
+          trackColor={accent.track}
+          progressColor={accent.progress}
+          compact
+        />
+
         <div className="flex-1" />
 
-        {/* progress */}
-        {progress.pct != null ? (
-          <div className="space-y-2 border-t border-border/60 pt-3">
-            <div className="flex items-baseline justify-between">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {progress.label}
-              </span>
-              <div className="flex items-baseline gap-0.5 tabular-nums">
-                <span
-                  className={cn(
-                    "text-xl font-extrabold leading-none",
-                    isCompleted ? "text-[rgb(26,158,58)]" : "text-[rgb(27,46,201)]"
-                  )}
-                >
-                  {progress.pct}
-                </span>
-                <span className="text-xs font-semibold text-muted-foreground">%</span>
-              </div>
-            </div>
-            <ProgressBar value={progress.pct} completed={isCompleted} />
-          </div>
-        ) : null}
-
-        {/* footer meta */}
+        {/* Footer meta — inline (без изменений) */}
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
           <span className="inline-flex items-center gap-1 text-muted-foreground">
             <CalendarDays className="size-3 shrink-0 opacity-60" />

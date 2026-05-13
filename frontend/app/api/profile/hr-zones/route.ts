@@ -1,3 +1,5 @@
+//frontend/app/api/profile/hr-zones/route.ts
+
 import { NextResponse } from "next/server";
 import { createClientWithCookies } from "@/lib/supabase/server";
 
@@ -59,6 +61,7 @@ export async function PATCH(req: Request) {
 
     const body = await req.json().catch(() => null);
     const zones = normalizeZones(body?.hr_zones);
+    const hrMax = Number(body?.hr_max);
 
     if (!zones) {
       return NextResponse.json(
@@ -67,14 +70,22 @@ export async function PATCH(req: Request) {
       );
     }
 
+    if (!Number.isFinite(hrMax) || hrMax < 120 || hrMax > 230) {
+      return NextResponse.json(
+        { error: "Invalid hr_max value" },
+        { status: 400 }
+      );
+    }
+
     const { data, error } = await supabase
       .from("profiles")
       .update({
+        hr_max: Math.round(hrMax),
         hr_zones: zones,
         updated_at: new Date().toISOString(),
       })
       .eq("user_id", user.id)
-      .select("user_id, hr_zones, updated_at")
+      .select("user_id, hr_max, hr_zones, updated_at")
       .single();
 
     if (error) {

@@ -76,6 +76,7 @@ export default function ProfileContent({ profile }: { profile: ProfileData }) {
         <ProfileHrZones
           userId={profile.userId}
           age={profile.age ?? null}
+          gender={profile.gender ?? null}
           workoutsCount={profile.workoutsCount ?? null}
           maxHr={profile.max_hr ?? null}
           hrZones={profile.hr_zones ?? null}

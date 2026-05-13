@@ -81,9 +81,9 @@ function MarkdownMessage(props: {
             {children}
           </pre>
         ),
-        h1: ({ children }) => <h1 className="mb-2 text-sm font-semibold">{children}</h1>,
-        h2: ({ children }) => <h2 className="mb-2 text-sm font-semibold">{children}</h2>,
-        h3: ({ children }) => <h3 className="mb-1 text-xs font-semibold">{children}</h3>,
+        h1: ({ children }) => <h1 className="mb-2 text-base font-semibold">{children}</h1>,
+        h2: ({ children }) => <h2 className="mb-2 text-base font-semibold">{children}</h2>,
+        h3: ({ children }) => <h3 className="mb-1 text-sm font-semibold">{children}</h3>,
         hr: () => <hr className="my-3 border-border/70" />,
         a: ({ href, children }) => (
           <a
@@ -171,7 +171,7 @@ function CoachMessageBubble(props: {
 
       <div
         className={cn(
-          "max-w-[78%] rounded-[var(--radius)] px-3.5 py-2.5 text-xs leading-relaxed break-words",
+          "max-w-[78%] rounded-[var(--radius)] px-3.5 py-2.5 text-sm leading-relaxed break-words",
           "border border-black/10 transition-transform",
           isUser
             ? [
@@ -198,7 +198,7 @@ function CoachMessageBubble(props: {
         {createdAt && showAvatar ? (
           <div
             className={cn(
-              "mt-1 text-[9px] opacity-70",
+              "mt-1 text-[10px] opacity-70",
               isUser ? "text-black/70" : "text-muted-foreground"
             )}
           >
