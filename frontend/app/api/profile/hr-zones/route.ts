@@ -92,8 +92,20 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    const { error: recomputeError } = await supabase.rpc(
+      "recompute_user_hr_zone_times",
+      {
+        p_user_id: user.id,
+      }
+    );
+
+    if (recomputeError) {
+      console.warn("[api/profile/hr-zones] recompute failed", recomputeError);
+    }
+
     return NextResponse.json({
       profile: data,
+      recomputed: !recomputeError,
     });
   } catch (error) {
     return NextResponse.json(

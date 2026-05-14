@@ -150,6 +150,39 @@ const C = {
   rose: "rgb(244,63,94)",
 } as const;
 
+const RU_MONTHS_SHORT = [
+  "янв.",
+  "фев.",
+  "март",
+  "апр.",
+  "май",
+  "июнь",
+  "июль",
+  "авг.",
+  "сен.",
+  "окт.",
+  "ноя.",
+  "дек.",
+] as const;
+
+function formatShortRuDate(value?: string | null) {
+  if (!value) return "";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return `${date.getDate()} ${RU_MONTHS_SHORT[date.getMonth()]}`;
+}
+
+function formatNumberRu(
+  value: number,
+  options?: Intl.NumberFormatOptions,
+) {
+  return new Intl.NumberFormat("ru-RU", options).format(value);
+}
+
 const GOAL_TYPE_META: Record<string, { emoji: string; label: string }> = {
   "10k": { emoji: "💨", label: "Забег 10 км" },
   HM: { emoji: "🏁", label: "Полумарафон" },
@@ -528,7 +561,7 @@ export default function MyWorkoutsDashboardClient({
     return [...weeks]
       .sort((a, b) => a.week_start.localeCompare(b.week_start))
       .map((w) => ({
-        w: w.week_start.slice(5),
+        w: formatShortRuDate(w.week_start),
         hours: +(Number(w.time_sec || 0) / 3600).toFixed(2),
         workouts: Number(w.workouts || 0),
         distance_km: +(Number(w.distance_m || 0) / 1000).toFixed(1),
@@ -787,10 +820,10 @@ function FormHeroCard({
         </div>
 
         <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-          <KpiTile icon={<TrendingUp className="size-4" />} label="Тренировок" value={kpi.workouts} accent={C.indigo} bg={C.indigoSoft} />
-          <KpiTile icon={<Footprints className="size-4" />} label="Дистанция" value={fmtKm(kpi.distance_m)} accent={C.violet} bg={C.violetSoft} />
+          <KpiTile icon={<TrendingUp className="size-4" />} label="Тренировок" value={formatNumberRu(kpi.workouts)} accent={C.indigo} bg={C.indigoSoft} />
+          <KpiTile icon={<Footprints className="size-4" />} label="Дистанция" value={`${formatNumberRu(Math.round(kpi.distance_m / 1000))} км`} accent={C.violet} bg={C.violetSoft} />
           <KpiTile icon={<Activity className="size-4" />} label="Время" value={fmtTime(kpi.time_sec)} accent={C.green} bg={C.greenSoft} />
-          <KpiTile icon={<Flame className="size-4" />} label="Калории" value={fmtKcal(kpi.kcal)} accent={C.orange} bg={C.orangeSoft} />
+          <KpiTile icon={<Flame className="size-4" />} label="Калории" value={`${formatNumberRu(Math.round(kpi.kcal))} ккал`} accent={C.orange} bg={C.orangeSoft} />
         </div>
       </CardContent>
     </Card>
@@ -1107,7 +1140,7 @@ function WeeklyVolumeCard({
         <CardTitle className="text-base">Объём по неделям</CardTitle>
         <CardDescription>
           {data.length
-            ? `12 недель · в среднем ${fmtKm(weeklyAvg.distance_m)} в неделю`
+            ? `12 недель · в среднем ${formatNumberRu(Math.round(weeklyAvg.distance_m / 1000))} км в неделю`
             : "Сколько километров ты набегал за последние 12 недель"}
         </CardDescription>
       </CardHeader>
@@ -1307,7 +1340,7 @@ function SportMixCard({ mix }: { mix: MixRow[] }) {
 // ============================================================
 function DailyTimeCard({ daysData }: { daysData: DayRow[] }) {
   const data = daysData.map((d) => ({
-    d: d.d.slice(5),
+    d: formatShortRuDate(d.d),
     time_h: Math.round((Number(d.time_sec || 0) / 3600) * 100) / 100,
   }));
   return (
@@ -1359,7 +1392,7 @@ function DailyTimeCard({ daysData }: { daysData: DayRow[] }) {
 // ============================================================
 function DailyKcalCard({ daysData }: { daysData: DayRow[] }) {
   const data = daysData.map((d) => ({
-    d: d.d.slice(5),
+    d: formatShortRuDate(d.d),
     kcal: Math.round(Number(d.kcal || 0)),
   }));
   return (
