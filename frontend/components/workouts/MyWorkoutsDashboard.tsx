@@ -104,6 +104,10 @@ type HrZonesData = {
   easyPct: number;
   hardPct: number;
   hasData: boolean;
+  workoutsWithDetailedHr: number;
+  balanceLabel: string;
+  balanceTone: "good" | "ok" | "warn";
+  balanceAdvice: string;
 };
 
 type WeeklyChartPoint = { w: string; hours: number; workouts: number; distance_km: number };
@@ -186,8 +190,14 @@ function isNum(v: unknown): v is number {
 function fmtTime(sec: number) {
   const s = Number(sec || 0);
   const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  return h > 0 ? `${h} ч ${m} мин` : `${m} мин`;
+  const m = Math.round((s % 3600) / 60);
+  if (h <= 0) return `${m} мин`;
+  return `${h} ч ${m} мин`;
+}
+
+function fmtHoursOnly(sec: number) {
+  const h = Math.max(1, Math.round(sec / 3600));
+  return `${h} ч`;
 }
 function fmtKm(meters: number) {
   const km = Number(meters || 0) / 1000;
@@ -524,9 +534,19 @@ export default function MyWorkoutsDashboardClient({
 
   const hrZones: HrZonesData = useMemo(() => {
     const totals = new Map<string, number>();
+    let workoutsWithDetailedHr = 0;
+
     for (const row of zoneRows) {
       const hr = row.hr_zone_time;
       if (!hr || typeof hr !== "object") continue;
+
+      const hasAnyZoneSeconds = Object.values(hr).some((rawValue) => {
+        const seconds = Number(rawValue || 0);
+        return Number.isFinite(seconds) && seconds > 0;
+      });
+
+      if (hasAnyZoneSeconds) workoutsWithDetailedHr += 1;
+
       for (const [rawKey, rawValue] of Object.entries(hr)) {
         const seconds = Number(rawValue || 0);
         if (!Number.isFinite(seconds) || seconds <= 0) continue;
@@ -544,11 +564,35 @@ export default function MyWorkoutsDashboardClient({
       .filter((r) => !["Z1", "Z2"].includes(r.zone))
       .reduce((s, r) => s + r.seconds, 0);
     const totalSeconds = easySeconds + hardSeconds;
+    const easyPct = totalSeconds > 0 ? (easySeconds / totalSeconds) * 100 : 0;
+    const hardPct = totalSeconds > 0 ? (hardSeconds / totalSeconds) * 100 : 0;
+
+    const balanceTone: HrZonesData["balanceTone"] =
+      easyPct >= 78 && easyPct <= 90 ? "good" : easyPct >= 70 ? "ok" : "warn";
+
+    const balanceLabel =
+      balanceTone === "good"
+        ? "Баланс отличный"
+        : balanceTone === "ok"
+          ? "Почти 80/20"
+          : "Слишком много интенсивности";
+
+    const balanceAdvice =
+      balanceTone === "good"
+        ? "Лёгкие зоны занимают основную часть нагрузки — это хороший фундамент для прогресса."
+        : balanceTone === "ok"
+          ? "Баланс близок к целевому. Добавь немного больше спокойного бега в Z1–Z2."
+          : "Интенсивной работы многовато. Чтобы прогрессировать и не перегореть, чаще держи лёгкий темп в Z1–Z2.";
+
     return {
       rows,
-      easyPct: totalSeconds > 0 ? (easySeconds / totalSeconds) * 100 : 0,
-      hardPct: totalSeconds > 0 ? (hardSeconds / totalSeconds) * 100 : 0,
+      easyPct,
+      hardPct,
       hasData: totalSeconds > 0,
+      workoutsWithDetailedHr,
+      balanceLabel,
+      balanceTone,
+      balanceAdvice,
     };
   }, [zoneRows]);
 
@@ -569,14 +613,15 @@ export default function MyWorkoutsDashboardClient({
   return (
     <section className="space-y-5">
       {/* HEADER */}
-      <header className="flex flex-wrap items-start justify-between gap-3">
+      <header className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
         <div className="min-w-0">
           <h1 className="text-3xl font-extrabold tracking-tight">
             {safeUserName ? `Привет, ${safeUserName}` : "Привет!"}
           </h1>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <div className="inline-flex items-center gap-0.5 rounded-full border bg-muted/10 p-0.5">
+
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+          <div className="inline-flex max-w-full flex-wrap items-center gap-0.5 rounded-full border bg-muted/10 p-0.5">
             {PERIOD_OPTIONS.map((n) => (
               <Button
                 key={n}
@@ -591,8 +636,13 @@ export default function MyWorkoutsDashboardClient({
               </Button>
             ))}
           </div>
-          <Link href="/workouts">
-            <Button variant="secondary" size="sm">
+
+          <Link href="/workouts" className="w-full sm:w-auto">
+            <Button
+              variant="secondary"
+              size="sm"
+              className="w-full sm:w-auto"
+            >
               Тренировки <ArrowRight className="ml-1 size-3.5" />
             </Button>
           </Link>
@@ -1002,8 +1052,8 @@ function WeeklyVolumeCard({
         <CardTitle className="text-base">Объём по неделям</CardTitle>
         <CardDescription>
           {data.length
-            ? `12 недель · в среднем ${fmtTime(Math.round(weeklyAvg.time_sec))} в неделю · ${fmtKm(weeklyAvg.distance_m)}`
-            : "Сколько ты тренировался за последние 12 недель"}
+            ? `12 недель · в среднем ${fmtKm(weeklyAvg.distance_m)} в неделю`
+            : "Сколько километров ты набегал за последние 12 недель"}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -1021,10 +1071,10 @@ function WeeklyVolumeCard({
                 <XAxis dataKey="w" tickLine={false} axisLine={false} tickMargin={8} tick={{ fontSize: 10 }} />
                 <YAxis tickLine={false} axisLine={false} width={32} tick={{ fontSize: 11 }} />
                 <Tooltip
-                  content={<ChartTooltip formatter={(v) => `${v} ч`} />}
+                  content={<ChartTooltip formatter={(v) => `${v} км`} />}
                   cursor={{ fill: "rgba(27,46,201,0.06)" }}
                 />
-                <Bar dataKey="hours" name="Часы" radius={[6, 6, 0, 0]} fill="url(#weeklyBarFill)" />
+                <Bar dataKey="distance_km" name="Километры" radius={[6, 6, 0, 0]} fill="url(#weeklyBarFill)" />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -1040,6 +1090,13 @@ function WeeklyVolumeCard({
 // HR ZONES
 // ============================================================
 function HrZonesCard({ hrZones }: { hrZones: HrZonesData }) {
+  const toneClass =
+    hrZones.balanceTone === "good"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+      : hrZones.balanceTone === "ok"
+        ? "border-amber-200 bg-amber-50 text-amber-900"
+        : "border-rose-200 bg-rose-50 text-rose-900";
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -1052,27 +1109,45 @@ function HrZonesCard({ hrZones }: { hrZones: HrZonesData }) {
       </CardHeader>
       <CardContent>
         {hrZones.hasData ? (
-          <div className="h-52 sm:h-60">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={hrZones.rows} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" vertical={false} />
-                <XAxis
-                  dataKey="zone"
-                  tickLine={false} axisLine={false} tickMargin={8}
-                  tick={{ fontSize: 11, fontWeight: 600 }}
-                />
-                <YAxis tickLine={false} axisLine={false} width={32} tick={{ fontSize: 11 }} />
-                <Tooltip
-                  content={<ChartTooltip formatter={(v) => `${v} мин`} />}
-                  cursor={{ fill: "rgba(27,46,201,0.06)" }}
-                />
-                <Bar dataKey="minutes" name="Время" radius={[6, 6, 0, 0]}>
-                  {hrZones.rows.map((row) => (
-                    <Cell key={row.zone} fill={HR_ZONE_COLORS[row.zone] ?? C.indigo} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+          <div className="space-y-3">
+            <div className={cn("rounded-2xl border p-3", toneClass)}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-sm font-bold">{hrZones.balanceLabel}</div>
+                <div className="rounded-full bg-white/70 px-2.5 py-1 text-xs font-bold tabular-nums">
+                  Z1–Z2: {fmtPercent(hrZones.easyPct)} / Z3–Z5: {fmtPercent(hrZones.hardPct)}
+                </div>
+              </div>
+              <p className="mt-1.5 text-xs leading-relaxed opacity-85">
+                {hrZones.balanceAdvice}
+              </p>
+            </div>
+
+            <div className="h-52 sm:h-60">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={hrZones.rows} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" vertical={false} />
+                  <XAxis
+                    dataKey="zone"
+                    tickLine={false} axisLine={false} tickMargin={8}
+                    tick={{ fontSize: 11, fontWeight: 600 }}
+                  />
+                  <YAxis tickLine={false} axisLine={false} width={32} tick={{ fontSize: 11 }} />
+                  <Tooltip
+                    content={<ChartTooltip formatter={(v) => `${v} мин`} />}
+                    cursor={{ fill: "rgba(27,46,201,0.06)" }}
+                  />
+                  <Bar dataKey="minutes" name="Время" radius={[6, 6, 0, 0]}>
+                    {hrZones.rows.map((row) => (
+                      <Cell key={row.zone} fill={HR_ZONE_COLORS[row.zone] ?? C.indigo} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="rounded-xl border border-dashed bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+              Зоны рассчитаны по {hrZones.workoutsWithDetailedHr} тренировкам с детальным пульсом.
+            </div>
           </div>
         ) : (
           <EmptyChartState
@@ -1089,38 +1164,80 @@ function HrZonesCard({ hrZones }: { hrZones: HrZonesData }) {
 // SPORT MIX
 // ============================================================
 function SportMixCard({ mix }: { mix: MixRow[] }) {
+  const chartData = mix.map((m) => ({
+    sport: m.sport,
+    name: humanSport(m.sport),
+    value: Math.max(0, Number(m.time_sec || 0)),
+    color: sportColor(m.sport),
+  }));
+
+  const totalSec = chartData.reduce((s, x) => s + x.value, 0);
+
   return (
-    <Card>
+    <Card className="flex h-full flex-col">
       <CardHeader className="pb-2">
         <CardTitle className="text-base">Структура тренировок</CardTitle>
         <CardDescription>Доля времени по видам спорта</CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex min-h-[420px] flex-1 flex-col">
         {mix.length ? (
-          <div className="h-52 sm:h-60">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={mix.map((m) => ({
-                    name: humanSport(m.sport),
-                    value: Math.max(0, Number(m.time_sec || 0)),
-                  }))}
-                  dataKey="value"
-                  nameKey="name"
-                  innerRadius={48}
-                  outerRadius={80}
-                  paddingAngle={3}
-                  strokeWidth={2}
-                  stroke="#ffffff"
-                >
-                  {mix.map((m, i) => (
-                    <Cell key={i} fill={sportColor(m.sport)} />
-                  ))}
-                </Pie>
-                <Tooltip content={<ChartTooltip formatter={(v) => fmtTime(v)} />} />
-                <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-              </PieChart>
-            </ResponsiveContainer>
+          <div className="flex flex-1 flex-col gap-4">
+            <div className="relative min-h-[260px] flex-1">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                  <Pie
+                    data={chartData}
+                    dataKey="value"
+                    nameKey="name"
+                    innerRadius="52%"
+                    outerRadius="82%"
+                    paddingAngle={2}
+                    strokeWidth={3}
+                    stroke="#ffffff"
+                  >
+                    {chartData.map((m) => (
+                      <Cell key={m.sport} fill={m.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip content={<ChartTooltip formatter={(v) => fmtTime(v)} />} />
+                </PieChart>
+              </ResponsiveContainer>
+
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                <div className="text-center">
+                  <div className="text-2xl font-extrabold tabular-nums">
+                    {fmtHoursOnly(totalSec)}
+                  </div>
+                  <div className="mt-0.5 text-[11px] font-medium text-muted-foreground">
+                    всего
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {chartData.map((m) => {
+                const pct = totalSec > 0 ? Math.round((m.value / totalSec) * 100) : 0;
+
+                return (
+                  <div
+                    key={m.sport}
+                    className="flex min-w-0 items-center gap-2 rounded-xl border bg-background/70 px-2.5 py-2"
+                  >
+                    <span
+                      className="size-2.5 shrink-0 rounded-full"
+                      style={{ background: m.color }}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-xs font-bold">{m.name}</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {pct}% · {fmtTime(m.value)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         ) : (
           <EmptyChartState text="Пока нет данных по видам спорта" emoji="🥧" />
