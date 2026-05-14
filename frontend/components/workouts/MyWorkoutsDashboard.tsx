@@ -4,8 +4,6 @@
 
 import * as React from "react";
 import { useEffect, useMemo, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import Link from "next/link";
 import Image from "next/image";
 import {
@@ -412,54 +410,28 @@ export default function MyWorkoutsDashboardClient({
       setLoading(true);
       setErr(null);
       try {
-        const [a, b, c, d, e, f, g, h] = await Promise.all([
-          fetch(`/api/dashboard/fast-days?days=${days}`, { credentials: "include" }),
-          fetch("/api/dashboard/fast-weeks?weeks=12", { credentials: "include" }),
-          fetch(`/api/dashboard/weekday?days=${days}`, { credentials: "include" }),
-          fetch(`/api/dashboard/sport-mix?days=${days}`, { credentials: "include" }),
-          fetch(`/api/dashboard/hr-zones?days=${days}`, { credentials: "include" }),
-          fetch("/api/dashboard/next-planned", { credentials: "include" }),
-          fetch("/api/goals", { credentials: "include" }).catch(() => null),
-          fetch("/api/coach/latest", { credentials: "include" }).catch(() => null),
-        ]);
+        const res = await fetch(`/api/dashboard/home?days=${days}`, {
+          credentials: "include",
+        });
 
         if (canceled) return;
 
-        const coreResponses = [a, b, c, d, e, f];
-        const failed = coreResponses.find((res) => !res.ok);
-        if (failed) {
-          const json = await failed.json().catch(() => null);
-          throw new Error(json?.error ?? `HTTP ${failed.status}`);
+        const json = await res.json().catch(() => null);
+
+        if (!res.ok) {
+          throw new Error(json?.error ?? `HTTP ${res.status}`);
         }
 
-        const [daysJson, weeksJson, weekdayJson, sportMixJson, zonesJson, nextPlannedJson] =
-          await Promise.all(coreResponses.map((res) => res.json()));
+        const data = json?.data ?? {};
 
-        setDaysData((daysJson.data ?? []) as DayRow[]);
-        setWeeks((weeksJson.data ?? []) as WeekRow[]);
-        setWd((weekdayJson.data ?? []) as WdRow[]);
-        setMix((sportMixJson.data ?? []) as MixRow[]);
-        setZoneRows((zonesJson.data ?? []) as WorkoutZoneRow[]);
-        setNextPlannedWorkout((nextPlannedJson.data ?? null) as NextPlannedWorkoutRow | null);
-
-        if (g && g.ok) {
-          try {
-            const goalsJson = await g.json();
-            const goalsList: GoalRow[] = goalsJson.data ?? goalsJson.goals ?? [];
-            const primary =
-              goalsList.find((x) => x.is_primary && x.status === "active") ??
-              goalsList.find((x) => x.status === "active") ??
-              null;
-            setPrimaryGoal(primary);
-          } catch {}
-        }
-
-        if (h && h.ok) {
-          try {
-            const coachJson = await h.json();
-            setCoachQuote((coachJson.data ?? null) as CoachQuoteRow | null);
-          } catch {}
-        }
+        setDaysData((data.days ?? []) as DayRow[]);
+        setWeeks((data.weeks ?? []) as WeekRow[]);
+        setWd((data.weekday ?? []) as WdRow[]);
+        setMix((data.sportMix ?? []) as MixRow[]);
+        setZoneRows((data.hrZones ?? []) as WorkoutZoneRow[]);
+        setNextPlannedWorkout((data.nextPlanned ?? null) as NextPlannedWorkoutRow | null);
+        setPrimaryGoal((data.primaryGoal ?? null) as GoalRow | null);
+        setCoachQuote((data.latestCoachMessage ?? null) as CoachQuoteRow | null);
       } catch (e: unknown) {
         if (!canceled) setErr(e instanceof Error ? e.message : String(e));
       } finally {
@@ -812,14 +784,12 @@ function CoachQuoteCard({ quote }: { quote: CoachQuoteRow | null }) {
         </div>
 
         {quote?.body || quote?.body_preview ? (
-          <div className="relative min-h-[180px] flex-1 overflow-hidden rounded-2xl border bg-white/70 backdrop-blur-sm">
+          <div className="relative flex-1 rounded-2xl border bg-white/70 p-4 backdrop-blur-sm">
             <Quote className="pointer-events-none absolute left-3 top-3 z-10 size-5 rotate-180 fill-[rgba(27,46,201,0.22)] text-[rgba(27,46,201,0.22)]" />
             <div className="max-h-[260px] overflow-y-auto p-4 pl-9 pr-3">
-              <div className="prose prose-sm max-w-none text-sm leading-relaxed text-foreground prose-headings:mb-1.5 prose-headings:mt-3 prose-headings:text-sm prose-headings:font-extrabold prose-p:my-1.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {quote.body ?? quote.body_preview ?? ""}
-                </ReactMarkdown>
-              </div>
+              <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                {quote.body ?? quote.body_preview}
+              </p>
             </div>
           </div>
         ) : (

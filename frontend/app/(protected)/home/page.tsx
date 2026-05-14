@@ -1,3 +1,5 @@
+//frontend/app/(protected)/home/page.tsx
+
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -34,7 +36,7 @@ export default async function ProtectedHomePage() {
       : null;
 
   return (
-    <main className="space-y-6 p-6">
+    <main className="w-full space-y-5">
       <MyWorkoutsDashboardClient daysDefault={30} userName={userName} />
     </main>
   );
