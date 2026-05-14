@@ -4,16 +4,25 @@
 
 import * as React from "react";
 import { useEffect, useMemo, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import Link from "next/link";
+import Image from "next/image";
 import {
   Activity,
   ArrowDown,
+  ArrowRight,
   ArrowUp,
   CalendarClock,
   Flame,
   Footprints,
-  HeartPulse,
+  MessageCircle,
+  Plus,
+  Quote,
+  Sparkles,
+  Target,
   TrendingUp,
+  Trophy,
 } from "lucide-react";
 
 import {
@@ -21,6 +30,7 @@ import {
   Area,
   BarChart,
   Bar,
+  CartesianGrid,
   PieChart,
   Pie,
   Cell,
@@ -39,17 +49,20 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { sportColor } from "@/components/ui/sport-theme";
+import { sportColor, humanSport } from "@/components/ui/sport-theme";
+import logo from "@/app/icon-512.png";
 
-/* ─── types ─────────────────────────────────────────────────── */
-type DayRow  = { d: string; workouts: number; time_sec: number; distance_m: number; kcal: number };
+// ============================================================
+// TYPES
+// ============================================================
+type DayRow = { d: string; workouts: number; time_sec: number; distance_m: number; kcal: number };
 type WeekRow = { week_start: string; workouts: number; time_sec: number; distance_m: number };
-type WdRow   = { dow: number; workouts: number; time_sec: number };
-type MixRow  = { sport: string; workouts: number; time_sec: number };
+type WdRow = { dow: number; workouts: number; time_sec: number };
+type MixRow = { sport: string; workouts: number; time_sec: number };
 type HrZoneTime = Record<string, number> | null;
 type WorkoutZoneRow = { local_date: string | null; hr_zone_time: HrZoneTime };
+
 type NextPlannedWorkoutRow = {
   id: string;
   planned_date: string;
@@ -64,58 +77,111 @@ type NextPlannedWorkoutRow = {
   } | null;
 };
 
-/* ─── constants ──────────────────────────────────────────────── */
+type GoalRow = {
+  id: string;
+  title: string;
+  type: string;
+  sport: string | null;
+  status: string;
+  date_from: string;
+  date_to: string;
+  target_json: {
+    primary?: string;
+    secondary?: string;
+    race_name?: string;
+    target_time_s?: number;
+  } | null;
+  progress_cache?: {
+    completion_pct?: number;
+    progress_pct?: number;
+    progress?: number;
+  } | null;
+  is_primary?: boolean | null;
+};
+
+type CoachQuoteRow = { id: string; body?: string; body_preview?: string; created_at: string };
+
+type HrZonesData = {
+  rows: { zone: string; seconds: number; minutes: number }[];
+  easyPct: number;
+  hardPct: number;
+  hasData: boolean;
+};
+
+type WeeklyChartPoint = { w: string; hours: number; workouts: number; distance_km: number };
+
+type FormScore = {
+  score: number;
+  label: string;
+  tone: "good" | "ok" | "warn" | "muted";
+};
+
+type Trend = { pct: number; up: boolean };
+
+// ============================================================
+// CONSTANTS
+// ============================================================
 const DOW_RU = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"] as const;
-const DOW_RU_FULL = [
-  "Понедельник",
-  "Вторник",
-  "Среда",
-  "Четверг",
-  "Пятница",
-  "Суббота",
-  "Воскресенье",
-] as const;
 const PERIOD_STORAGE_KEY = "capyrun.dashboard.periodDays";
 const PERIOD_OPTIONS = [7, 30, 90, 365] as const;
 type PeriodOption = (typeof PERIOD_OPTIONS)[number];
 
-/* ─── analytics palette (colors.ts) ─────────────────────────── */
+// Бренд-палитра
 const C = {
-  blue:         "#1B2EC9",
-  blueLight:    "#C5CEFA",
-  purple:       "#59229F",
-  purpleLight:  "#D1C1E4",
-  green:        "#1A9E3A",
-  greenLight:   "#C5EDD0",
-  red:          "#E60012",
-  redLight:     "#FFCCCC",
-  yellow:       "#FFD600",
-  yellowLight:  "#FFF5B0",
-  teal:         "#3AAAEF",
-  tealLight:    "#C5E8FF",
-  navy:         "#283158",
-  navyLight:    "#D7DCE8",
+  indigo: "rgb(27,46,201)",
+  indigoLight: "rgba(27,46,201,0.12)",
+  indigoSoft: "rgba(197,206,250,0.55)",
+  green: "rgb(26,158,58)",
+  greenLight: "rgba(26,158,58,0.12)",
+  greenSoft: "rgba(197,237,208,0.55)",
+  orange: "rgb(229,139,33)",
+  orangeLight: "rgba(229,139,33,0.12)",
+  orangeSoft: "rgba(255,246,232,0.85)",
+  violet: "rgb(124,58,237)",
+  violetLight: "rgba(124,58,237,0.12)",
+  violetSoft: "rgba(209,193,228,0.55)",
+  sky: "rgb(14,165,233)",
+  skyLight: "rgba(14,165,233,0.12)",
+  rose: "rgb(244,63,94)",
 } as const;
 
-// ordered data colours for pie slices
-const WEEKDAY_ANALYTICS_COLORS = [
-  { solid: C.blue,   light: C.blueLight },
-  { solid: C.purple, light: C.purpleLight },
-  { solid: C.green,  light: C.greenLight },
-  { solid: C.red,    light: C.redLight },
-  { solid: C.yellow, light: C.yellowLight },
-  { solid: C.teal,   light: C.tealLight },
-  { solid: C.navy,   light: C.navyLight },
-] as const;
-const HR_ZONE_COLORS: Record<string, string> = {
-  Z1: C.purple,
-  Z2: C.teal,
-  Z3: C.green,
-  Z4: C.yellow,
-  Z5: C.red,
+const GOAL_TYPE_META: Record<string, { emoji: string; label: string }> = {
+  "10k": { emoji: "💨", label: "Забег 10 км" },
+  HM: { emoji: "🏁", label: "Полумарафон" },
+  M: { emoji: "🧱", label: "Марафон" },
+  trail: { emoji: "⛰️", label: "Трейл" },
+  ride: { emoji: "🚴‍♂️", label: "Вело" },
+  swim: { emoji: "🏊‍♂️", label: "Плавание" },
+  strength: { emoji: "🏋️‍♂️", label: "Силовая" },
+  weight: { emoji: "⚖️", label: "Снижение веса" },
+  vo2max: { emoji: "🫁", label: "Выносливость" },
+  custom: { emoji: "🎯", label: "Индивидуальная цель" },
 };
 
-/* ─── helpers ────────────────────────────────────────────────── */
+const GOAL_TYPE_ACCENT: Record<string, { progress: string; track: string }> = {
+  "10k": { progress: C.indigo, track: C.indigoLight },
+  HM: { progress: C.indigo, track: C.indigoLight },
+  custom: { progress: C.indigo, track: C.indigoLight },
+  M: { progress: C.violet, track: C.violetLight },
+  strength: { progress: C.violet, track: C.violetLight },
+  trail: { progress: C.green, track: C.greenLight },
+  ride: { progress: C.green, track: C.greenLight },
+  vo2max: { progress: C.green, track: C.greenLight },
+  swim: { progress: C.sky, track: C.skyLight },
+  weight: { progress: C.orange, track: C.orangeLight },
+};
+
+const HR_ZONE_COLORS: Record<string, string> = {
+  Z1: C.sky,
+  Z2: C.green,
+  Z3: C.indigo,
+  Z4: C.orange,
+  Z5: C.rose,
+};
+
+// ============================================================
+// HELPERS
+// ============================================================
 function isNum(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v);
 }
@@ -130,36 +196,8 @@ function fmtKm(meters: number) {
   const d = km >= 100 ? 0 : km >= 10 ? 1 : 2;
   return `${km.toFixed(d).replace(".", ",")} км`;
 }
-function fmtKcal(k: number) {                                                                 
+function fmtKcal(k: number) {
   return `${Math.round(Number(k || 0))} ккал`;
-}
-function prettySport(s: string) {
-  const map: Record<string, string> = {
-    run: "Бег", ride: "Вело", swim: "Плавание", walk: "Ходьба",
-    hike: "Хайк", row: "Гребля", strength: "Силовая", yoga: "Йога",
-    aerobics: "Аэробика", crossfit: "Кроссфит", pilates: "Пилатес", other: "Другая",
-  };
-  return map[s] ?? s;
-}
-function formatZoneLabel(raw: string) {
-  const key = String(raw || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-  const map: Record<string, string> = {
-    z1: "Z1",
-    z2: "Z2",
-    z3: "Z3",
-    z4: "Z4",
-    z5: "Z5",
-    zone1: "Z1",
-    zone2: "Z2",
-    zone3: "Z3",
-    zone4: "Z4",
-    zone5: "Z5",
-  };
-  return map[key] ?? String(raw || "").toUpperCase();
-}
-function zoneOrder(label: string) {
-  const m = /^Z(\d+)$/.exec(label);
-  return m ? Number(m[1]) : 999;
 }
 function fmtPercent(v: number) {
   return `${Math.round(v)}%`;
@@ -168,94 +206,234 @@ function formatDateShortRu(isoDate?: string | null) {
   if (!isoDate) return "—";
   const d = new Date(`${isoDate}T00:00:00`);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("ru-RU", {
-    day: "numeric",
-    month: "long",
-  });
-}
-function plannedWorkoutSummary(workout: NextPlannedWorkoutRow | null) {
-  if (!workout) return null;
 
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const target = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+
+  if (today === target) return "Сегодня";
+
+  return d.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+}
+function daysLeft(dateTo?: string | null) {
+  if (!dateTo) return null;
+  const end = new Date(dateTo);
+  if (Number.isNaN(end.getTime())) return null;
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const target = new Date(end.getFullYear(), end.getMonth(), end.getDate()).getTime();
+  return Math.round((target - today) / 86400000);
+}
+function daysLeftLabel(dateTo?: string | null) {
+  const d = daysLeft(dateTo);
+  if (d == null) return "Без даты";
+  if (d < 0) return "Срок прошёл";
+  if (d === 0) return "Сегодня";
+  if (d === 1) return "1 день";
+  if (d >= 2 && d <= 4) return `${d} дня`;
+  return `${d} дней`;
+}
+function getGoalProgressPct(goal: GoalRow): number {
+  const p = goal.progress_cache ?? {};
+  const raw = [p.completion_pct, p.progress_pct, p.progress].find(
+    (v) => typeof v === "number" && Number.isFinite(v)
+  );
+  if (typeof raw === "number") return Math.max(0, Math.min(100, Math.round(raw)));
+  if (goal.date_from && goal.date_to) {
+    const start = new Date(goal.date_from).getTime();
+    const end = new Date(goal.date_to).getTime();
+    const now = Date.now();
+    if (!Number.isNaN(start) && !Number.isNaN(end) && end > start) {
+      return Math.max(0, Math.min(100, Math.round(((now - start) / (end - start)) * 100)));
+    }
+  }
+  return 0;
+}
+function formatZoneLabel(raw: string) {
+  const key = String(raw || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const map: Record<string, string> = {
+    z1: "Z1", z2: "Z2", z3: "Z3", z4: "Z4", z5: "Z5",
+    zone1: "Z1", zone2: "Z2", zone3: "Z3", zone4: "Z4", zone5: "Z5",
+  };
+  return map[key] ?? String(raw || "").toUpperCase();
+}
+function zoneOrder(label: string) {
+  const m = /^Z(\d+)$/.exec(label);
+  return m ? Number(m[1]) : 999;
+}
+function sportEmoji(s?: string | null): string {
+  const k = (s || "").toLowerCase();
+  const map: Record<string, string> = {
+    run: "🏃", ride: "🚴", swim: "🏊", walk: "🚶", hike: "🥾",
+    row: "🚣", strength: "🏋️", yoga: "🧘", aerobics: "💃",
+    crossfit: "🏋️‍♂️", pilates: "🤸",
+  };
+  return map[k] ?? "🏃";
+}
+
+type PlannedWorkoutSummary = {
+  title: string;
+  meta: string;
+  dateLabel: string;
+  sport: string | null;
+};
+function plannedWorkoutSummary(workout: NextPlannedWorkoutRow | null): PlannedWorkoutSummary | null {
+  if (!workout) return null;
   const parts: string[] = [];
-  if (workout.sport) parts.push(prettySport(workout.sport));
   if (workout.structure?.duration_min) parts.push(`${Math.round(Number(workout.structure.duration_min))} мин`);
   if (workout.structure?.distance_km) parts.push(`${Number(workout.structure.distance_km).toFixed(1)} км`);
   if (workout.structure?.effort) parts.push(String(workout.structure.effort));
-
   return {
     title: workout.title || workout.structure?.goal || "Тренировка по плану",
     meta: parts.join(" · ") || "Плановая тренировка",
     dateLabel: formatDateShortRu(workout.planned_date),
+    sport: workout.sport,
   };
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   MAIN COMPONENT
-═══════════════════════════════════════════════════════════════ */
-export default function MyWorkoutsDashboardClient({ daysDefault = 30 }: { daysDefault?: number }) {
-  const [days, setDays]       = useState<PeriodOption>(daysDefault as PeriodOption);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr]         = useState<string | null>(null);
+// ============================================================
+// SVG RADIAL GAUGE
+// ============================================================
+function RadialProgress({
+  value, size = 190, strokeWidth = 15, trackColor, progressColor,
+}: {
+  value: number;
+  size?: number;
+  strokeWidth?: number;
+  trackColor: string;
+  progressColor: string;
+}) {
+  const r = (size - strokeWidth) / 2;
+  const cx = size / 2;
+  const cy = size / 2;
+  const circumference = 2 * Math.PI * r;
+  const halfCirc = circumference / 2;
+  const p = Math.max(0, Math.min(100, value));
+  const progressLen = Math.min((p / 100) * halfCirc, halfCirc);
+  const viewH = size / 2 + strokeWidth;
+  return (
+    <svg width={size} height={viewH} viewBox={`0 0 ${size} ${viewH}`} aria-hidden className="block">
+      <circle
+        cx={cx} cy={cy} r={r}
+        fill="none" stroke={trackColor} strokeWidth={strokeWidth} strokeLinecap="round"
+        strokeDasharray={`${halfCirc} ${circumference}`}
+        transform={`rotate(180, ${cx}, ${cy})`}
+      />
+      {p > 0 && (
+        <circle
+          cx={cx} cy={cy} r={r}
+          fill="none" stroke={progressColor} strokeWidth={strokeWidth} strokeLinecap="round"
+          strokeDasharray={`${progressLen} ${circumference}`}
+          transform={`rotate(180, ${cx}, ${cy})`}
+          style={{ transition: "stroke-dasharray 0.6s ease-out" }}
+        />
+      )}
+    </svg>
+  );
+}
 
-  // restore saved period (client-only)
+// ============================================================
+// SHADCN-STYLE CHART TOOLTIP
+// ============================================================
+type TooltipFormatter = (value: number, name?: string) => string;
+
+function ChartTooltip({
+  active, payload, label, formatter,
+}: {
+  active?: boolean;
+  payload?: Array<{ value: number; name?: string; color?: string; fill?: string; dataKey?: string }>;
+  label?: string | number;
+  formatter?: TooltipFormatter;
+}) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-xl border bg-card/95 px-3 py-2 shadow-lg backdrop-blur-sm">
+      {label != null ? <div className="mb-1.5 text-xs font-bold text-foreground">{label}</div> : null}
+      <div className="space-y-1">
+        {payload.map((entry, i) => (
+          <div key={i} className="flex items-center gap-2 text-[11px]">
+            <span
+              className="size-2 shrink-0 rounded-full"
+              style={{ background: entry.color || entry.fill }}
+            />
+            <span className="text-muted-foreground">{entry.name ?? entry.dataKey}:</span>
+            <span className="ml-auto font-bold tabular-nums text-foreground">
+              {formatter ? formatter(entry.value, entry.name) : entry.value}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// MAIN COMPONENT
+// ============================================================
+export default function MyWorkoutsDashboardClient({
+  daysDefault = 30,
+  userName,
+}: {
+  daysDefault?: number;
+  userName?: string | null;
+}) {
+  const [days, setDays] = useState<PeriodOption>(daysDefault as PeriodOption);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(PERIOD_STORAGE_KEY);
       if (!raw) return;
       const parsed = Number(raw);
-      if ((PERIOD_OPTIONS as readonly number[]).includes(parsed))
+      if ((PERIOD_OPTIONS as readonly number[]).includes(parsed)) {
         setDays(parsed as PeriodOption);
-    } catch { /* ignore */ }
+      }
+    } catch {}
   }, []);
-
-  // persist period
   useEffect(() => {
-    try { window.localStorage.setItem(PERIOD_STORAGE_KEY, String(days)); } catch { /* ignore */ }
+    try {
+      window.localStorage.setItem(PERIOD_STORAGE_KEY, String(days));
+    } catch {}
   }, [days]);
 
-  /* ── data state ── */
   const [daysData, setDaysData] = useState<DayRow[]>([]);
-  const [weeks,    setWeeks]    = useState<WeekRow[]>([]);
-  const [wd,       setWd]       = useState<WdRow[]>([]);
-  const [mix,      setMix]      = useState<MixRow[]>([]);
+  const [weeks, setWeeks] = useState<WeekRow[]>([]);
+  const [wd, setWd] = useState<WdRow[]>([]);
+  const [mix, setMix] = useState<MixRow[]>([]);
   const [zoneRows, setZoneRows] = useState<WorkoutZoneRow[]>([]);
   const [nextPlannedWorkout, setNextPlannedWorkout] = useState<NextPlannedWorkoutRow | null>(null);
-  const [weeklyHoverIndex, setWeeklyHoverIndex] = useState<number | null>(null);
+  const [primaryGoal, setPrimaryGoal] = useState<GoalRow | null>(null);
+  const [coachQuote, setCoachQuote] = useState<CoachQuoteRow | null>(null);
 
-  /* ── fetch ── */
   useEffect(() => {
     let canceled = false;
     (async () => {
       setLoading(true);
       setErr(null);
       try {
-        const [a, b, c, d, e, f] = await Promise.all([
+        const [a, b, c, d, e, f, g, h] = await Promise.all([
           fetch(`/api/dashboard/fast-days?days=${days}`, { credentials: "include" }),
           fetch("/api/dashboard/fast-weeks?weeks=12", { credentials: "include" }),
           fetch(`/api/dashboard/weekday?days=${days}`, { credentials: "include" }),
           fetch(`/api/dashboard/sport-mix?days=${days}`, { credentials: "include" }),
           fetch(`/api/dashboard/hr-zones?days=${days}`, { credentials: "include" }),
           fetch("/api/dashboard/next-planned", { credentials: "include" }),
+          fetch("/api/goals", { credentials: "include" }).catch(() => null),
+          fetch("/api/coach/latest", { credentials: "include" }).catch(() => null),
         ]);
 
         if (canceled) return;
 
-        const responses = [a, b, c, d, e, f];
-        const failed = responses.find((res) => !res.ok);
-
+        const coreResponses = [a, b, c, d, e, f];
+        const failed = coreResponses.find((res) => !res.ok);
         if (failed) {
           const json = await failed.json().catch(() => null);
           throw new Error(json?.error ?? `HTTP ${failed.status}`);
         }
 
-        const [
-          daysJson,
-          weeksJson,
-          weekdayJson,
-          sportMixJson,
-          zonesJson,
-          nextPlannedJson,
-        ] = await Promise.all(responses.map((res) => res.json()));
+        const [daysJson, weeksJson, weekdayJson, sportMixJson, zonesJson, nextPlannedJson] =
+          await Promise.all(coreResponses.map((res) => res.json()));
 
         setDaysData((daysJson.data ?? []) as DayRow[]);
         setWeeks((weeksJson.data ?? []) as WeekRow[]);
@@ -263,123 +441,120 @@ export default function MyWorkoutsDashboardClient({ daysDefault = 30 }: { daysDe
         setMix((sportMixJson.data ?? []) as MixRow[]);
         setZoneRows((zonesJson.data ?? []) as WorkoutZoneRow[]);
         setNextPlannedWorkout((nextPlannedJson.data ?? null) as NextPlannedWorkoutRow | null);
+
+        if (g && g.ok) {
+          try {
+            const goalsJson = await g.json();
+            const goalsList: GoalRow[] = goalsJson.data ?? goalsJson.goals ?? [];
+            const primary =
+              goalsList.find((x) => x.is_primary && x.status === "active") ??
+              goalsList.find((x) => x.status === "active") ??
+              null;
+            setPrimaryGoal(primary);
+          } catch {}
+        }
+
+        if (h && h.ok) {
+          try {
+            const coachJson = await h.json();
+            setCoachQuote((coachJson.data ?? null) as CoachQuoteRow | null);
+          } catch {}
+        }
       } catch (e: unknown) {
         if (!canceled) setErr(e instanceof Error ? e.message : String(e));
       } finally {
         if (!canceled) setLoading(false);
       }
     })();
-    return () => { canceled = true; };
+    return () => {
+      canceled = true;
+    };
   }, [days]);
 
-  /* ─── derived: KPI totals ─── */
-  const kpi = useMemo(() => ({
-    workouts:   daysData.reduce((s, x) => s + (isNum(x.workouts)   ? x.workouts   : 0), 0),
-    time_sec:   daysData.reduce((s, x) => s + (isNum(x.time_sec)   ? x.time_sec   : 0), 0),
-    distance_m: daysData.reduce((s, x) => s + Number(x.distance_m || 0), 0),
-    kcal:       daysData.reduce((s, x) => s + Number(x.kcal        || 0), 0),
-  }), [daysData]);
+  const kpi = useMemo(
+    () => ({
+      workouts: daysData.reduce((s, x) => s + (isNum(x.workouts) ? x.workouts : 0), 0),
+      time_sec: daysData.reduce((s, x) => s + (isNum(x.time_sec) ? x.time_sec : 0), 0),
+      distance_m: daysData.reduce((s, x) => s + Number(x.distance_m || 0), 0),
+      kcal: daysData.reduce((s, x) => s + Number(x.kcal || 0), 0),
+    }),
+    [daysData],
+  );
 
-  /* ─── derived: period trend (second half vs first half) ─── */
-  const trend = useMemo(() => {
+  const trend: Trend | null = useMemo(() => {
     if (daysData.length < 6) return null;
     const sorted = [...daysData].sort((a, b) => a.d.localeCompare(b.d));
-    const half   = Math.floor(sorted.length / 2);
-    const distA  = sorted.slice(0, half).reduce((s, x) => s + Number(x.distance_m || 0), 0);
-    const distB  = sorted.slice(half   ).reduce((s, x) => s + Number(x.distance_m || 0), 0);
+    const half = Math.floor(sorted.length / 2);
+    const distA = sorted.slice(0, half).reduce((s, x) => s + Number(x.distance_m || 0), 0);
+    const distB = sorted.slice(half).reduce((s, x) => s + Number(x.distance_m || 0), 0);
     if (distA <= 0) return null;
     const pct = Math.round(((distB - distA) / distA) * 100);
     return { pct, up: pct >= 0 };
   }, [daysData]);
 
-  /* ─── derived: form score ─── */
-  const form = useMemo(() => {
-    if (!daysData.length) return { score: 0, label: "нет данных", tone: "muted" as const };
+  const form: FormScore = useMemo(() => {
+    if (!daysData.length) return { score: 0, label: "нет данных", tone: "muted" };
     const sorted = [...daysData].sort((a, b) => a.d.localeCompare(b.d));
-    const last7  = sorted.slice(-7);
+    const last7 = sorted.slice(-7);
     const last28 = sorted.slice(-28);
-    const km7    = last7.reduce( (s, x) => s + Number(x.distance_m || 0), 0) / 1000;
-    const km28   = last28.reduce((s, x) => s + Number(x.distance_m || 0), 0) / 1000;
-    const exp7   = last28.length >= 14 ? (km28 / Math.max(1, last28.length)) * 7 : km7;
-    if (exp7 <= 0.2) return { score: 35, label: "строим базу", tone: "muted" as const };
+    const km7 = last7.reduce((s, x) => s + Number(x.distance_m || 0), 0) / 1000;
+    const km28 = last28.reduce((s, x) => s + Number(x.distance_m || 0), 0) / 1000;
+    const exp7 = last28.length >= 14 ? (km28 / Math.max(1, last28.length)) * 7 : km7;
+    if (exp7 <= 0.2) return { score: 35, label: "строим базу", tone: "muted" };
     const ratio = km7 / Math.max(0.01, exp7);
     const score = Math.max(0, Math.min(100, Math.round(55 + (ratio - 1) * 28)));
-    const tone  = score >= 80 ? "good" as const : score >= 65 ? "ok" as const : score >= 50 ? "warn" as const : "muted" as const;
-    const label = score >= 80 ? "готов жечь" : score >= 65 ? "хорошая форма" : score >= 50 ? "нормально" : "бережно";
+    const tone: FormScore["tone"] =
+      score >= 80 ? "good" : score >= 65 ? "ok" : score >= 50 ? "warn" : "muted";
+    const label =
+      score >= 80 ? "готов жечь" :
+      score >= 65 ? "хорошая форма" :
+      score >= 50 ? "нормально" :
+      "бережно";
     return { score, label, tone };
   }, [daysData]);
 
-  /* ─── derived: averages & insights ─── */
-  const avgPerWorkout = useMemo(() => {
-    const w = Math.max(1, kpi.workouts);
-    return {
-      distance_m: kpi.workouts > 0 ? kpi.distance_m / w : 0,
-      time_sec:   kpi.workouts > 0 ? kpi.time_sec   / w : 0,
-    };
-  }, [kpi]);
+  const formAccent = useMemo(() => {
+    switch (form.tone) {
+      case "good": return { progress: C.green, track: C.greenLight };
+      case "ok": return { progress: C.indigo, track: C.indigoLight };
+      case "warn": return { progress: C.orange, track: C.orangeLight };
+      default:
+        if (form.score > 0) return { progress: C.rose, track: "rgba(244,63,94,0.12)" };
+        return { progress: "rgb(120,120,140)", track: "rgba(120,120,140,0.14)" };
+    }
+  }, [form.tone, form.score]);
 
   const weeklyAvg = useMemo(() => {
     const valid = weeks.filter((w) => Number(w.time_sec || 0) > 0 || Number(w.distance_m || 0) > 0);
     if (!valid.length) return { time_sec: 0, distance_m: 0, workouts: 0 };
     return {
-      time_sec:   valid.reduce((s, w) => s + Number(w.time_sec   || 0), 0) / valid.length,
+      time_sec: valid.reduce((s, w) => s + Number(w.time_sec || 0), 0) / valid.length,
       distance_m: valid.reduce((s, w) => s + Number(w.distance_m || 0), 0) / valid.length,
-      workouts:   valid.reduce((s, w) => s + Number(w.workouts   || 0), 0) / valid.length,
+      workouts: valid.reduce((s, w) => s + Number(w.workouts || 0), 0) / valid.length,
     };
   }, [weeks]);
-
-  const weeklyChartData = useMemo(() => {
-    return weeks.map((w) => ({
-      w: w.week_start,
-      hours: +(Number(w.time_sec || 0) / 3600).toFixed(2),
-      workouts: Number(w.workouts || 0),
-      distance_km: +(Number(w.distance_m || 0) / 1000).toFixed(1),
-    }));
-  }, [weeks]);
-
-  const activeWeeklyPoint = useMemo(() => {
-    if (!weeklyChartData.length) return null;
-    if (weeklyHoverIndex != null && weeklyChartData[weeklyHoverIndex]) {
-      return weeklyChartData[weeklyHoverIndex];
-    }
-    return weeklyChartData[weeklyChartData.length - 1] ?? null;
-  }, [weeklyChartData, weeklyHoverIndex]);
 
   const activeDays = useMemo(
     () => daysData.filter((d) => Number(d.workouts || 0) > 0).length,
     [daysData],
   );
 
-  const topWeekday = useMemo(() => {
-    if (!wd.length) return null;
-    const top = [...wd].sort((a, b) => {
-      const diff = Number(b.time_sec || 0) - Number(a.time_sec || 0);
-      return diff !== 0 ? diff : Number(b.workouts || 0) - Number(a.workouts || 0);
-    })[0];
-    return top
-      ? { label: DOW_RU_FULL[(top.dow - 1 + 7) % 7], workouts: Number(top.workouts || 0) }
-      : null;
-  }, [wd]);
+  const weeklyChartData: WeeklyChartPoint[] = useMemo(() => {
+    return [...weeks]
+      .sort((a, b) => a.week_start.localeCompare(b.week_start))
+      .map((w) => ({
+        w: w.week_start.slice(5),
+        hours: +(Number(w.time_sec || 0) / 3600).toFixed(2),
+        workouts: Number(w.workouts || 0),
+        distance_km: +(Number(w.distance_m || 0) / 1000).toFixed(1),
+      }));
+  }, [weeks]);
 
-  const topSport = useMemo(() => {
-    if (!mix.length) return null;
-    const total = mix.reduce((s, x) => s + Number(x.time_sec || 0), 0);
-    const top   = [...mix].sort((a, b) => Number(b.time_sec || 0) - Number(a.time_sec || 0))[0];
-    return top
-      ? {
-          label: prettySport(top.sport),
-          share: total > 0 ? Math.round((Number(top.time_sec || 0) / total) * 100) : 0,
-        }
-      : null;
-  }, [mix]);
-
-  const hrZones = useMemo(() => {
+  const hrZones: HrZonesData = useMemo(() => {
     const totals = new Map<string, number>();
-
     for (const row of zoneRows) {
       const hr = row.hr_zone_time;
       if (!hr || typeof hr !== "object") continue;
-
       for (const [rawKey, rawValue] of Object.entries(hr)) {
         const seconds = Number(rawValue || 0);
         if (!Number.isFinite(seconds) || seconds <= 0) continue;
@@ -387,147 +562,49 @@ export default function MyWorkoutsDashboardClient({ daysDefault = 30 }: { daysDe
         totals.set(label, (totals.get(label) ?? 0) + seconds);
       }
     }
-
     const rows = Array.from(totals.entries())
-      .map(([zone, seconds]) => ({
-        zone,
-        seconds,
-        minutes: Math.round(seconds / 60),
-      }))
+      .map(([zone, seconds]) => ({ zone, seconds, minutes: Math.round(seconds / 60) }))
       .sort((a, b) => zoneOrder(a.zone) - zoneOrder(b.zone));
-
     const easySeconds = rows
       .filter((r) => r.zone === "Z1" || r.zone === "Z2")
-      .reduce((sum, r) => sum + r.seconds, 0);
+      .reduce((s, r) => s + r.seconds, 0);
     const hardSeconds = rows
       .filter((r) => !["Z1", "Z2"].includes(r.zone))
-      .reduce((sum, r) => sum + r.seconds, 0);
+      .reduce((s, r) => s + r.seconds, 0);
     const totalSeconds = easySeconds + hardSeconds;
-    const easyPct = totalSeconds > 0 ? (easySeconds / totalSeconds) * 100 : 0;
-    const hardPct = totalSeconds > 0 ? (hardSeconds / totalSeconds) * 100 : 0;
-
     return {
       rows,
-      easySeconds,
-      hardSeconds,
-      totalSeconds,
-      easyPct,
-      hardPct,
+      easyPct: totalSeconds > 0 ? (easySeconds / totalSeconds) * 100 : 0,
+      hardPct: totalSeconds > 0 ? (hardSeconds / totalSeconds) * 100 : 0,
       hasData: totalSeconds > 0,
     };
   }, [zoneRows]);
 
-  const intensityRecommendation = useMemo(() => {
-    if (!hrZones.hasData) {
-      return "Пока недостаточно данных по пульсовым зонам, чтобы оценить баланс лёгкой и тяжёлой работы.";
-    }
-    if (hrZones.easyPct >= 75 && hrZones.hardPct <= 25) {
-      return "Баланс близок к 80/20. Хорошая база: лёгкой работы достаточно, тяжёлая нагрузка не доминирует.";
-    }
-    if (hrZones.easyPct < 75) {
-      return "Стоит добавить больше лёгких тренировок. Сейчас доля интенсивной работы выглядит выше желаемой.";
-    }
-    return "Тяжёлой работы сейчас немного. Это нормально для базы, но при желании можно точечно добавить качественную нагрузку.";
-  }, [hrZones]);
-
-  /* ─── derived: text ─── */
-  const summaryLines = useMemo(() => {
-    if (kpi.workouts === 0) {
-      return ["За выбранный период пока нет тренировок"];
-    }
-
-    const lines: string[] = [];
-    if (topSport) {
-      lines.push(`Основной фокус — ${topSport.label.toLowerCase()} (${topSport.share}% объёма)`);
-    }
-    if (topWeekday) {
-      lines.push(`Самый объёмный день недели — ${topWeekday.label}`);
-    }
-    if (form.score >= 75) {
-      lines.push("Форма выглядит уверенно — можно держать хороший объём");
-    } else if (form.score >= 55) {
-      lines.push("Форма хорошая — главное сейчас не терять ритм");
-    } else {
-      lines.push("Сейчас лучше мягко наращивать базу без перегруза");
-    }
-
-    return lines;
-  }, [form.score, kpi.workouts, topSport, topWeekday]);
-
   const nextWorkoutCard = useMemo(() => plannedWorkoutSummary(nextPlannedWorkout), [nextPlannedWorkout]);
+  const goalAccent = primaryGoal ? GOAL_TYPE_ACCENT[primaryGoal.type] ?? GOAL_TYPE_ACCENT.custom : null;
+  const goalPct = primaryGoal ? getGoalProgressPct(primaryGoal) : 0;
+  const goalMeta = primaryGoal ? GOAL_TYPE_META[primaryGoal.type] ?? GOAL_TYPE_META.custom : null;
 
-  const weeklyComparison = useMemo(() => {
-    const point = activeWeeklyPoint;
-    if (!point) {
-      return {
-        title: "Пока нет недельных данных",
-        text: "Когда накопится несколько тренировок, здесь появится ориентир по недельному объёму",
-        emoji: "📊",
-      };
-    }
+  const safeUserName = userName && !userName.includes("@") ? userName.trim() : "";
 
-    const hours = Number(point.hours || 0);
+  // === WELCOME (полностью пустой пользователь) ===
+  const isWelcome =
+    !loading && !err && kpi.workouts === 0 && !primaryGoal && !nextPlannedWorkout;
+  if (isWelcome) {
+    return <WelcomeEmptyState userName={safeUserName || null} />;
+  }
 
-    if (hours < 2) {
-      return {
-        title: "Лёгкий режим",
-        text: "Небольшой объём — отлично для восстановления или мягкого входа в тренировки",
-        emoji: "🐢",
-      };
-    }
-    if (hours < 4) {
-      return {
-        title: "Спокойный ритм",
-        text: "Стабильные тренировки для здоровья и формы без перегрузки",
-        emoji: "🙂",
-      };
-    }
-    if (hours < 6.5) {
-      return {
-        title: "Хорошая база",
-        text: "Уже системный уровень — так тренируются те, кто строит выносливость",
-        emoji: "🏃",
-      };
-    }
-    if (hours < 9) {
-      return {
-        title: "Сильный объём",
-        text: "Похоже на подготовку к серьёзной цели — нагрузка уже заметная",
-        emoji: "🐇",
-      };
-    }
-
-    return {
-      title: "Очень высокий объём",
-      text: "Такой объём держат дисциплинированные спортсмены — почти соревновательный режим",
-      emoji: "🐆",
-    };
-  }, [activeWeeklyPoint]);
-
-  /* ─── hero gradient & bar color ─── */
-  const heroGradient =
-    form.tone === "good" ? "bg-gradient-to-br from-emerald-200/70 to-blue-100/60 dark:from-emerald-500/20 dark:to-sky-500/10" :
-    form.tone === "ok"   ? "bg-gradient-to-br from-blue-100/70 to-violet-100/70 dark:from-sky-500/15 dark:to-violet-500/10" :
-    form.tone === "warn" ? "bg-gradient-to-br from-amber-100/80 to-orange-100/60 dark:from-amber-500/15 dark:to-sky-500/10" :
-    "bg-gradient-to-br from-muted/60 to-muted/20";
-
-  const formBarColor =
-    form.tone === "good" ? C.green :
-    form.tone === "ok"   ? C.blue  :
-    form.tone === "warn" ? C.yellow :
-    "#595958";
-
-  /* ═══════════════════════════════════════════════════════════
-     RENDER
-  ═══════════════════════════════════════════════════════════ */
   return (
-    <section className="space-y-4">
-
-      {/* ── period picker + nav ── */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="shrink-0 text-sm text-muted-foreground">Период</span>
-          <div className="inline-flex flex-wrap items-center gap-0.5 rounded-full border bg-muted/10 p-0.5">
+    <section className="space-y-5">
+      {/* HEADER */}
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-3xl font-extrabold tracking-tight">
+            {safeUserName ? `Привет, ${safeUserName}` : "Привет!"}
+          </h1>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <div className="inline-flex items-center gap-0.5 rounded-full border bg-muted/10 p-0.5">
             {PERIOD_OPTIONS.map((n) => (
               <Button
                 key={n}
@@ -536,582 +613,844 @@ export default function MyWorkoutsDashboardClient({ daysDefault = 30 }: { daysDe
                 variant={days === n ? "secondary" : "ghost"}
                 onClick={() => setDays(n)}
                 disabled={loading}
-                className="h-7 rounded-full px-3 text-sm hover:bg-muted/40"
+                className="h-7 rounded-full px-3 text-xs hover:bg-muted/40"
               >
                 {n} дн.
               </Button>
             ))}
           </div>
-          {loading && <Badge variant="secondary" className="shrink-0">Обновляем…</Badge>}
-          {err      && <Badge variant="destructive" className="shrink-0">Ошибка</Badge>}
+          <Link href="/workouts">
+            <Button variant="secondary" size="sm">
+              Тренировки <ArrowRight className="ml-1 size-3.5" />
+            </Button>
+          </Link>
         </div>
+      </header>
 
-        <Link href="/workouts">
-          <Button variant="secondary" size="sm">Тренировки →</Button>
-        </Link>
-      </div>
-
-      {err && (
+      {err ? (
         <Card className="border-destructive/30">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Не удалось загрузить дашборд</CardTitle>
-            <CardDescription className="text-destructive">{err}</CardDescription>
-          </CardHeader>
-        </Card>
-      )}
-
-      {/* ── HERO ── */}
-      <Card className={cn("relative overflow-hidden", heroGradient)}>
-        <CardContent className="relative space-y-4 p-4 sm:p-6">
-
-          {/* score + badges row */}
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div className="space-y-2.5">
-              <div className="flex flex-wrap gap-2">
-                <Badge variant="secondary">Runner HQ</Badge>
-                <Badge variant="outline">форма · объём · привычки</Badge>
-              </div>
-              <div className="text-2xl font-extrabold leading-tight sm:text-3xl">
-                Форма:{" "}
-                <span className="tabular-nums">{form.score || "—"}</span>/100
-                <span className="ml-2 text-base font-semibold text-muted-foreground">
-                  {form.label}
-                </span>
-              </div>
-              <div className="h-2.5 w-full max-w-xs overflow-hidden rounded-full bg-background/70">
-                <div
-                  className="h-full rounded-full transition-all duration-500"
-                  style={{ width: `${Math.max(6, form.score || 0)}%`, background: formBarColor }}
-                />
-              </div>
-            </div>
-
-            {/* meta-badges: trend / activity */}
-            <div className="flex flex-wrap gap-2 sm:flex-col sm:items-end sm:gap-1.5">
-              {trend && (
-                <span className={cn(
-                  "inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-sm font-medium backdrop-blur",
-                  trend.up
-                    ? "bg-green-100/80 text-green-800 dark:bg-green-900/30 dark:text-green-300"
-                    : "bg-red-100/80 text-red-800 dark:bg-red-900/30 dark:text-red-300",
-                )}>
-                  {trend.up
-                    ? <ArrowUp   className="h-3.5 w-3.5" />
-                    : <ArrowDown className="h-3.5 w-3.5" />}
-                  {Math.abs(trend.pct)}% к прошлому периоду
-                </span>
-              )}
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-background/70 px-3 py-1.5 text-sm font-medium backdrop-blur">
-                📅 {activeDays} из {days} дней активны
-              </span>
-            </div>
-          </div>
-
-          {/* 4 KPI tiles */}
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <HeroKPI icon={<TrendingUp className="h-4 w-4" />} label="Тренировок" value={kpi.workouts}                 color={C.blue}   fill={C.blueLight} />
-            <HeroKPI icon={<Footprints className="h-4 w-4" />} label="Дистанция"  value={fmtKm(kpi.distance_m)}        color={C.purple} fill={C.purpleLight} />
-            <HeroKPI icon={<Activity  className="h-4 w-4" />} label="Время"       value={fmtTime(kpi.time_sec)}        color={C.green}  fill={C.greenLight} />
-            <HeroKPI
-              icon={<Flame className="h-4 w-4" style={{ color: C.red }} />}
-              label="Калории"
-              value={fmtKcal(kpi.kcal)}
-              color={C.red}
-              fill={C.redLight}
-            />
-          </div>
-
-          {/* 2 insight tiles */}
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-2">
-            <InsightTile
-              title="Средняя тренировка"
-              value={fmtTime(Math.round(avgPerWorkout.time_sec))}
-              sub={avgPerWorkout.distance_m > 0 ? fmtKm(avgPerWorkout.distance_m) : undefined}
-              tone="blue"
-            />
-            <InsightTile
-              title="Средний объём в неделю"
-              value={fmtKm(weeklyAvg.distance_m)}
-              sub={fmtTime(Math.round(weeklyAvg.time_sec))}
-              tone="violet"
-            />
-          </div>
-
-          {/* summary + next step */}
-          <div className="grid gap-2 md:grid-cols-2">
-            <div className="rounded-2xl border border-white/50 bg-background/60 p-4 backdrop-blur">
-              <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
-                <TrendingUp className="h-4 w-4" />
-                Вывод
-              </div>
-              <div className="space-y-1.5 text-sm text-muted-foreground">
-                {summaryLines.map((line, idx) => (
-                  <p key={idx}>{line}</p>
-                ))}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-white/50 bg-background/60 p-4 backdrop-blur">
-              <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
-                <CalendarClock className="h-4 w-4" />
-                Следующая тренировка
-              </div>
-              {nextWorkoutCard ? (
-                <>
-                  <div className="text-sm font-medium">{nextWorkoutCard.title}</div>
-                  <div className="mt-1 text-sm text-muted-foreground">{nextWorkoutCard.dateLabel}</div>
-                  <div className="mt-1 text-sm text-muted-foreground">{nextWorkoutCard.meta}</div>
-                  <Link href="/plan">
-                    <Button variant="secondary" size="sm" className="mt-3 rounded-xl">
-                      Открыть план →
-                    </Button>
-                  </Link>
-                </>
-              ) : (
-                <>
-                  <p className="mb-3 text-sm text-muted-foreground">
-                    В плане пока нет ближайшей тренировки. Можно открыть календарь и добавить следующую сессию.
-                  </p>
-                  <Link href="/plan">
-                    <Button variant="secondary" size="sm" className="rounded-xl">
-                      Открыть план →
-                    </Button>
-                  </Link>
-                </>
-              )}
-            </div>
-          </div>
-
-        </CardContent>
-      </Card>
-
-      {/* ── HR ZONES + WEEKLY RHYTHM ── */}
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1.35fr_0.95fr]">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Пульсовые зоны</CardTitle>
-            <CardDescription>сколько времени тренировки шли в каждой зоне за период и как выглядит баланс 80/20</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {hrZones.hasData ? (
-              <>
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-[0.95fr_1.25fr]">
-                  <div className="grid grid-cols-2 gap-2">
-                    <CompactStat label="Лёгкая работа" value={fmtPercent(hrZones.easyPct)} tone="green" />
-                    <CompactStat label="Интенсивная работа" value={fmtPercent(hrZones.hardPct)} tone="red" />
-                  </div>
-                  <div className="rounded-2xl border bg-muted/20 p-3">
-                    <div className="mb-1 flex items-center gap-2 text-sm font-semibold">
-                      <HeartPulse className="h-4 w-4" />
-                      Баланс 80/20
-                    </div>
-                    <p className="text-sm text-muted-foreground">{intensityRecommendation}</p>
-                  </div>
-                </div>
-
-                <div className="h-56 sm:h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={hrZones.rows}
-                      margin={{ top: 8, right: 8, left: 0, bottom: 8 }}
-                    >
-                      <XAxis dataKey="zone" tickLine={false} axisLine={false} tickMargin={8} tick={{ fontSize: 11 }} />
-                      <YAxis tickLine={false} axisLine={false} width={32} tick={{ fontSize: 11 }} />
-                      <Tooltip formatter={(v: unknown) => [`${v} мин`, "Время"]} />
-                      <Bar dataKey="minutes" radius={[6, 6, 0, 0]}>
-                        {hrZones.rows.map((row) => (
-                          <Cell
-                            key={row.zone}
-                            fill={HR_ZONE_COLORS[row.zone] ?? C.purple}
-                          />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </>
-            ) : (
-              <EmptyStateCard
-                emoji="🫀"
-                title="Пульсовые зоны пока не собраны"
-                description="Как только появятся тренировки с данными по пульсу, здесь покажем распределение по зонам и проверим баланс 80/20"
-              />
-            )}
+          <CardContent className="py-3">
+            <div className="text-sm font-semibold text-destructive">Ошибка загрузки: {err}</div>
           </CardContent>
         </Card>
+      ) : null}
 
-        <Card className="overflow-hidden">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Объём тренировок по неделям</CardTitle>
-            <CardDescription>12 недель · сколько времени вы тренировались каждую неделю</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid grid-cols-2 gap-2">
-              <CompactStat
-                label="Среднее время в неделю"
-                value={fmtTime(Math.round(weeklyAvg.time_sec))}
-                tone="blue"
-              />
-              <CompactStat
-                label="Тренировок в неделю"
-                value={Math.round(weeklyAvg.workouts * 10) / 10}
-                tone="blue"
-              />
-            </div>
-            <div className="h-40 sm:h-44">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={weeklyChartData}
-                  margin={{ top: 8, right: 8, left: 0, bottom: 8 }}
-                  onMouseMove={(state) => {
-                    if (typeof state?.activeTooltipIndex === "number") {
-                      setWeeklyHoverIndex(state.activeTooltipIndex);
-                    }
-                  }}
-                  onMouseLeave={() => setWeeklyHoverIndex(null)}
-                >
-                  <XAxis dataKey="w" tickLine={false} axisLine={false} tickMargin={8} tick={{ fontSize: 10 }} />
-                  <YAxis tickLine={false} axisLine={false} width={28} tick={{ fontSize: 11 }} />
-                  <Tooltip formatter={(v: unknown) => [`${v} ч`, "Время"]} />
-                  <Bar dataKey="hours" radius={[6, 6, 0, 0]} fill={C.blue} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            <WeeklyVolumeCallout
-              point={activeWeeklyPoint}
-              title={weeklyComparison.title}
-              text={weeklyComparison.text}
-              emoji={weeklyComparison.emoji}
-            />
-          </CardContent>
-        </Card>
+      {/* HERO ROW: форма + цитата тренера */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.6fr_1fr]">
+        <FormHeroCard
+          score={form.score}
+          label={form.label}
+          accent={formAccent}
+          kpi={kpi}
+          trend={trend}
+          activeDays={activeDays}
+          totalDays={days}
+        />
+        <CoachQuoteCard quote={coachQuote} />
       </div>
 
-      {/* ── DAILY TREND + KCAL ── */}
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-        <Card className="overflow-hidden">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Время тренировок по дням</CardTitle>
-            <CardDescription>как распределялось тренировочное время внутри выбранного периода</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="h-64 sm:h-72">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart
-                  data={daysData.map((d) => ({
-                    d:        d.d,
-                    time_h:   Math.round((Number(d.time_sec || 0) / 3600) * 100) / 100,
-                    workouts: Number(d.workouts || 0),
-                  }))}
-                  margin={{ top: 10, right: 12, left: 0, bottom: 0 }}
-                >
-                  <defs>
-                    <linearGradient id="dailyFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={C.blue} stopOpacity={0.42} />
-                      <stop offset="100%" stopColor={C.blueLight} stopOpacity={0.15} />
-                    </linearGradient>
-                  </defs>
-                  <XAxis dataKey="d" tickLine={false} axisLine={false} tickMargin={8} tick={{ fontSize: 11 }} />
-                  <YAxis tickLine={false} axisLine={false} width={32} tick={{ fontSize: 11 }} />
-                  <Tooltip
-                    formatter={(v: unknown, name: unknown) =>
-                      name === "time_h" ? [`${v} ч`, "Время"] : [v, "Тренировок"]
-                    }
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="time_h"
-                    stroke={C.blue}
-                    fill="url(#dailyFill)"
-                    strokeWidth={3}
-                    activeDot={{ r: 4 }}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Сожжённые калории</CardTitle>
-            <CardDescription>динамика энергозатрат по дням за выбранный период</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="h-60 sm:h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart
-                  data={daysData.map((d) => ({
-                    d: d.d,
-                    kcal: Math.round(Number(d.kcal || 0)),
-                  }))}
-                  margin={{ top: 10, right: 12, left: 0, bottom: 0 }}
-                >
-                  <defs>
-                    <linearGradient id="kcalFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="var(--destructive)" stopOpacity={0.34} />
-                      <stop offset="100%" stopColor="var(--destructive)" stopOpacity={0.08} />
-                    </linearGradient>
-                  </defs>
-                  <XAxis dataKey="d" tickLine={false} axisLine={false} tickMargin={8} tick={{ fontSize: 11 }} />
-                  <YAxis tickLine={false} axisLine={false} width={36} tick={{ fontSize: 11 }} />
-                  <Tooltip formatter={(v: unknown) => [`${v} ккал`, "Калории"]} />
-                  <Area
-                    type="monotone"
-                    dataKey="kcal"
-                    stroke="var(--destructive)"
-                    fill="url(#kcalFill)"
-                    strokeWidth={3}
-                    activeDot={{ r: 4 }}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
+      {/* ROW: next workout + primary goal */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <NextWorkoutCard data={nextWorkoutCard} />
+        <PrimaryGoalCard goal={primaryGoal} meta={goalMeta} accent={goalAccent} pct={goalPct} />
       </div>
 
-      {/* ── WEEKDAY HABITS + SPORT MIX ── */}
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1.35fr_0.95fr]">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Распределение тренировок по дням недели</CardTitle>
-            <CardDescription>в какие дни недели у вас больше всего объёма и тренировок</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="h-52 sm:h-56">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={wd.map((x) => ({
-                    d: DOW_RU[(x.dow - 1 + 7) % 7],
-                    h: +(Number(x.time_sec || 0) / 3600).toFixed(2),
-                    c: Number(x.workouts || 0),
-                  }))}
-                  margin={{ top: 8, right: 8, left: 0, bottom: 8 }}
-                >
-                  <defs>
-                    {WEEKDAY_ANALYTICS_COLORS.map((color, idx) => (
-                      <pattern
-                        key={`weekday-time-pattern-${idx}`}
-                        id={`weekday-time-pattern-${idx}`}
-                        patternUnits="userSpaceOnUse"
-                        width="16"
-                        height="16"
-                        patternTransform="rotate(-45)"
-                      >
-                        <rect width="16" height="16" fill={color.light} />
-                        <rect x="8" y="0" width="8" height="16" fill={color.solid} />
-                      </pattern>
-                    ))}
-                  </defs>
-                  <XAxis dataKey="d" tickLine={false} axisLine={false} tickMargin={8} tick={{ fontSize: 11 }} />
-                  <YAxis yAxisId="left" tickLine={false} axisLine={false} width={28} tick={{ fontSize: 11 }} />
-                  <YAxis yAxisId="right" orientation="right" tickLine={false} axisLine={false} width={28} tick={{ fontSize: 11 }} />
-                  <Tooltip
-                    formatter={(v: unknown, name: unknown) =>
-                      name === "h" ? [`${v} ч`, "Время"] : [v, "Тренировки"]
-                    }
-                  />
-                  <Legend iconSize={10} />
-                  <Bar
-                    yAxisId="left"
-                    dataKey="h"
-                    radius={[6, 6, 0, 0]}
-                    name="Время"
-                  >
-                    {wd.map((_, idx) => (
-                      <Cell
-                        key={`weekday-time-cell-${idx}`}
-                        fill={`url(#weekday-time-pattern-${idx % WEEKDAY_ANALYTICS_COLORS.length})`}
-                      />
-                    ))}
-                  </Bar>
-                  <Bar
-                    yAxisId="right"
-                    dataKey="c"
-                    radius={[6, 6, 0, 0]}
-                    name="Тренировки"
-                  >
-                    {wd.map((_, idx) => (
-                      <Cell
-                        key={`weekday-workouts-cell-${idx}`}
-                        fill={WEEKDAY_ANALYTICS_COLORS[idx % WEEKDAY_ANALYTICS_COLORS.length].solid}
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
+      {/* CHART: weekly volume */}
+      <WeeklyVolumeCard data={weeklyChartData} weeklyAvg={weeklyAvg} />
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Структура тренировок по видам спорта</CardTitle>
-            <CardDescription>какую долю времени занимает каждый вид активности</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="h-60 sm:h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={mix.map((m) => ({
-                      name: prettySport(m.sport),
-                      value: Math.max(0, Number(m.time_sec || 0)),
-                    }))}
-                    dataKey="value"
-                    nameKey="name"
-                    innerRadius={52}
-                    outerRadius={85}
-                    paddingAngle={3}
-                  >
-                    {mix.map((m, i) => (
-                      <Cell key={i} fill={sportColor(m?.sport)} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(v: unknown) => [fmtTime(Number(v)), "Время"]} />
-                  <Legend iconSize={10} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
+      {/* ROW: HR zones + sport mix */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <HrZonesCard hrZones={hrZones} />
+        <SportMixCard mix={mix} />
       </div>
 
+      {/* ROW: daily time + daily kcal */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <DailyTimeCard daysData={daysData} />
+        <DailyKcalCard daysData={daysData} />
+      </div>
+
+      {/* CHART: weekday distribution */}
+      <WeekdayDistributionCard wd={wd} />
     </section>
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   UI COMPONENTS
-═══════════════════════════════════════════════════════════════ */
+// ============================================================
+// FORM HERO
+// ============================================================
+function FormHeroCard({
+  score, label, accent, kpi, trend, activeDays, totalDays,
+}: {
+  score: number;
+  label: string;
+  accent: { progress: string; track: string };
+  kpi: { workouts: number; time_sec: number; distance_m: number; kcal: number };
+  trend: Trend | null;
+  activeDays: number;
+  totalDays: number;
+}) {
+  const heroBg = `
+    radial-gradient(circle at calc(100% + 5rem) -5rem, ${accent.track} 0, transparent 58%),
+    radial-gradient(circle at -4rem calc(100% + 4rem), ${accent.track} 0, transparent 55%)
+  `;
 
-function HeroKPI({
-  icon, label, value, color, fill,
+  return (
+    <Card
+      className="relative overflow-hidden border bg-card shadow-2xl shadow-[rgba(229,139,33,0.12)]"
+      style={{ backgroundImage: heroBg }}
+    >
+
+      <CardContent className="relative space-y-5 p-5 sm:p-6">
+        <div className="flex items-center justify-between gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300/50 bg-amber-100/70 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-amber-800 backdrop-blur">
+            <Sparkles className="size-3.5" />
+            Твоя форма
+          </span>
+          {trend ? (
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold backdrop-blur",
+                trend.up
+                  ? "bg-[rgba(197,237,208,0.7)] text-[rgb(26,158,58)]"
+                  : "bg-[rgba(255,232,232,0.7)] text-[rgb(220,38,38)]",
+              )}
+            >
+              {trend.up ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />}
+              {Math.abs(trend.pct)}% к началу периода
+            </span>
+          ) : null}
+        </div>
+
+        <div className="flex flex-col items-center gap-5 sm:flex-row sm:items-start">
+          <div className="relative shrink-0">
+            <RadialProgress
+              value={score}
+              size={170}
+              strokeWidth={14}
+              trackColor={accent.track}
+              progressColor={accent.progress}
+            />
+            <div className="absolute inset-x-0 bottom-2 text-center">
+              <div className="flex items-baseline justify-center gap-0.5 tabular-nums">
+                <span className="text-4xl font-extrabold leading-none">{score || "—"}</span>
+                <span className="text-base font-bold text-muted-foreground">/100</span>
+              </div>
+              <div className="mt-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Форма
+              </div>
+            </div>
+          </div>
+
+          <div className="min-w-0 flex-1 space-y-2.5 sm:pt-2">
+            <h2 className="text-2xl font-extrabold leading-tight tracking-tight sm:text-3xl capitalize">
+              {label}
+            </h2>
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              {score >= 80
+                ? "Уверенный объём за последние недели — можешь смело держать ритм и добавлять качество."
+                : score >= 65
+                ? "Стабильная нагрузка. Хорошее время для точечной интенсивной работы."
+                : score >= 50
+                ? "Тренируешься по-человечески, без перегруза. Можно мягко наращивать."
+                : "Сейчас лучше аккуратно вернуться в ритм — без рывков."}
+            </p>
+            <div className="text-xs text-muted-foreground">
+              {activeDays} из {totalDays} дней были активными
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+          <KpiTile icon={<TrendingUp className="size-4" />} label="Тренировок" value={kpi.workouts} accent={C.indigo} bg={C.indigoSoft} />
+          <KpiTile icon={<Footprints className="size-4" />} label="Дистанция" value={fmtKm(kpi.distance_m)} accent={C.violet} bg={C.violetSoft} />
+          <KpiTile icon={<Activity className="size-4" />} label="Время" value={fmtTime(kpi.time_sec)} accent={C.green} bg={C.greenSoft} />
+          <KpiTile icon={<Flame className="size-4" />} label="Калории" value={fmtKcal(kpi.kcal)} accent={C.orange} bg={C.orangeSoft} />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function KpiTile({
+  icon, label, value, accent, bg,
 }: {
   icon: React.ReactNode;
   label: string;
   value: React.ReactNode;
-  color: string;
-  fill: string;
+  accent: string;
+  bg: string;
 }) {
   return (
-    <div className="rounded-2xl border bg-background/65 p-3 backdrop-blur sm:p-4">
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <span
-          className="inline-flex h-6 w-6 items-center justify-center rounded-full"
-          style={{ background: fill, color }}
-        >
+    <div className="rounded-2xl border bg-white/65 p-3 backdrop-blur-sm">
+      <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+        <span className="inline-flex size-6 items-center justify-center rounded-full" style={{ background: bg, color: accent }}>
           {icon}
         </span>
-        {label}
+        <span className="truncate">{label}</span>
       </div>
-      <div className="mt-1.5 text-lg font-semibold tabular-nums">{value}</div>
+      <div className="mt-1.5 text-base font-extrabold tabular-nums sm:text-lg">{value}</div>
     </div>
   );
 }
 
-function InsightTile({
-  title, value, sub, tone,
-}: {
-  title: string;
-  value: React.ReactNode;
-  sub?: React.ReactNode;
-  tone: "blue" | "violet" | "green" | "yellow";
-}) {
-  const cls =
-    tone === "blue"   ? "border-[rgba(27,46,201,0.18)]  bg-[rgba(197,206,250,0.65)]" :
-    tone === "violet" ? "border-[rgba(89,34,159,0.18)]  bg-[rgba(209,193,228,0.45)]" :
-    tone === "green"  ? "border-[rgba(26,158,58,0.18)]  bg-[rgba(197,237,208,0.70)]" :
-    /* yellow */        "border-[rgba(255,214,0,0.25)]   bg-[rgba(255,245,176,0.70)]";
-
+// ============================================================
+// COACH QUOTE
+// ============================================================
+function CoachQuoteCard({ quote }: { quote: CoachQuoteRow | null }) {
   return (
-    <div className={cn("rounded-2xl border p-3 sm:p-4", cls)}>
-      <div className="text-xs text-muted-foreground">{title}</div>
-      <div className="mt-1 text-base font-semibold tabular-nums sm:text-lg">{value}</div>
-      {sub && <div className="mt-1 text-xs text-muted-foreground">{sub}</div>}
-    </div>
+    <Card className="relative flex flex-col overflow-hidden border bg-gradient-to-br from-[rgba(212,219,253,0.55)] via-card to-[rgba(197,237,208,0.35)] shadow-sm">
+      <CardContent className="flex flex-1 flex-col gap-3 p-5">
+        <div className="flex items-center gap-2.5">
+          <div className="flex size-10 items-center justify-center rounded-full bg-white shadow-md ring-2 ring-white">
+            <Image src={logo} alt="Капи" width={36} height={36} className="rounded-full" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-sm font-bold">Капи</div>
+            <div className="text-[11px] text-muted-foreground">Тренер</div>
+          </div>
+        </div>
+
+        {quote?.body || quote?.body_preview ? (
+          <div className="relative min-h-[180px] flex-1 overflow-hidden rounded-2xl border bg-white/70 backdrop-blur-sm">
+            <Quote className="pointer-events-none absolute left-3 top-3 z-10 size-5 rotate-180 fill-[rgba(27,46,201,0.22)] text-[rgba(27,46,201,0.22)]" />
+            <div className="max-h-[260px] overflow-y-auto p-4 pl-9 pr-3">
+              <div className="prose prose-sm max-w-none text-sm leading-relaxed text-foreground prose-headings:mb-1.5 prose-headings:mt-3 prose-headings:text-sm prose-headings:font-extrabold prose-p:my-1.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {quote.body ?? quote.body_preview ?? ""}
+                </ReactMarkdown>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 rounded-2xl border border-dashed bg-white/40 p-4">
+            <p className="text-sm text-muted-foreground">
+              Капи скоро напишет совет дня. А пока — посмотри статистику ниже.
+            </p>
+          </div>
+        )}
+
+        <Link href="/coach">
+          <Button variant="secondary" size="sm" className="w-full">
+            <MessageCircle className="mr-1.5 size-4" />
+            Открыть чат с тренером
+          </Button>
+        </Link>
+      </CardContent>
+    </Card>
   );
 }
 
-function CompactStat({
-  label, value, tone,
+// ============================================================
+// NEXT WORKOUT
+// ============================================================
+function NextWorkoutCard({ data }: { data: PlannedWorkoutSummary | null }) {
+  return (
+    <Card className="relative flex flex-col overflow-hidden border shadow-sm">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -right-16 -top-20 size-52 rounded-full bg-[rgba(197,206,250,0.55)] blur-3xl"
+      />
+
+      <CardContent className="relative flex flex-1 flex-col gap-4 p-5">
+        <div className="flex items-center justify-between gap-3">
+          <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-[rgba(27,46,201,0.25)] bg-[rgba(197,206,250,0.55)] px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-[rgb(27,46,201)]">
+            <CalendarClock className="size-3" />
+            Следующая тренировка
+          </span>
+
+          {data ? (
+            <span className="rounded-full bg-muted/50 px-2.5 py-1 text-xs font-semibold text-muted-foreground">
+              {data.dateLabel}
+            </span>
+          ) : null}
+        </div>
+
+        {data ? (
+          <>
+            <div className="rounded-3xl border bg-white/70 p-4 shadow-sm backdrop-blur-sm">
+              <div className="flex items-start gap-4">
+                <div
+                  className="flex size-14 shrink-0 items-center justify-center rounded-2xl text-3xl shadow-sm"
+                  style={{
+                    background: data.sport ? `${sportColor(data.sport)}1A` : C.indigoLight,
+                    border: `1px solid ${data.sport ? `${sportColor(data.sport)}40` : "rgba(27,46,201,0.18)"}`,
+                  }}
+                >
+                  {sportEmoji(data.sport)}
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                    {humanSport(data.sport)}
+                  </div>
+                  <h3 className="mt-1 line-clamp-2 text-base font-bold leading-snug">
+                    {data.title}
+                  </h3>
+                  <p className="mt-1 line-clamp-2 text-[11px] font-medium text-muted-foreground">
+                    {data.meta}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex-1" />
+
+            <Link href="/plan">
+              <Button variant="primary" size="sm" className="w-full">
+                Открыть в календаре <ArrowRight className="ml-1 size-4" />
+              </Button>
+            </Link>
+          </>
+        ) : (
+          <>
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed bg-muted/15 px-5 py-8 text-center">
+              <div className="flex size-16 items-center justify-center rounded-2xl bg-white shadow-sm">
+                <CalendarClock className="size-8 text-muted-foreground" />
+              </div>
+              <div>
+                <div className="text-sm font-semibold">Тренировка не запланирована</div>
+                <p className="mt-1 max-w-xs text-xs leading-relaxed text-muted-foreground">
+                  Добавим тренировку в календарь или попросим Капи собрать неделю.
+                </p>
+              </div>
+            </div>
+
+            <Link href="/plan">
+              <Button variant="primary" size="sm" className="w-full">
+                <Plus className="mr-1 size-4" /> Запланировать
+              </Button>
+            </Link>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ============================================================
+// PRIMARY GOAL
+// ============================================================
+function PrimaryGoalCard({
+  goal, meta, accent, pct,
 }: {
-  label: string;
-  value: React.ReactNode;
-  tone: "blue" | "violet" | "green" | "red";
+  goal: GoalRow | null;
+  meta: { emoji: string; label: string } | null;
+  accent: { progress: string; track: string } | null;
+  pct: number;
 }) {
   return (
-    <div className={cn(
-      "rounded-2xl border p-3",
-      tone === "blue"
-        ? "border-[rgba(27,46,201,0.18)] bg-[rgba(197,206,250,0.38)]"
-        : tone === "violet"
-        ? "border-[rgba(89,34,159,0.18)] bg-[rgba(209,193,228,0.30)]"
-        : tone === "green"
-        ? "border-[rgba(26,158,58,0.18)] bg-[rgba(197,237,208,0.38)]"
-        : "border-destructive/20 bg-destructive/5",
-    )}>
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-base font-semibold tabular-nums">{value}</div>
+    <Card className="flex flex-col border shadow-sm">
+      <CardContent className="flex flex-1 flex-col gap-3.5 p-5">
+        <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-amber-300/50 bg-amber-100/70 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-amber-800">
+          <Trophy className="size-3" />
+          Главная цель
+        </span>
+
+        {goal && meta && accent ? (
+          <>
+            <div className="rounded-2xl border bg-muted/10 p-4">
+              <div className="flex items-start gap-3">
+                <div
+                  className="flex size-12 shrink-0 items-center justify-center rounded-2xl text-2xl shadow-sm"
+                  style={{
+                    background: accent.track,
+                    border: `1px solid color-mix(in srgb, ${accent.progress} 20%, transparent)`,
+                  }}
+                >
+                  {meta.emoji}
+                </div>
+
+                <div className="min-w-0 flex-1 space-y-1">
+                  <h3 className="line-clamp-2 text-base font-bold leading-snug">
+                    {goal.title || meta.label}
+                  </h3>
+                  <p className="text-[11px] font-medium text-muted-foreground">{meta.label}</p>
+                  <div className="text-[11px] text-muted-foreground">
+                    Финиш {formatDateShortRu(goal.date_to)} ·{" "}
+                    <span className="font-semibold text-foreground">{daysLeftLabel(goal.date_to)}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-2">
+                <div className="flex items-center justify-between gap-3 text-xs">
+                  <span className="font-medium text-muted-foreground">Прогресс</span>
+                  <span className="font-extrabold tabular-nums">{pct}%</span>
+                </div>
+                <div className="h-3 overflow-hidden rounded-full" style={{ background: accent.track }}>
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{ width: `${pct}%`, background: accent.progress }}
+                  />
+                </div>
+              </div>
+            </div>
+            <Link href="/goals">
+              <Button variant="secondary" size="sm" className="w-full">
+                Все цели <ArrowRight className="ml-1 size-4" />
+              </Button>
+            </Link>
+          </>
+        ) : (
+          <>
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 py-2 text-center">
+              <div className="flex size-14 items-center justify-center rounded-2xl bg-muted/40">
+                <Target className="size-7 text-muted-foreground" />
+              </div>
+              <div>
+                <div className="text-sm font-semibold">Цель ещё не поставлена</div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Поставь цель — план и календарь будут под неё подстраиваться
+                </p>
+              </div>
+            </div>
+            <Link href="/goals">
+              <Button variant="primary" size="sm" className="w-full">
+                <Plus className="mr-1 size-4" /> Поставить цель
+              </Button>
+            </Link>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ============================================================
+// WEEKLY VOLUME
+// ============================================================
+function WeeklyVolumeCard({
+  data, weeklyAvg,
+}: {
+  data: WeeklyChartPoint[];
+  weeklyAvg: { time_sec: number; distance_m: number; workouts: number };
+}) {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">Объём по неделям</CardTitle>
+        <CardDescription>
+          {data.length
+            ? `12 недель · в среднем ${fmtTime(Math.round(weeklyAvg.time_sec))} в неделю · ${fmtKm(weeklyAvg.distance_m)}`
+            : "Сколько ты тренировался за последние 12 недель"}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {data.length ? (
+          <div className="h-56 sm:h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={data} margin={{ top: 10, right: 8, left: 0, bottom: 4 }}>
+                <defs>
+                  <linearGradient id="weeklyBarFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={C.indigo} stopOpacity={1} />
+                    <stop offset="100%" stopColor={C.indigo} stopOpacity={0.55} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" vertical={false} />
+                <XAxis dataKey="w" tickLine={false} axisLine={false} tickMargin={8} tick={{ fontSize: 10 }} />
+                <YAxis tickLine={false} axisLine={false} width={32} tick={{ fontSize: 11 }} />
+                <Tooltip
+                  content={<ChartTooltip formatter={(v) => `${v} ч`} />}
+                  cursor={{ fill: "rgba(27,46,201,0.06)" }}
+                />
+                <Bar dataKey="hours" name="Часы" radius={[6, 6, 0, 0]} fill="url(#weeklyBarFill)" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <EmptyChartState text="Данных по неделям пока нет" emoji="📊" />
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ============================================================
+// HR ZONES
+// ============================================================
+function HrZonesCard({ hrZones }: { hrZones: HrZonesData }) {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">Пульсовые зоны</CardTitle>
+        <CardDescription>
+          {hrZones.hasData
+            ? `лёгкая ${fmtPercent(hrZones.easyPct)} · интенсивная ${fmtPercent(hrZones.hardPct)}`
+            : "Распределение времени по зонам Z1–Z5"}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {hrZones.hasData ? (
+          <div className="h-52 sm:h-60">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={hrZones.rows} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" vertical={false} />
+                <XAxis
+                  dataKey="zone"
+                  tickLine={false} axisLine={false} tickMargin={8}
+                  tick={{ fontSize: 11, fontWeight: 600 }}
+                />
+                <YAxis tickLine={false} axisLine={false} width={32} tick={{ fontSize: 11 }} />
+                <Tooltip
+                  content={<ChartTooltip formatter={(v) => `${v} мин`} />}
+                  cursor={{ fill: "rgba(27,46,201,0.06)" }}
+                />
+                <Bar dataKey="minutes" name="Время" radius={[6, 6, 0, 0]}>
+                  {hrZones.rows.map((row) => (
+                    <Cell key={row.zone} fill={HR_ZONE_COLORS[row.zone] ?? C.indigo} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <EmptyChartState
+            text="Тренировки без пульса. Подключи устройство — и увидишь баланс зон."
+            emoji="🫀"
+          />
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ============================================================
+// SPORT MIX
+// ============================================================
+function SportMixCard({ mix }: { mix: MixRow[] }) {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">Структура тренировок</CardTitle>
+        <CardDescription>Доля времени по видам спорта</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {mix.length ? (
+          <div className="h-52 sm:h-60">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={mix.map((m) => ({
+                    name: humanSport(m.sport),
+                    value: Math.max(0, Number(m.time_sec || 0)),
+                  }))}
+                  dataKey="value"
+                  nameKey="name"
+                  innerRadius={48}
+                  outerRadius={80}
+                  paddingAngle={3}
+                  strokeWidth={2}
+                  stroke="#ffffff"
+                >
+                  {mix.map((m, i) => (
+                    <Cell key={i} fill={sportColor(m.sport)} />
+                  ))}
+                </Pie>
+                <Tooltip content={<ChartTooltip formatter={(v) => fmtTime(v)} />} />
+                <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <EmptyChartState text="Пока нет данных по видам спорта" emoji="🥧" />
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ============================================================
+// DAILY TIME
+// ============================================================
+function DailyTimeCard({ daysData }: { daysData: DayRow[] }) {
+  const data = daysData.map((d) => ({
+    d: d.d.slice(5),
+    time_h: Math.round((Number(d.time_sec || 0) / 3600) * 100) / 100,
+  }));
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">Время по дням</CardTitle>
+        <CardDescription>Часы тренировок в каждый день периода</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {data.length ? (
+          <div className="h-52 sm:h-60">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={data} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="dailyFillIndigo" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={C.indigo} stopOpacity={0.4} />
+                    <stop offset="100%" stopColor={C.indigo} stopOpacity={0.05} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" vertical={false} />
+                <XAxis dataKey="d" tickLine={false} axisLine={false} tickMargin={8} tick={{ fontSize: 10 }} />
+                <YAxis tickLine={false} axisLine={false} width={32} tick={{ fontSize: 11 }} />
+                <Tooltip
+                  content={<ChartTooltip formatter={(v) => `${v} ч`} />}
+                  cursor={{ stroke: C.indigo, strokeWidth: 1, strokeDasharray: "3 3" }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="time_h"
+                  name="Время"
+                  stroke={C.indigo}
+                  strokeWidth={2.5}
+                  fill="url(#dailyFillIndigo)"
+                  activeDot={{ r: 4, fill: C.indigo }}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <EmptyChartState text="Пока нет тренировок в этом периоде" emoji="📈" />
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ============================================================
+// DAILY KCAL
+// ============================================================
+function DailyKcalCard({ daysData }: { daysData: DayRow[] }) {
+  const data = daysData.map((d) => ({
+    d: d.d.slice(5),
+    kcal: Math.round(Number(d.kcal || 0)),
+  }));
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">Калории</CardTitle>
+        <CardDescription>Энергозатраты по дням</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {data.length ? (
+          <div className="h-52 sm:h-60">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={data} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="kcalFillOrange" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={C.orange} stopOpacity={0.42} />
+                    <stop offset="100%" stopColor={C.orange} stopOpacity={0.05} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" vertical={false} />
+                <XAxis dataKey="d" tickLine={false} axisLine={false} tickMargin={8} tick={{ fontSize: 10 }} />
+                <YAxis tickLine={false} axisLine={false} width={36} tick={{ fontSize: 11 }} />
+                <Tooltip
+                  content={<ChartTooltip formatter={(v) => `${v} ккал`} />}
+                  cursor={{ stroke: C.orange, strokeWidth: 1, strokeDasharray: "3 3" }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="kcal"
+                  name="Калории"
+                  stroke={C.orange}
+                  strokeWidth={2.5}
+                  fill="url(#kcalFillOrange)"
+                  activeDot={{ r: 4, fill: C.orange }}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <EmptyChartState text="Пока нет данных по калориям" emoji="🔥" />
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ============================================================
+// WEEKDAY DISTRIBUTION
+// ============================================================
+function WeekdayDistributionCard({ wd }: { wd: WdRow[] }) {
+  const data = wd.map((x) => ({
+    d: DOW_RU[(x.dow - 1 + 7) % 7],
+    hours: +(Number(x.time_sec || 0) / 3600).toFixed(2),
+    workouts: Number(x.workouts || 0),
+  }));
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">По дням недели</CardTitle>
+        <CardDescription>Когда ты тренируешься чаще всего</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {data.length ? (
+          <div className="h-52 sm:h-60">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" vertical={false} />
+                <XAxis
+                  dataKey="d"
+                  tickLine={false} axisLine={false} tickMargin={8}
+                  tick={{ fontSize: 11, fontWeight: 600 }}
+                />
+                <YAxis
+                  yAxisId="left"
+                  tickLine={false} axisLine={false} width={28} tick={{ fontSize: 11 }}
+                />
+                <YAxis
+                  yAxisId="right"
+                  orientation="right"
+                  tickLine={false} axisLine={false} width={28} tick={{ fontSize: 11 }}
+                />
+                <Tooltip
+                  content={
+                    <ChartTooltip
+                      formatter={(v, name) =>
+                        name === "Часы" ? `${v} ч` : `${v} трен.`
+                      }
+                    />
+                  }
+                  cursor={{ fill: "rgba(27,46,201,0.06)" }}
+                />
+                <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
+                <Bar yAxisId="left" dataKey="hours" name="Часы" radius={[6, 6, 0, 0]} fill={C.indigo} />
+                <Bar yAxisId="right" dataKey="workouts" name="Трен." radius={[6, 6, 0, 0]} fill={C.violet} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <EmptyChartState text="Пока недостаточно тренировок" emoji="📅" />
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ============================================================
+// EMPTY CHART STATE
+// ============================================================
+function EmptyChartState({ text, emoji }: { text: string; emoji: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed bg-muted/20 px-4 py-8 text-center">
+      <div className="text-3xl">{emoji}</div>
+      <p className="text-sm text-muted-foreground">{text}</p>
     </div>
   );
 }
 
-function EmptyStateCard({
+// ============================================================
+// WELCOME EMPTY STATE
+// ============================================================
+function WelcomeEmptyState({ userName }: { userName?: string | null }) {
+  return (
+    <section className="space-y-5">
+      <div className="relative mx-auto max-w-2xl space-y-6 text-center">
+        <div className="mx-auto inline-flex size-24 items-center justify-center rounded-full bg-white shadow-xl ring-4 ring-white/60">
+          <Image src={logo} alt="Капи" width={80} height={80} className="rounded-full" />
+        </div>
+
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300/50 bg-amber-100/70 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-amber-800">
+          <Sparkles className="size-3.5" />
+          Привет от Капи
+        </span>
+
+        <div className="space-y-3">
+          <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">
+            Готов жечь{userName ? `, ${userName}` : ""}?
+          </h1>
+          <p className="mx-auto max-w-lg text-base leading-relaxed text-muted-foreground">
+            Чтобы дашборд ожил данными — добавь первую тренировку, поставь цель или подключи Strava. Дальше я
+            подсчитаю форму, недельный объём, баланс зон и буду подсказывать, что делать.
+          </p>
+        </div>
+
+        <div className="grid gap-3 pt-2 sm:grid-cols-3">
+          <WelcomeActionCard
+            href="/integrations"
+            emoji="⚡"
+            title="Подключить Strava"
+            description="Тренировки подтянутся автоматически"
+            accent={C.orange}
+            bg={C.orangeSoft}
+          />
+          <WelcomeActionCard
+            href="/workouts"
+            emoji="🏃"
+            title="Добавить тренировку"
+            description="Вручную или из файла"
+            accent={C.indigo}
+            bg={C.indigoSoft}
+          />
+          <WelcomeActionCard
+            href="/goals"
+            emoji="🎯"
+            title="Поставить цель"
+            description="План адаптируется под неё"
+            accent={C.green}
+            bg={C.greenSoft}
+          />
+        </div>
+      </div>
+
+      <Card className="border-dashed">
+        <CardContent className="space-y-4 p-5 sm:p-6">
+          <div className="flex items-center gap-2">
+            <Sparkles className="size-4 text-[rgb(229,139,33)]" />
+            <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
+              Что появится здесь
+            </h2>
+          </div>
+          <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+            <PreviewBullet emoji="📊" title="Форма" text="Оценка 0–100 по объёму и нагрузке" />
+            <PreviewBullet emoji="🎯" title="Главная цель" text="Прогресс с полукруглым графиком" />
+            <PreviewBullet emoji="🫀" title="Пульсовые зоны" text="Баланс 80/20" />
+            <PreviewBullet emoji="📅" title="Календарь" text="Следующая тренировка и план" />
+          </div>
+        </CardContent>
+      </Card>
+    </section>
+  );
+}
+
+function WelcomeActionCard({
+  href,
   emoji,
   title,
   description,
+  accent,
+  bg,
 }: {
+  href: string;
   emoji: string;
   title: string;
   description: string;
+  accent: string;
+  bg: string;
 }) {
   return (
-    <div className="rounded-2xl border border-dashed bg-muted/20 p-6">
-      <div className="mx-auto flex max-w-md flex-col items-center text-center">
-        <div className="mb-3 inline-flex h-16 w-16 items-center justify-center rounded-full border bg-background text-3xl shadow-sm">
+    <Link href={href} className="block h-full">
+      <div className="group relative h-full overflow-hidden rounded-2xl border bg-card p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-foreground/15 hover:shadow-md">
+        <div
+          className="flex size-12 items-center justify-center rounded-xl text-2xl shadow-sm transition-transform group-hover:scale-110"
+          style={{
+            background: bg,
+            border: `1px solid color-mix(in srgb, ${accent} 22%, transparent)`,
+          }}
+        >
           {emoji}
         </div>
-        <div className="text-sm font-semibold">{title}</div>
-        <div className="mt-2 text-sm text-muted-foreground">{description}</div>
+        <h3 className="mt-3 text-sm font-bold leading-snug">{title}</h3>
+        <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{description}</p>
+        <ArrowRight className="absolute right-3 top-3 size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
       </div>
-    </div>
+    </Link>
   );
 }
 
-function WeeklyVolumeCallout({
-  point,
-  title,
-  text,
-  emoji,
-}: {
-  point: { w: string; hours: number; workouts: number; distance_km: number } | null;
-  title: string;
-  text: string;
-  emoji: string;
-}) {
+function PreviewBullet({ emoji, title, text }: { emoji: string; title: string; text: string }) {
   return (
-    <div
-      className={cn(
-        "rounded-2xl border p-3",
-        "border-[rgba(27,46,201,0.18)] bg-[rgba(197,206,250,0.35)]",
-      )}
-    >
-      <div className="flex items-start gap-3">
-        <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-background/70 text-lg">
-          {emoji}
-        </div>
-        <div className="min-w-0 space-y-1">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <div className="text-sm font-semibold">{title}</div>
-            {point ? (
-              <div className="text-xs text-muted-foreground">
-                {point.hours.toFixed(1)} ч · {point.workouts} трен. · {point.distance_km.toFixed(1)} км
-              </div>
-            ) : null}
-          </div>
-          <div className="text-sm text-muted-foreground">{text}</div>
-        </div>
+    <div className="flex items-start gap-2.5">
+      <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-muted/40 text-xl">{emoji}</div>
+      <div className="min-w-0">
+        <div className="text-sm font-semibold">{title}</div>
+        <p className="text-xs leading-relaxed text-muted-foreground">{text}</p>
       </div>
     </div>
   );

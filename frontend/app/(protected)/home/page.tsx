@@ -1,12 +1,10 @@
-// frontend/app/(protected)/home/page.tsx
-
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createSupabaseServerClient } from "@/lib/supabaseServerApp";
-import MyWorkoutsDashboardClient from "@/components/workouts/MyWorkoutsDashboard.client"; // Это дашборд с данными по тренировкам
+import MyWorkoutsDashboardClient from "@/components/workouts/MyWorkoutsDashboard.client";
 
 export default async function ProtectedHomePage() {
   const supabase = await createSupabaseServerClient();
@@ -14,19 +12,30 @@ export default async function ProtectedHomePage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // если нет текущего юзера — проверим легаси-куку и уйдём в апгрейд
   if (!user) {
     const jar = await cookies();
     const legacy = jar.get("capyrun.auth")?.value;
     if (legacy) {
       redirect(`/api/auth/upgrade?returnTo=${encodeURIComponent("/")}`);
     }
-    redirect("/login"); // или твой путь логина
+    redirect("/login");
   }
+
+  // Имя для приветствия — только display_name из профиля (без e-mail / метаданных)
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("display_name")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  const userName =
+    profile?.display_name?.trim()?.length
+      ? profile.display_name.trim()
+      : null;
 
   return (
     <main className="space-y-6 p-6">
-      <MyWorkoutsDashboardClient daysDefault={30} />
+      <MyWorkoutsDashboardClient daysDefault={30} userName={userName} />
     </main>
   );
 }
