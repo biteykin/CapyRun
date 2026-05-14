@@ -102,6 +102,23 @@ type GoalRow = {
 
 type CoachQuoteRow = { id: string; body?: string; body_preview?: string; created_at: string };
 
+type GoalForecast = {
+  title: string;
+  days_left: number;
+  current_weekly_km: number;
+  projected_weekly_km: number;
+  recommended_weekly_km: number | null;
+  status: "on_track" | "watch" | "behind" | "unknown";
+} | null;
+
+type FormForecast = {
+  current_weekly_km: number;
+  projected_weekly_km: number;
+  projected_4w_km: number;
+  growth_pct: number;
+  recommendation: string;
+} | null;
+
 type HrZonesData = {
   rows: { zone: string; seconds: number; minutes: number }[];
   easyPct: number;
@@ -449,6 +466,8 @@ export default function MyWorkoutsDashboardClient({
   const [nextPlannedWorkout, setNextPlannedWorkout] = useState<NextPlannedWorkoutRow | null>(null);
   const [primaryGoal, setPrimaryGoal] = useState<GoalRow | null>(null);
   const [coachQuote, setCoachQuote] = useState<CoachQuoteRow | null>(null);
+  const [goalForecast, setGoalForecast] = useState<GoalForecast>(null);
+  const [formForecast, setFormForecast] = useState<FormForecast>(null);
 
   useEffect(() => {
     let canceled = false;
@@ -478,6 +497,8 @@ export default function MyWorkoutsDashboardClient({
         setNextPlannedWorkout((data.nextPlanned ?? null) as NextPlannedWorkoutRow | null);
         setPrimaryGoal((data.primaryGoal ?? null) as GoalRow | null);
         setCoachQuote((data.latestCoachMessage ?? null) as CoachQuoteRow | null);
+        setGoalForecast((data.goalForecast ?? null) as GoalForecast);
+        setFormForecast((data.formForecast ?? null) as FormForecast);
       } catch (e: unknown) {
         if (!canceled) setErr(e instanceof Error ? e.message : String(e));
       } finally {
@@ -711,6 +732,11 @@ export default function MyWorkoutsDashboardClient({
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <NextWorkoutCard data={nextWorkoutCard} />
         <PrimaryGoalCard goal={primaryGoal} meta={goalMeta} accent={goalAccent} pct={goalPct} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <GoalForecastCard forecast={goalForecast} />
+        <FourWeeksForecastCard forecast={formForecast} />
       </div>
 
       {/* CHART: weekly volume */}
@@ -1122,6 +1148,119 @@ function PrimaryGoalCard({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function GoalForecastCard({ forecast }: { forecast: GoalForecast }) {
+  const tone =
+    forecast?.status === "on_track"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-950"
+      : forecast?.status === "watch"
+        ? "border-amber-200 bg-amber-50 text-amber-950"
+        : "border-rose-200 bg-rose-50 text-rose-950";
+
+  const label =
+    forecast?.status === "on_track"
+      ? "Успеваем к цели"
+      : forecast?.status === "watch"
+        ? "Нужно чуть добавить"
+        : forecast?.status === "behind"
+          ? "Есть риск не успеть"
+          : "Недостаточно данных";
+
+  return (
+    <Card className="flex h-full flex-col">
+      <CardContent className="flex flex-1 flex-col gap-4 p-5">
+        <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-[rgba(27,46,201,0.25)] bg-[rgba(197,206,250,0.55)] px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-[rgb(27,46,201)]">
+          <Target className="size-3" />
+          Прогноз цели
+        </span>
+
+        {forecast ? (
+          <>
+            <div className={cn("rounded-2xl border p-4", tone)}>
+              <div className="text-sm font-extrabold">{label}</div>
+              <div className="mt-1 text-xs opacity-80">
+                До цели осталось {forecast.days_left > 0 ? `${forecast.days_left} дн.` : "меньше дня"}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <ForecastMiniStat label="Сейчас" value={`${forecast.current_weekly_km} км/нед`} />
+              <ForecastMiniStat label="По плану" value={`${forecast.projected_weekly_km} км/нед`} />
+            </div>
+
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {forecast.recommended_weekly_km != null
+                ? (
+                    <>
+                      Для цели желательно держать около{" "}
+                      <span className="font-bold text-foreground">
+                        {forecast.recommended_weekly_km} км/нед
+                      </span>
+                      . Добавляем объём через лёгкие тренировки.
+                    </>
+                  )
+                : "У цели пока мало параметров для точного прогноза. Добавь дату и дистанцию/тип цели."}
+            </p>
+          </>
+        ) : (
+          <EmptyChartState text="Поставь цель — и мы покажем прогноз движения к ней" emoji="🔮" />
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function FourWeeksForecastCard({ forecast }: { forecast: FormForecast }) {
+  return (
+    <Card className="flex h-full flex-col">
+      <CardContent className="flex flex-1 flex-col gap-4 p-5">
+        <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-emerald-300/50 bg-emerald-100/70 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-emerald-800">
+          <Sparkles className="size-3" />
+          Через 4 недели
+        </span>
+
+        {forecast ? (
+          <>
+            <div>
+              <div className="text-3xl font-extrabold tabular-nums">
+                {forecast.projected_4w_km} км
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                прогноз объёма за 4 недели при текущем плане
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <ForecastMiniStat label="Сейчас" value={`${forecast.current_weekly_km} км/нед`} />
+              <ForecastMiniStat
+                label="Динамика"
+                value={`${forecast.growth_pct > 0 ? "+" : ""}${forecast.growth_pct}%`}
+              />
+            </div>
+
+            <div className="rounded-2xl border bg-muted/20 p-3">
+              <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                Совет Капи
+              </div>
+              <p className="mt-1.5 text-sm leading-relaxed">{forecast.recommendation}</p>
+            </div>
+          </>
+        ) : (
+          <EmptyChartState text="Добавь план тренировок — и появится прогноз формы" emoji="📈" />
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ForecastMiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border bg-background/70 p-3">
+      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div className="mt-1 text-base font-extrabold tabular-nums">{value}</div>
+    </div>
   );
 }
 

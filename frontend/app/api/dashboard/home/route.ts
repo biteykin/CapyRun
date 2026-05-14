@@ -1,3 +1,5 @@
+//frontend/app/api/dashboard/home/route.ts
+
 import { NextRequest, NextResponse } from "next/server";
 import { createClientWithCookies } from "@/lib/supabase/server";
 
@@ -15,9 +17,19 @@ function dateDaysAgo(days: number) {
 }
 
 type GoalPick = {
+  id?: string;
+  title?: string | null;
+  type?: string | null;
+  date_to?: string | null;
+  target_json?: unknown;
   is_primary?: boolean | null;
   status: string;
 };
+
+function num(v: unknown) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
 
 export async function GET(req: NextRequest) {
   const daysRaw = Number(req.nextUrl.searchParams.get("days") ?? 30);
@@ -123,6 +135,109 @@ export async function GET(req: NextRequest) {
       goalsList.find((x) => x.status === "active") ??
       null;
 
+    const { data: plan4w, error: plan4wError } = await supabase
+      .from("user_plan_sessions")
+      .select("planned_date, status, structure")
+      .eq("user_id", user.id)
+      .gte("planned_date", todayISO())
+      .lte(
+        "planned_date",
+        new Date(Date.now() + 28 * 86400000).toISOString().slice(0, 10)
+      )
+      .in("status", ["planned", "moved"])
+      .order("planned_date", { ascending: true });
+
+    if (plan4wError) {
+      return NextResponse.json({ error: plan4wError.message }, { status: 500 });
+    }
+
+    const daysRows = fastDaysRes.data ?? [];
+    const weeksRows = fastWeeksRes.data ?? [];
+
+    const actualKm = daysRows.reduce(
+      (s: number, x: { distance_m?: unknown }) => s + num(x.distance_m) / 1000,
+      0
+    );
+    const currentWeeklyKm = actualKm / Math.max(1, days / 7);
+
+    const validWeeks = weeksRows.filter((w: { distance_m?: unknown }) => num(w.distance_m) > 0);
+    const avgWeeklyKm =
+      validWeeks.length > 0
+        ? validWeeks.reduce(
+            (s: number, w: { distance_m?: unknown }) => s + num(w.distance_m) / 1000,
+            0
+          ) / validWeeks.length
+        : currentWeeklyKm;
+
+    const plannedKm4w = (plan4w ?? []).reduce(
+      (s: number, x: { structure?: { distance_km?: unknown } | null }) =>
+        s + num(x.structure?.distance_km),
+      0
+    );
+
+    const projectedWeeklyKm =
+      plannedKm4w > 0 ? plannedKm4w / 4 : Math.max(currentWeeklyKm, avgWeeklyKm);
+
+    const goalDaysLeft = primaryGoal?.date_to
+      ? Math.ceil((new Date(primaryGoal.date_to).getTime() - Date.now()) / 86400000)
+      : null;
+
+    const targetKmByGoalType: Record<string, number> = {
+      "10k": 10,
+      HM: 21.1,
+      M: 42.2,
+    };
+
+    const targetJson = primaryGoal?.target_json as { distance_km?: unknown } | null | undefined;
+    const targetKm =
+      num(targetJson?.distance_km) ||
+      targetKmByGoalType[String(primaryGoal?.type ?? "")] ||
+      null;
+
+    const recommendedWeeklyKm =
+      targetKm && goalDaysLeft && goalDaysLeft > 0
+        ? Math.max(
+            targetKm * 1.2,
+            targetKm * 0.45 * Math.min(8, Math.max(1, goalDaysLeft / 7))
+          )
+        : null;
+
+    const goalForecast =
+      primaryGoal && goalDaysLeft != null
+        ? {
+            title: primaryGoal.title ?? "Главная цель",
+            days_left: goalDaysLeft,
+            current_weekly_km: Math.round(currentWeeklyKm * 10) / 10,
+            projected_weekly_km: Math.round(projectedWeeklyKm * 10) / 10,
+            recommended_weekly_km:
+              recommendedWeeklyKm != null ? Math.round(recommendedWeeklyKm * 10) / 10 : null,
+            status:
+              recommendedWeeklyKm == null
+                ? "unknown"
+                : projectedWeeklyKm >= recommendedWeeklyKm * 0.95
+                  ? "on_track"
+                  : projectedWeeklyKm >= recommendedWeeklyKm * 0.75
+                    ? "watch"
+                    : "behind",
+          }
+        : null;
+
+    const formForecast = {
+      current_weekly_km: Math.round(currentWeeklyKm * 10) / 10,
+      projected_weekly_km: Math.round(projectedWeeklyKm * 10) / 10,
+      projected_4w_km: Math.round(projectedWeeklyKm * 4 * 10) / 10,
+      growth_pct:
+        avgWeeklyKm > 0
+          ? Math.round(((projectedWeeklyKm - avgWeeklyKm) / avgWeeklyKm) * 100)
+          : 0,
+      recommendation:
+        projectedWeeklyKm > avgWeeklyKm * 1.15
+          ? "Рост нагрузки заметный. Держи большую часть пробежек в Z1–Z2 и не добавляй интенсивность без восстановления."
+          : projectedWeeklyKm < avgWeeklyKm * 0.85
+            ? "Нагрузка снижается. Если цель актуальна — добавь одну лёгкую тренировку или чуть увеличь длительность спокойного бега."
+            : "Темп подготовки выглядит ровным. Продолжай выполнять план и следи за восстановлением.",
+    };
+
     return NextResponse.json({
       data: {
         days: fastDaysRes.data ?? [],
@@ -133,6 +248,8 @@ export async function GET(req: NextRequest) {
         nextPlanned: nextPlannedRes.data ?? null,
         primaryGoal,
         latestCoachMessage,
+        goalForecast,
+        formForecast,
       },
     });
   } catch (error) {
