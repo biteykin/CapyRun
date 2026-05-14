@@ -6,6 +6,9 @@ import * as React from "react";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkBreaks from "remark-breaks";
 import {
   Activity,
   ArrowDown,
@@ -820,6 +823,8 @@ function KpiTile({
 // COACH QUOTE
 // ============================================================
 function CoachQuoteCard({ quote }: { quote: CoachQuoteRow | null }) {
+  const message = quote?.body ?? quote?.body_preview ?? "";
+
   return (
     <Card className="relative flex flex-col overflow-hidden border bg-gradient-to-br from-[rgba(212,219,253,0.55)] via-card to-[rgba(197,237,208,0.35)] shadow-sm">
       <CardContent className="flex flex-1 flex-col gap-3 p-5">
@@ -833,13 +838,63 @@ function CoachQuoteCard({ quote }: { quote: CoachQuoteRow | null }) {
           </div>
         </div>
 
-        {quote?.body || quote?.body_preview ? (
+        {message ? (
           <div className="relative flex-1 rounded-2xl border bg-white/70 p-4 backdrop-blur-sm">
             <Quote className="pointer-events-none absolute left-3 top-3 z-10 size-5 rotate-180 fill-[rgba(27,46,201,0.22)] text-[rgba(27,46,201,0.22)]" />
-            <div className="max-h-[260px] overflow-y-auto p-4 pl-9 pr-3">
-              <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                {quote.body ?? quote.body_preview}
-              </p>
+            <div className="max-h-[210px] overflow-y-auto p-4 pl-9 pr-3">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm, remarkBreaks]}
+                components={{
+                  h1: ({ children }) => (
+                    <h1 className="mb-2 text-base font-extrabold leading-snug">
+                      {children}
+                    </h1>
+                  ),
+                  h2: ({ children }) => (
+                    <h2 className="mb-2 mt-3 text-sm font-extrabold leading-snug first:mt-0">
+                      {children}
+                    </h2>
+                  ),
+                  h3: ({ children }) => (
+                    <h3 className="mb-1.5 mt-3 text-sm font-bold leading-snug first:mt-0">
+                      {children}
+                    </h3>
+                  ),
+                  p: ({ children }) => (
+                    <p className="my-0 text-sm leading-relaxed text-foreground [&:not(:last-child)]:mb-2">
+                      {children}
+                    </p>
+                  ),
+                  ul: ({ children }) => (
+                    <ul className="my-2 ml-4 list-disc space-y-1 text-sm leading-relaxed">
+                      {children}
+                    </ul>
+                  ),
+                  ol: ({ children }) => (
+                    <ol className="my-2 ml-4 list-decimal space-y-1 text-sm leading-relaxed">
+                      {children}
+                    </ol>
+                  ),
+                  li: ({ children }) => <li className="pl-1">{children}</li>,
+                  strong: ({ children }) => (
+                    <strong className="font-bold">{children}</strong>
+                  ),
+                  em: ({ children }) => <em className="italic">{children}</em>,
+                  hr: () => <hr className="my-3 border-border/70" />,
+                  a: ({ href, children }) => (
+                    <a
+                      href={href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium text-primary underline underline-offset-2"
+                    >
+                      {children}
+                    </a>
+                  ),
+                }}
+              >
+                {message}
+              </ReactMarkdown>
             </div>
           </div>
         ) : (
