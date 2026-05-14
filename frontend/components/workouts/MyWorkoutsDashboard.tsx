@@ -108,15 +108,8 @@ type GoalForecast = {
   current_weekly_km: number;
   projected_weekly_km: number;
   recommended_weekly_km: number | null;
+  pct_of_recommended?: number | null;
   status: "on_track" | "watch" | "behind" | "unknown";
-} | null;
-
-type FormForecast = {
-  current_weekly_km: number;
-  projected_weekly_km: number;
-  projected_4w_km: number;
-  growth_pct: number;
-  recommendation: string;
 } | null;
 
 type HrZonesData = {
@@ -467,7 +460,6 @@ export default function MyWorkoutsDashboardClient({
   const [primaryGoal, setPrimaryGoal] = useState<GoalRow | null>(null);
   const [coachQuote, setCoachQuote] = useState<CoachQuoteRow | null>(null);
   const [goalForecast, setGoalForecast] = useState<GoalForecast>(null);
-  const [formForecast, setFormForecast] = useState<FormForecast>(null);
 
   useEffect(() => {
     let canceled = false;
@@ -498,7 +490,6 @@ export default function MyWorkoutsDashboardClient({
         setPrimaryGoal((data.primaryGoal ?? null) as GoalRow | null);
         setCoachQuote((data.latestCoachMessage ?? null) as CoachQuoteRow | null);
         setGoalForecast((data.goalForecast ?? null) as GoalForecast);
-        setFormForecast((data.formForecast ?? null) as FormForecast);
       } catch (e: unknown) {
         if (!canceled) setErr(e instanceof Error ? e.message : String(e));
       } finally {
@@ -734,10 +725,7 @@ export default function MyWorkoutsDashboardClient({
         <PrimaryGoalCard goal={primaryGoal} meta={goalMeta} accent={goalAccent} pct={goalPct} />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <GoalForecastCard forecast={goalForecast} />
-        <FourWeeksForecastCard forecast={formForecast} />
-      </div>
+      <GoalForecastCard forecast={goalForecast} />
 
       {/* CHART: weekly volume */}
       <WeeklyVolumeCard data={weeklyChartData} weeklyAvg={weeklyAvg} />
@@ -1152,114 +1140,212 @@ function PrimaryGoalCard({
 }
 
 function GoalForecastCard({ forecast }: { forecast: GoalForecast }) {
-  const tone =
-    forecast?.status === "on_track"
-      ? "border-emerald-200 bg-emerald-50 text-emerald-950"
-      : forecast?.status === "watch"
-        ? "border-amber-200 bg-amber-50 text-amber-950"
-        : "border-rose-200 bg-rose-50 text-rose-950";
-
-  const label =
-    forecast?.status === "on_track"
-      ? "Успеваем к цели"
-      : forecast?.status === "watch"
-        ? "Нужно чуть добавить"
-        : forecast?.status === "behind"
-          ? "Есть риск не успеть"
-          : "Недостаточно данных";
-
-  return (
-    <Card className="flex h-full flex-col">
-      <CardContent className="flex flex-1 flex-col gap-4 p-5">
-        <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-[rgba(27,46,201,0.25)] bg-[rgba(197,206,250,0.55)] px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-[rgb(27,46,201)]">
-          <Target className="size-3" />
-          Прогноз цели
-        </span>
-
-        {forecast ? (
-          <>
-            <div className={cn("rounded-2xl border p-4", tone)}>
-              <div className="text-sm font-extrabold">{label}</div>
-              <div className="mt-1 text-xs opacity-80">
-                До цели осталось {forecast.days_left > 0 ? `${forecast.days_left} дн.` : "меньше дня"}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <ForecastMiniStat label="Сейчас" value={`${forecast.current_weekly_km} км/нед`} />
-              <ForecastMiniStat label="По плану" value={`${forecast.projected_weekly_km} км/нед`} />
-            </div>
-
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              {forecast.recommended_weekly_km != null
-                ? (
-                    <>
-                      Для цели желательно держать около{" "}
-                      <span className="font-bold text-foreground">
-                        {forecast.recommended_weekly_km} км/нед
-                      </span>
-                      . Добавляем объём через лёгкие тренировки.
-                    </>
-                  )
-                : "У цели пока мало параметров для точного прогноза. Добавь дату и дистанцию/тип цели."}
-            </p>
-          </>
-        ) : (
+  if (!forecast) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col gap-4 p-5 sm:p-6">
+          <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-[rgba(27,46,201,0.25)] bg-[rgba(197,206,250,0.55)] px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-[rgb(27,46,201)]">
+            <Target className="size-3" />
+            Прогноз цели
+          </span>
           <EmptyChartState text="Поставь цель — и мы покажем прогноз движения к ней" emoji="🔮" />
-        )}
-      </CardContent>
-    </Card>
-  );
-}
+        </CardContent>
+      </Card>
+    );
+  }
 
-function FourWeeksForecastCard({ forecast }: { forecast: FormForecast }) {
+  const statusConfig = {
+    on_track: {
+      color: "rgb(26,158,58)",
+      trackColor: "rgba(26,158,58,0.14)",
+      bgClass: "border-emerald-200 bg-emerald-50 text-emerald-950",
+      label: "Успеваем к цели",
+      hint: "Текущий ритм соответствует цели. Продолжай в том же темпе.",
+    },
+    watch: {
+      color: "rgb(229,139,33)",
+      trackColor: "rgba(229,139,33,0.14)",
+      bgClass: "border-amber-200 bg-amber-50 text-amber-950",
+      label: "Нужно чуть добавить",
+      hint: "Объёма не хватает — добери лёгкими пробежками без интенсивности.",
+    },
+    behind: {
+      color: "rgb(244,63,94)",
+      trackColor: "rgba(244,63,94,0.14)",
+      bgClass: "border-rose-200 bg-rose-50 text-rose-950",
+      label: "Есть риск не успеть",
+      hint: "Текущего темпа мало для цели. Стоит пересобрать план с тренером.",
+    },
+    unknown: {
+      color: "rgb(120,120,140)",
+      trackColor: "rgba(120,120,140,0.10)",
+      bgClass: "border-border bg-muted/20 text-muted-foreground",
+      label: "Недостаточно данных",
+      hint: "Для прогноза нужны дата финиша и дистанция/тип цели.",
+    },
+  } as const;
+
+  const cfg = statusConfig[forecast.status];
+  const recommendedPct = forecast.pct_of_recommended;
+  const radialValue =
+    recommendedPct != null ? Math.min(100, Math.max(0, recommendedPct)) : 0;
+  const showRadial = forecast.status !== "unknown" && recommendedPct != null;
+
+  const heroBg = `
+    radial-gradient(circle at calc(100% + 5rem) -5rem, ${cfg.trackColor} 0, transparent 58%),
+    radial-gradient(circle at -4rem calc(100% + 4rem), ${cfg.trackColor} 0, transparent 55%)
+  `;
+
   return (
-    <Card className="flex h-full flex-col">
-      <CardContent className="flex flex-1 flex-col gap-4 p-5">
-        <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-emerald-300/50 bg-emerald-100/70 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-emerald-800">
-          <Sparkles className="size-3" />
-          Через 4 недели
-        </span>
+    <Card
+      className="relative overflow-hidden"
+      style={{ backgroundImage: heroBg }}
+    >
+      <CardContent className="relative grid grid-cols-1 items-center gap-6 p-5 sm:p-6 md:grid-cols-[190px_1fr]">
+        {/* LEFT: радиальный gauge */}
+        {showRadial ? (
+          <div className="relative mx-auto shrink-0">
+            <RadialProgress
+              value={radialValue}
+              size={170}
+              strokeWidth={14}
+              trackColor={cfg.trackColor}
+              progressColor={cfg.color}
+            />
 
-        {forecast ? (
-          <>
-            <div>
-              <div className="text-3xl font-extrabold tabular-nums">
-                {forecast.projected_4w_km} км
+            <div className="pointer-events-none absolute inset-x-0 bottom-2 text-center">
+              <div className="flex items-baseline justify-center gap-0.5 tabular-nums">
+                <span
+                  className="text-4xl font-extrabold leading-none"
+                  style={{ color: cfg.color }}
+                >
+                  {recommendedPct}
+                </span>
+                <span
+                  className="text-base font-bold leading-none"
+                  style={{ color: cfg.color }}
+                >
+                  %
+                </span>
               </div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                прогноз объёма за 4 недели при текущем плане
+              <div className="mt-1 text-[10px] font-semibold uppercase leading-tight tracking-wider text-muted-foreground">
+                от нужного объёма
               </div>
             </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <ForecastMiniStat label="Сейчас" value={`${forecast.current_weekly_km} км/нед`} />
-              <ForecastMiniStat
-                label="Динамика"
-                value={`${forecast.growth_pct > 0 ? "+" : ""}${forecast.growth_pct}%`}
-              />
-            </div>
-
-            <div className="rounded-2xl border bg-muted/20 p-3">
-              <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                Совет Капи
-              </div>
-              <p className="mt-1.5 text-sm leading-relaxed">{forecast.recommendation}</p>
-            </div>
-          </>
+          </div>
         ) : (
-          <EmptyChartState text="Добавь план тренировок — и появится прогноз формы" emoji="📈" />
+          <div className="mx-auto flex aspect-square w-full max-w-[200px] flex-col items-center justify-center rounded-full border border-dashed bg-muted/20 p-5 text-center">
+            <Target className="size-8 text-muted-foreground" />
+            <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+              Для прогноза нужны дата финиша и дистанция/тип цели
+            </p>
+          </div>
         )}
+
+        {/* RIGHT: контент */}
+        <div className="flex min-w-0 flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-[rgba(27,46,201,0.25)] bg-[rgba(197,206,250,0.55)] px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-[rgb(27,46,201)]">
+              <Target className="size-3" />
+              Прогноз цели
+            </span>
+            <span className="rounded-full bg-muted/50 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground">
+              {forecast.days_left > 0
+                ? `${forecast.days_left} дн. до цели`
+                : "финиш сегодня"}
+            </span>
+          </div>
+
+          <h3 className="line-clamp-2 text-base font-bold leading-snug sm:text-lg">
+            {forecast.title}
+          </h3>
+
+          <div className={cn("rounded-2xl border p-3", cfg.bgClass)}>
+            <div className="flex items-center gap-2">
+              <span
+                className="size-2 shrink-0 rounded-full"
+                style={{ background: cfg.color }}
+              />
+              <span className="text-sm font-extrabold">{cfg.label}</span>
+            </div>
+            <p className="mt-1 text-xs leading-relaxed opacity-85">{cfg.hint}</p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <ForecastMetricTile
+              icon={<TrendingUp className="size-4" />}
+              label="Текущий темп"
+              value={`${forecast.current_weekly_km}`}
+              unit="км/нед"
+              hint="средн. за 28 дн."
+              accent={cfg.color}
+              bg={cfg.trackColor}
+            />
+            <ForecastMetricTile
+              icon={<Target className="size-4" />}
+              label="Нужно для цели"
+              value={
+                forecast.recommended_weekly_km != null
+                  ? `${forecast.recommended_weekly_km}`
+                  : "—"
+              }
+              unit="км/нед"
+              accent={C.indigo}
+              bg={C.indigoSoft}
+            />
+          </div>
+        </div>
       </CardContent>
     </Card>
   );
 }
 
-function ForecastMiniStat({ label, value }: { label: string; value: string }) {
+function ForecastMetricTile({
+  icon,
+  label,
+  value,
+  unit,
+  accent,
+  bg,
+  hint,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  unit?: string;
+  accent: string;
+  bg: string;
+  hint?: string;
+}) {
   return (
-    <div className="rounded-2xl border bg-background/70 p-3">
-      <div className="text-[11px] text-muted-foreground">{label}</div>
-      <div className="mt-1 text-base font-extrabold tabular-nums">{value}</div>
+    <div className="rounded-2xl border bg-white/65 p-3 backdrop-blur-sm">
+      <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+        <span
+          className="inline-flex size-6 items-center justify-center rounded-full"
+          style={{ background: bg, color: accent }}
+        >
+          {icon}
+        </span>
+        <span className="truncate">{label}</span>
+      </div>
+      <div className="mt-1.5 flex items-baseline gap-1 tabular-nums">
+        <span
+          className="text-base font-extrabold sm:text-lg"
+          style={{ color: accent }}
+        >
+          {value}
+        </span>
+        {unit ? (
+          <span className="text-[11px] font-medium text-muted-foreground">
+            {unit}
+          </span>
+        ) : null}
+      </div>
+      {hint ? (
+        <div className="mt-0.5 text-[9px] font-medium leading-tight text-muted-foreground/80">
+          {hint}
+        </div>
+      ) : null}
     </div>
   );
 }

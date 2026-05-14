@@ -16,6 +16,13 @@ function dateDaysAgo(days: number) {
   return d.toISOString().slice(0, 10);
 }
 
+function dateDaysAhead(days: number) {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + Math.max(0, days));
+  return d.toISOString().slice(0, 10);
+}
+
 type GoalPick = {
   id?: string;
   title?: string | null;
@@ -135,48 +142,49 @@ export async function GET(req: NextRequest) {
       goalsList.find((x) => x.status === "active") ??
       null;
 
-    const { data: plan4w, error: plan4wError } = await supabase
+    const forecastFromISO = dateDaysAgo(28);
+    const forecastToISO = dateDaysAhead(28);
+
+    const { data: forecastWorkouts, error: forecastWorkoutsError } = await supabase
+      .from("workouts")
+      .select("distance_m,start_time,local_date")
+      .eq("user_id", user.id)
+      .is("deleted_at", null)
+      .gte("local_date", forecastFromISO)
+      .lte("local_date", todayISO());
+
+    if (forecastWorkoutsError) {
+      return NextResponse.json({ error: forecastWorkoutsError.message }, { status: 500 });
+    }
+
+    const { data: forecastPlan, error: forecastPlanError } = await supabase
       .from("user_plan_sessions")
-      .select("planned_date, status, structure")
+      .select("planned_date,status,structure")
       .eq("user_id", user.id)
       .gte("planned_date", todayISO())
-      .lte(
-        "planned_date",
-        new Date(Date.now() + 28 * 86400000).toISOString().slice(0, 10)
-      )
+      .lte("planned_date", forecastToISO)
       .in("status", ["planned", "moved"])
       .order("planned_date", { ascending: true });
 
-    if (plan4wError) {
-      return NextResponse.json({ error: plan4wError.message }, { status: 500 });
+    if (forecastPlanError) {
+      return NextResponse.json({ error: forecastPlanError.message }, { status: 500 });
     }
 
-    const daysRows = fastDaysRes.data ?? [];
-    const weeksRows = fastWeeksRes.data ?? [];
-
-    const actualKm = daysRows.reduce(
+    const past4wKm = (forecastWorkouts ?? []).reduce(
       (s: number, x: { distance_m?: unknown }) => s + num(x.distance_m) / 1000,
       0
     );
-    const currentWeeklyKm = actualKm / Math.max(1, days / 7);
 
-    const validWeeks = weeksRows.filter((w: { distance_m?: unknown }) => num(w.distance_m) > 0);
-    const avgWeeklyKm =
-      validWeeks.length > 0
-        ? validWeeks.reduce(
-            (s: number, w: { distance_m?: unknown }) => s + num(w.distance_m) / 1000,
-            0
-          ) / validWeeks.length
-        : currentWeeklyKm;
+    const currentWeeklyKm = past4wKm / 4;
 
-    const plannedKm4w = (plan4w ?? []).reduce(
+    const plannedKm4w = (forecastPlan ?? []).reduce(
       (s: number, x: { structure?: { distance_km?: unknown } | null }) =>
         s + num(x.structure?.distance_km),
       0
     );
 
     const projectedWeeklyKm =
-      plannedKm4w > 0 ? plannedKm4w / 4 : Math.max(currentWeeklyKm, avgWeeklyKm);
+      plannedKm4w > 0 ? plannedKm4w / 4 : currentWeeklyKm;
 
     const goalDaysLeft = primaryGoal?.date_to
       ? Math.ceil((new Date(primaryGoal.date_to).getTime() - Date.now()) / 86400000)
@@ -211,6 +219,10 @@ export async function GET(req: NextRequest) {
             projected_weekly_km: Math.round(projectedWeeklyKm * 10) / 10,
             recommended_weekly_km:
               recommendedWeeklyKm != null ? Math.round(recommendedWeeklyKm * 10) / 10 : null,
+            pct_of_recommended:
+              recommendedWeeklyKm && recommendedWeeklyKm > 0
+                ? Math.round((projectedWeeklyKm / recommendedWeeklyKm) * 100)
+                : null,
             status:
               recommendedWeeklyKm == null
                 ? "unknown"
@@ -227,13 +239,13 @@ export async function GET(req: NextRequest) {
       projected_weekly_km: Math.round(projectedWeeklyKm * 10) / 10,
       projected_4w_km: Math.round(projectedWeeklyKm * 4 * 10) / 10,
       growth_pct:
-        avgWeeklyKm > 0
-          ? Math.round(((projectedWeeklyKm - avgWeeklyKm) / avgWeeklyKm) * 100)
+        currentWeeklyKm > 0
+          ? Math.round(((projectedWeeklyKm - currentWeeklyKm) / currentWeeklyKm) * 100)
           : 0,
       recommendation:
-        projectedWeeklyKm > avgWeeklyKm * 1.15
+        projectedWeeklyKm > currentWeeklyKm * 1.15
           ? "Рост нагрузки заметный. Держи большую часть пробежек в Z1–Z2 и не добавляй интенсивность без восстановления."
-          : projectedWeeklyKm < avgWeeklyKm * 0.85
+          : projectedWeeklyKm < currentWeeklyKm * 0.85
             ? "Нагрузка снижается. Если цель актуальна — добавь одну лёгкую тренировку или чуть увеличь длительность спокойного бега."
             : "Темп подготовки выглядит ровным. Продолжай выполнять план и следи за восстановлением.",
     };
