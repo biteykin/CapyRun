@@ -7,9 +7,14 @@ import { useRouter } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import { PencilLine, Sparkles, Save, X } from "lucide-react";
+import { Info, PencilLine, Sparkles, Save, X } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { DEFAULT_HR_MAX, buildDefaultHrZones, estimateHrMax } from "@/lib/training/hr-zones";
 
 type Zone = {
@@ -25,6 +30,34 @@ const ZONE_THEME: Record<string, { color: string; bg: string }> = {
   Z3: { color: "#1A9E3A", bg: "#C5EDD0" },
   Z4: { color: "#FFD600", bg: "#FFF5B0" },
   Z5: { color: "#E60012", bg: "#FFCCCC" },
+};
+
+const ZONE_HELP: Record<string, { title: string; body: string }> = {
+  Z1: {
+    title: "Z1 · Восстановление",
+    body:
+      "Очень лёгкая интенсивность. Помогает восстановлению, улучшает кровоток и снижает накопленную усталость. В этой зоне хорошо делать разминку, заминку и восстановительные пробежки после тяжёлых дней.",
+  },
+  Z2: {
+    title: "Z2 · Аэробная база",
+    body:
+      "Основная зона для развития выносливости. Организм активно использует жиры как источник энергии, укрепляется сердечно-сосудистая система и растёт митохондриальная база. Для любителя большая часть спокойного бега должна проходить именно здесь.",
+  },
+  Z3: {
+    title: "Z3 · Темповая",
+    body:
+      "Умеренно тяжёлая зона между лёгким бегом и пороговой работой. Развивает устойчивость к длительной нагрузке, но быстрее накапливает усталость. Полезна дозированно, но не должна незаметно заменять все лёгкие пробежки.",
+  },
+  Z4: {
+    title: "Z4 · Пороговая",
+    body:
+      "Интенсивная работа около анаэробного порога. Помогает бежать быстрее и дольше без резкого закисления. Используется для темповых отрезков и специальных тренировок, обычно 1–2 раза в неделю при хорошем восстановлении.",
+  },
+  Z5: {
+    title: "Z5 · VO₂max / Спурт",
+    body:
+      "Очень высокая интенсивность. Развивает максимальное потребление кислорода, скорость и мощность, но сильно нагружает нервную систему, мышцы и восстановление. Использовать редко и короткими отрезками.",
+  },
 };
 
 function clamp(n: number, a: number, b: number) {
@@ -342,7 +375,6 @@ export default function ProfileHrZones({
     setDraft(buildSuggestedZones(nextHrMax, age ?? null, workoutsCount ?? null));
     setEditing(true);
     setError(null);
-    setSuccess("Максимальная частота пульса рассчитана по возрасту. Проверьте зоны и сохраните");
   }
 
   function updateDraftHrMax(value: string) {
@@ -362,7 +394,8 @@ export default function ProfileHrZones({
   }
 
   return (
-    <Card>
+    <TooltipProvider delayDuration={150}>
+      <Card>
       <CardHeader className="pb-2">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -452,10 +485,6 @@ export default function ProfileHrZones({
             </Button>
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">HRmax: {draftHrMax || DEFAULT_HR_MAX} bpm</Badge>
-            <Badge variant="outline">5 зон</Badge>
-          </div>
 
           {success ? <div className="mt-3 text-sm text-emerald-700">{success}</div> : null}
         </div>
@@ -487,8 +516,35 @@ export default function ProfileHrZones({
                             style={{ background: theme.color }}
                             aria-hidden
                           />
-                          <div className="text-sm font-semibold">
-                            {z.key} · {z.name}
+                          <div className="flex items-center gap-1.5 text-sm font-semibold">
+                            <span>
+                              {z.key} · {z.name}
+                            </span>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  className="inline-flex rounded-full text-muted-foreground transition hover:text-foreground"
+                                  aria-label={`Описание зоны ${z.key}`}
+                                >
+                                  <Info className="size-3.5" />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent
+                                side="top"
+                                align="start"
+                                className="max-w-xs bg-popover px-3 py-2 text-popover-foreground shadow-md"
+                              >
+                                <div className="space-y-1.5">
+                                  <div className="font-semibold">
+                                    {ZONE_HELP[z.key]?.title ?? z.key}
+                                  </div>
+                                  <div className="leading-relaxed text-muted-foreground">
+                                    {ZONE_HELP[z.key]?.body ?? "Описание зоны пока не задано."}
+                                  </div>
+                                </div>
+                              </TooltipContent>
+                            </Tooltip>
                           </div>
                         </div>
                         <div className="mt-1 text-xs text-muted-foreground">
@@ -534,7 +590,8 @@ export default function ProfileHrZones({
           </>
         )}
       </CardContent>
-    </Card>
+      </Card>
+    </TooltipProvider>
   );
 }
 
