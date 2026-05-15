@@ -6,6 +6,11 @@ import * as React from "react";
 import { Trophy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 export type PlanEvent = {
   id: string | number;
@@ -40,6 +45,7 @@ export type PlansCalendarProps = {
   initialMonth?: Date;
   onDayClick?: (isoDate: string) => void;
   onEventClick?: (evt: PlanEvent) => void;
+  onEventDrop?: (evt: PlanEvent, isoDate: string) => void;
   className?: string;
   activeGoal?: {
     date_to?: string | null;
@@ -130,13 +136,30 @@ export default function PlansCalendar({
   initialMonth,
   onDayClick,
   onEventClick,
+  onEventDrop,
   className,
   activeGoal = null,
 }: PlansCalendarProps) {
+  const todayIso = React.useMemo(() => iso(new Date()), []);
+  const [draggingEventId, setDraggingEventId] = React.useState<string | null>(null);
+  const isDraggingPlannedWorkout = draggingEventId !== null;
+
   const [month, setMonth] = React.useState<Date>(() => {
     const now = new Date();
     return initialMonth ?? new Date(now.getFullYear(), now.getMonth(), 1);
   });
+
+  const canDragEvent = React.useCallback(
+    (e: PlanEvent) => {
+      return (
+        e.kind === "planned" &&
+        e.status !== "completed" &&
+        e.status !== "missed" &&
+        String(e.date) >= todayIso
+      );
+    },
+    [todayIso]
+  );
 
   // события по дате
   const eventsByDate = React.useMemo(() => {
@@ -218,11 +241,39 @@ export default function PlansCalendar({
             isGoalDay &&
             (activeGoal?.type === "race" || activeGoal?.type === "event");
           const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+          const canDropHere = k >= todayIso;
 
           return (
             <div
               key={k}
               onClick={() => onDayClick?.(k)}
+              onDragOver={(ev) => {
+                if (!canDropHere || !onEventDrop) return;
+
+                ev.preventDefault();
+                ev.dataTransfer.dropEffect = "move";
+              }}
+              onDrop={(ev) => {
+                if (!canDropHere || !onEventDrop) return;
+
+                ev.preventDefault();
+                ev.stopPropagation();
+
+                const raw = ev.dataTransfer.getData("application/json");
+                if (!raw) return;
+
+                try {
+                  const dropped = JSON.parse(raw) as PlanEvent;
+                  if (!canDragEvent(dropped)) return;
+                  if (String(dropped.date) === k) return;
+
+                  onEventDrop(dropped, k);
+                } catch {
+                  // ignore malformed drag payload
+                } finally {
+                  setDraggingEventId(null);
+                }
+              }}
               className={cn(
                 "min-h-[132px] p-2 transition-colors",
                 onDayClick && "cursor-pointer",
@@ -236,7 +287,11 @@ export default function PlansCalendar({
                     : "bg-muted/40 text-muted-foreground"),
                 isWeekend && inMonth && "bg-muted/[0.06]",
                 isToday &&
-                  "bg-[color:var(--btn-primary-bg,#FFF6E8)] ring-1 ring-inset ring-[color:var(--btn-primary-main,#E58B21)]"
+                  "bg-[color:var(--btn-primary-bg,#FFF6E8)] ring-1 ring-inset ring-[color:var(--btn-primary-main,#E58B21)]",
+                isDraggingPlannedWorkout &&
+                  canDropHere &&
+                  "ring-2 ring-inset ring-[color:var(--btn-primary-main,#E58B21)]",
+                isDraggingPlannedWorkout && !canDropHere && "opacity-60"
               )}
             >
               <div className="mb-2 flex items-center justify-between gap-2">
@@ -269,6 +324,7 @@ export default function PlansCalendar({
               <div className="space-y-1">
                 {dayEvents.slice(0, 3).map((e) => {
                   const style: React.CSSProperties = {};
+                  const draggable = canDragEvent(e);
 
                   if (e.kind === "goal") {
                     style.backgroundColor = "rgba(255, 214, 0, 0.18)";
@@ -295,9 +351,26 @@ export default function PlansCalendar({
                   }
 
                   return (
-                    <button
-                      key={e.id}
+                    <Tooltip key={e.id}>
+                      <TooltipTrigger asChild>
+                        <button
                       type="button"
+                      draggable={draggable}
+                      onDragStart={(ev) => {
+                        if (!draggable) {
+                          ev.preventDefault();
+                          return;
+                        }
+
+                        ev.stopPropagation();
+                        setDraggingEventId(String(e.id));
+                        ev.dataTransfer.effectAllowed = "move";
+                        ev.dataTransfer.setData(
+                          "application/json",
+                          JSON.stringify(e)
+                        );
+                      }}
+                      onDragEnd={() => setDraggingEventId(null)}
                       onClick={(ev) => {
                         ev.stopPropagation();
                         onEventClick?.(e);
@@ -305,7 +378,9 @@ export default function PlansCalendar({
                       className={cn(
                         "block w-full rounded-lg border px-2.5 py-2 text-left text-xs shadow-[0_1px_0_rgba(0,0,0,0.02)] transition-colors",
                         !e.isCompleted && "hover:bg-muted/60",
-                        !inMonth && "opacity-75"
+                        !inMonth && "opacity-75",
+                        draggable && "cursor-grab active:cursor-grabbing",
+                        draggingEventId === String(e.id) && "opacity-50"
                       )}
                       style={style}
                       title={e.title}
@@ -329,6 +404,13 @@ export default function PlansCalendar({
                         </div>
                       ) : null}
                     </button>
+                      </TooltipTrigger>
+                      {draggable ? (
+                        <TooltipContent side="top">
+                          Можно передвинуть на другую дату
+                        </TooltipContent>
+                      ) : null}
+                    </Tooltip>
                   );
                 })}
 

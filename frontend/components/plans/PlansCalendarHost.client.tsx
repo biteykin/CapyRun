@@ -104,6 +104,14 @@ const COLOR_COMPLETED = "#2D7601"; // выполнена
 const COLOR_MISSED = "#F6B021";    // пропущена
 const COLOR_PLANNED = "#0C5BF9";   // запланирована (data-color-11)
 
+function getTodayIso() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 const HR_ZONE_OPTIONS = [
   { value: "Z1", label: "Z1 · восстановление" },
   { value: "Z2", label: "Z2 · лёгкая аэробная" },
@@ -468,6 +476,18 @@ export default function PlansCalendarHost({
   const [createNotes, setCreateNotes] = React.useState("");
   const [isCreating, setIsCreating] = React.useState(false);
   const [createError, setCreateError] = React.useState<string | null>(null);
+  const [editOpen, setEditOpen] = React.useState(false);
+  const [editDate, setEditDate] = React.useState("");
+  const [editTitle, setEditTitle] = React.useState("");
+  const [editSport, setEditSport] = React.useState("run");
+  const [editDurationMin, setEditDurationMin] = React.useState("");
+  const [editDistanceKm, setEditDistanceKm] = React.useState("");
+  const [editEffort, setEditEffort] = React.useState("");
+  const [editHrZones, setEditHrZones] = React.useState<string[]>([]);
+  const [editHrZonesOpen, setEditHrZonesOpen] = React.useState(false);
+  const [editNotes, setEditNotes] = React.useState("");
+  const [isUpdating, setIsUpdating] = React.useState(false);
+  const [editError, setEditError] = React.useState<string | null>(null);
 
   // Маппим статусы в цвета и флаг isCompleted
   const calendarEvents = React.useMemo<PlanEvent[]>(() => {
@@ -526,6 +546,7 @@ export default function PlansCalendarHost({
       // не мешаем подтверждению удаления
       if (confirmDeleteOpen) return;
       if (createOpen) return;
+      if (editOpen) return;
 
       if (e.key === "ArrowLeft" && prevEvent) {
         e.preventDefault();
@@ -540,7 +561,7 @@ export default function PlansCalendarHost({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selected, prevEvent, nextEvent, confirmDeleteOpen, createOpen]);
+  }, [selected, prevEvent, nextEvent, confirmDeleteOpen, createOpen, editOpen]);
 
   React.useEffect(() => {
     setCalendarEventsState(events);
@@ -562,6 +583,131 @@ export default function PlansCalendarHost({
     setCreateError(null);
     setCreateOpen(true);
   };
+
+  const openEditDialog = React.useCallback(() => {
+    if (!selected || selected.kind !== "planned") return;
+
+    const structure = selected.structure ?? null;
+    const rawHrZones = (structure as any)?.hr_zones;
+    const normalizedHrZones = Array.isArray(rawHrZones)
+      ? rawHrZones
+          .map((zone) => {
+            if (typeof zone === "string") return zone;
+            if (zone && typeof zone === "object") {
+              return String((zone as PlannedHrZoneChip).value ?? "");
+            }
+            return "";
+          })
+          .filter(Boolean)
+      : [];
+
+    setEditDate(String(selected.date ?? ""));
+    setEditTitle(String(selected.title ?? ""));
+    setEditSport(String(selected.sport ?? "run"));
+    setEditDurationMin(
+      selected.planned_duration_min != null
+        ? String(selected.planned_duration_min)
+        : structure?.duration_min != null
+          ? String(structure.duration_min)
+          : ""
+    );
+    setEditDistanceKm(
+      selected.planned_distance_km != null
+        ? String(selected.planned_distance_km)
+        : structure?.distance_km != null
+          ? String(structure.distance_km)
+          : ""
+    );
+    setEditEffort(
+      String(
+        selected.effort ??
+          structure?.effort ??
+          ""
+      )
+    );
+    setEditHrZones(normalizedHrZones);
+    setEditNotes(
+      String(
+        selected.notes ??
+          structure?.notes ??
+          selected.description ??
+          ""
+      )
+    );
+    setEditError(null);
+    setEditOpen(true);
+  }, [selected]);
+
+  function toggleEditHrZone(zone: string) {
+    setEditHrZones((prev) =>
+      prev.includes(zone) ? prev.filter((z) => z !== zone) : [...prev, zone]
+    );
+  }
+
+  const handleEventDrop = React.useCallback(
+    async (evt: PlanEvent, nextDate: string) => {
+      const todayIso = getTodayIso();
+      const eventId = String(evt.id);
+
+      if (evt.kind !== "planned") return;
+      if (evt.status === "completed" || evt.status === "missed") return;
+      if (String(evt.date) < todayIso) return;
+      if (nextDate < todayIso) return;
+      if (String(evt.date) === nextDate) return;
+
+      const prevEvents = calendarEventsState;
+
+      setCalendarEventsState((prev) =>
+        prev.map((item) =>
+          String(item.id) === eventId
+            ? {
+                ...item,
+                date: nextDate,
+                planned_date: nextDate,
+              }
+            : item
+        )
+      );
+
+      setSelected((prev) =>
+        prev && String(prev.id) === eventId
+          ? ({
+              ...prev,
+              date: nextDate,
+              planned_date: nextDate,
+            } as ExtendedEvent)
+          : prev
+      );
+
+      try {
+        const res = await fetch(`/api/plan/sessions/${eventId}`, {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            planned_date: nextDate,
+          }),
+        });
+
+        if (!res.ok) {
+          const json = await res.json().catch(() => null);
+          console.error("plan_session_reschedule_failed", json);
+          throw new Error("Не удалось перенести тренировку.");
+        }
+
+        router.refresh();
+      } catch (e) {
+        console.error("plan_session_reschedule_failed", e);
+        setCalendarEventsState(prevEvents);
+        setSelected((prev) =>
+          prev && String(prev.id) === eventId
+            ? ({ ...prev, date: String(evt.date), planned_date: String(evt.date) } as ExtendedEvent)
+            : prev
+        );
+      }
+    },
+    [calendarEventsState, router]
+  );
 
   // 👉 теперь кликаем по ЛЮБОЙ части дня (даже если есть карточки)
   // это важно: прокидываем хендлер вниз и используем stopPropagation в карточках
@@ -688,6 +834,15 @@ export default function PlansCalendarHost({
     createTitle.trim().length > 0 &&
     (createDurationMin === "" || Number(createDurationMin) > 0);
 
+  const isEditDistanceVisible =
+    editSport !== "strength" && editSport !== "other";
+
+  const isEditValid =
+    !!editDate &&
+    !!editSport &&
+    editTitle.trim().length > 0 &&
+    (editDurationMin === "" || Number(editDurationMin) > 0);
+
   function toggleHrZone(zone: string) {
     setCreateHrZones((prev) =>
       prev.includes(zone) ? prev.filter((z) => z !== zone) : [...prev, zone]
@@ -738,6 +893,129 @@ export default function PlansCalendarHost({
   const isGoal = selected?.kind === "goal";
   const isWorkout = selected?.kind === "workout";
 
+  const handleUpdatePlannedWorkout = React.useCallback(async () => {
+    if (!selected || !isPlanned || isUpdating) return;
+
+    const title = editTitle.trim();
+    const durationMin = editDurationMin.trim() ? Number(editDurationMin) : null;
+    const distanceVisible = editSport !== "strength" && editSport !== "other";
+    const distanceKm =
+      distanceVisible && editDistanceKm.trim() ? Number(editDistanceKm) : null;
+
+    if (!editDate) {
+      setEditError("Не выбрана дата.");
+      return;
+    }
+
+    if (editDate < getTodayIso()) {
+      setEditError("Нельзя перенести плановую тренировку в прошлое.");
+      return;
+    }
+
+    if (!title) {
+      setEditError("Укажите название тренировки.");
+      return;
+    }
+
+    if (!editSport) {
+      setEditError("Выберите тип тренировки.");
+      return;
+    }
+
+    if (
+      durationMin != null &&
+      (!Number.isFinite(durationMin) || durationMin <= 0)
+    ) {
+      setEditError("Длительность должна быть больше 0.");
+      return;
+    }
+
+    if (distanceKm != null && (!Number.isFinite(distanceKm) || distanceKm <= 0)) {
+      setEditError("Некорректная дистанция.");
+      return;
+    }
+
+    try {
+      setIsUpdating(true);
+      setEditError(null);
+
+      const res = await fetch(`/api/plan/sessions/${selected.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          planned_date: editDate,
+          sport: editSport,
+          title,
+          notes: editNotes.trim() || null,
+          effort: editEffort.trim() || null,
+          hr_zones: editHrZones,
+          duration_min: durationMin,
+          distance_km: distanceKm,
+        }),
+      });
+
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        console.error("update planned workout failed", json);
+        throw new Error("Ошибка сохранения тренировки. Попробуйте ещё раз.");
+      }
+
+      const json = await res.json().catch(() => null);
+      const session = json?.session;
+      const nextStructure = session?.structure ?? {
+        ...(selected.structure ?? {}),
+        notes: editNotes.trim() || null,
+        effort: editEffort.trim() || null,
+        hr_zones: editHrZones,
+        duration_min: durationMin,
+        distance_km: distanceKm,
+      };
+
+      const updatedEvent: ExtendedEvent = {
+        ...selected,
+        date: session?.planned_date ?? editDate,
+        planned_date: session?.planned_date ?? editDate,
+        title: session?.title ?? title,
+        sport: session?.sport ?? editSport,
+        description: session?.notes ?? (editNotes.trim() || null),
+        notes: session?.notes ?? (editNotes.trim() || null),
+        structure: nextStructure,
+        effort: nextStructure?.effort ?? (editEffort.trim() || null),
+        hr_target: editHrZones.length ? editHrZones.join(", ") : null,
+        planned_duration_min: nextStructure?.duration_min ?? durationMin,
+        planned_distance_km: nextStructure?.distance_km ?? distanceKm,
+      };
+
+      setCalendarEventsState((prev) =>
+        prev.map((evt) =>
+          String(evt.id) === String(selected.id) ? updatedEvent : evt
+        )
+      );
+      setSelected(updatedEvent);
+      setEditOpen(false);
+      router.refresh();
+    } catch (e: any) {
+      console.error("update planned workout failed", e);
+      setEditError(e?.message ?? "Не удалось сохранить тренировку.");
+    } finally {
+      setIsUpdating(false);
+    }
+  }, [
+    editDate,
+    editDistanceKm,
+    editDurationMin,
+    editEffort,
+    editHrZones,
+    editNotes,
+    editSport,
+    editTitle,
+    isPlanned,
+    isUpdating,
+    router,
+    selected,
+  ]);
+
   const purposeLabel = getTrainingPurposeLabel(selected);
   const executionTips = getExecutionTips(selected);
 
@@ -775,6 +1053,7 @@ export default function PlansCalendarHost({
         initialMonth={initialMonth}
         onEventClick={handleEventClick}
         onDayClick={handleDayClick}
+        onEventDrop={handleEventDrop}
       />
 
       <Dialog
@@ -1262,6 +1541,17 @@ export default function PlansCalendarHost({
               </Button>
             ) : null}
 
+            {isPlanned ? (
+              <Button
+                type="button"
+                variant="primary"
+                disabled={isUpdating}
+                onClick={openEditDialog}
+              >
+                Редактировать
+              </Button>
+            ) : null}
+
             <Button
               type="button"
               variant="secondary"
@@ -1458,6 +1748,191 @@ export default function PlansCalendarHost({
                 onClick={() => void handleCreatePlannedWorkout()}
               >
                 {isCreating ? "Сохраняем…" : "Сохранить"}
+              </Button>
+            </div>
+          </RD.Content>
+        </DialogPortal>
+      </Dialog>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogPortal>
+          <DialogOverlay className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" />
+          <RD.Content
+            className={cn(
+              "fixed left-1/2 top-1/2 z-50 flex w-[min(760px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden",
+              "rounded-[var(--radius-lg,var(--radius))] border border-border bg-background p-0 text-foreground shadow-strong",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            )}
+          >
+            <div className="border-b px-6 py-5">
+              <DialogTitle>Редактировать тренировку</DialogTitle>
+              <div className="mt-1 text-sm text-muted-foreground">
+                Измените параметры плановой тренировки.
+              </div>
+            </div>
+
+            <div className="space-y-5 px-6 py-5">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-planned-date">Дата</Label>
+                  <Input
+                    id="edit-planned-date"
+                    type="date"
+                    min={getTodayIso()}
+                    value={editDate}
+                    onChange={(e) => setEditDate(e.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Вид тренировки</Label>
+                  <Select value={editSport} onValueChange={setEditSport}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Выберите спорт" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="run">Бег</SelectItem>
+                      <SelectItem value="ride">Вело</SelectItem>
+                      <SelectItem value="swim">Плавание</SelectItem>
+                      <SelectItem value="strength">ОФП / силовая</SelectItem>
+                      <SelectItem value="walk">Ходьба</SelectItem>
+                      <SelectItem value="other">Другое</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="edit-planned-title">Название</Label>
+                  <Input
+                    id="edit-planned-title"
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    placeholder="Например: Лёгкий бег 40 минут"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="edit-planned-effort">Интенсивность</Label>
+                  <Input
+                    id="edit-planned-effort"
+                    value={editEffort}
+                    onChange={(e) => setEditEffort(e.target.value)}
+                    placeholder="Легко / умеренно / тяжело"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="edit-planned-duration">Длительность, мин</Label>
+                  <Input
+                    id="edit-planned-duration"
+                    type="number"
+                    inputMode="numeric"
+                    value={editDurationMin}
+                    onChange={(e) => setEditDurationMin(e.target.value)}
+                    placeholder="40"
+                  />
+                </div>
+
+                {isEditDistanceVisible ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-planned-distance">Дистанция, км</Label>
+                    <Input
+                      id="edit-planned-distance"
+                      type="number"
+                      inputMode="decimal"
+                      value={editDistanceKm}
+                      onChange={(e) => setEditDistanceKm(e.target.value)}
+                      placeholder="6.0"
+                    />
+                  </div>
+                ) : null}
+
+                <div className="space-y-2 sm:col-span-2">
+                  <Label>Пульсовые зоны</Label>
+                  <Popover open={editHrZonesOpen} onOpenChange={setEditHrZonesOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        role="combobox"
+                        className="w-full justify-between"
+                      >
+                        <span className="truncate">
+                          {editHrZones.length
+                            ? editHrZones.join(", ")
+                            : "Выберите одну или несколько зон"}
+                        </span>
+                        <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                      <Command>
+                        <CommandList>
+                          <CommandEmpty>Зоны не найдены</CommandEmpty>
+                          <CommandGroup>
+                            {HR_ZONE_OPTIONS.map((zone) => {
+                              const zoneSelected = editHrZones.includes(zone.value);
+                              return (
+                                <CommandItem
+                                  key={zone.value}
+                                  value={zone.label}
+                                  onSelect={() => toggleEditHrZone(zone.value)}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 size-4",
+                                      zoneSelected ? "opacity-100" : "opacity-0"
+                                    )}
+                                  />
+                                  {zone.label}
+                                </CommandItem>
+                              );
+                            })}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                  <div className="text-xs text-muted-foreground">
+                    Можно выбрать несколько зон, например Z2 и Z3
+                  </div>
+                </div>
+
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="edit-planned-notes">План и заметки</Label>
+                  <Textarea
+                    id="edit-planned-notes"
+                    value={editNotes}
+                    onChange={(e) => setEditNotes(e.target.value)}
+                    rows={4}
+                    placeholder="Например: 10 минут разминки, затем ровный лёгкий бег. После — заминка и растяжка."
+                  />
+                </div>
+              </div>
+
+              {editError ? (
+                <div className="rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                  {editError}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex justify-end gap-2 border-t px-6 py-4">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={isUpdating}
+                onClick={() => setEditOpen(false)}
+              >
+                Отменить
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                disabled={isUpdating || !isEditValid}
+                onClick={() => void handleUpdatePlannedWorkout()}
+              >
+                {isUpdating ? "Сохраняем…" : "Сохранить"}
               </Button>
             </div>
           </RD.Content>
