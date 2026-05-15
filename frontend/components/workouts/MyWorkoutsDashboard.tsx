@@ -466,9 +466,20 @@ export default function MyWorkoutsDashboardClient({
     (async () => {
       setLoading(true);
       setErr(null);
+
+      // очищаем старые данные перед новой загрузкой,
+      // иначе React/HMR может оставлять старые точки графиков
+      setDaysData([]);
+      setWeeks([]);
+      setWd([]);
+      setMix([]);
+      setZoneRows([]);
+      setGoalForecast(null);
+
       try {
         const res = await fetch(`/api/dashboard/home?days=${days}`, {
           credentials: "include",
+          cache: "no-store",
         });
 
         if (canceled) return;
@@ -1149,6 +1160,91 @@ function GoalForecastCard({ forecast }: { forecast: GoalForecast }) {
             Прогноз цели
           </span>
           <EmptyChartState text="Поставь цель — и мы покажем прогноз движения к ней" emoji="🔮" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const isGoalFinished = forecast.days_left <= 0;
+
+  if (isGoalFinished) {
+    return (
+      <Card className="relative overflow-hidden border-amber-200">
+        {/* confetti background */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background: `
+              radial-gradient(circle at 12% 18%, rgba(255,205,86,0.30) 0 10px, transparent 11px),
+              radial-gradient(circle at 84% 20%, rgba(244,63,94,0.22) 0 8px, transparent 9px),
+              radial-gradient(circle at 22% 78%, rgba(27,46,201,0.20) 0 9px, transparent 10px),
+              radial-gradient(circle at 70% 72%, rgba(26,158,58,0.22) 0 10px, transparent 11px),
+              radial-gradient(circle at 92% 58%, rgba(229,139,33,0.22) 0 7px, transparent 8px),
+              linear-gradient(
+                135deg,
+                rgba(255,248,214,0.95) 0%,
+                rgba(255,255,255,0.98) 35%,
+                rgba(240,247,255,0.96) 68%,
+                rgba(240,255,244,0.96) 100%
+              )
+            `,
+          }}
+        />
+
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -left-10 top-0 size-40 rounded-full bg-[rgba(255,205,86,0.22)] blur-3xl"
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute right-0 top-10 size-44 rounded-full bg-[rgba(244,63,94,0.16)] blur-3xl"
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute bottom-0 left-1/3 size-52 rounded-full bg-[rgba(27,46,201,0.12)] blur-3xl"
+        />
+
+        <CardContent className="relative grid grid-cols-1 items-center gap-6 p-5 sm:p-6 md:grid-cols-[190px_1fr]">
+          <div className="mx-auto flex size-[170px] flex-col items-center justify-center rounded-full border border-amber-200 bg-white/70 text-center shadow-sm">
+            <Trophy className="size-10 text-amber-700" />
+            <div className="mt-2 text-2xl font-extrabold text-amber-800">Финиш</div>
+            <div className="mt-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              цель завершена
+            </div>
+          </div>
+
+          <div className="flex min-w-0 flex-col gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300/50 bg-amber-100/70 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-amber-800">
+                <Target className="size-3" />
+                Прогноз цели
+              </span>
+              <span className="rounded-full bg-white/70 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground">
+                финиш сегодня
+              </span>
+            </div>
+
+            <h3 className="line-clamp-2 text-base font-bold leading-snug sm:text-lg">
+              {forecast.title}
+            </h3>
+
+            <div className="rounded-2xl border border-amber-200 bg-white/70 p-3">
+              <div className="text-sm font-extrabold text-amber-900">
+                Цель подошла к финишу
+              </div>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                Прогноз больше не нужен: сейчас лучше зафиксировать результат, восстановиться
+                и поставить следующую цель.
+              </p>
+            </div>
+
+            <Link href="/goals">
+              <Button variant="primary" size="sm" className="w-full sm:w-fit">
+                Посмотреть цель <ArrowRight className="ml-1 size-4" />
+              </Button>
+            </Link>
+          </div>
         </CardContent>
       </Card>
     );

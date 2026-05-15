@@ -3,6 +3,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClientWithCookies } from "@/lib/supabase/server";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function todayISO() {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
@@ -36,6 +39,89 @@ type GoalPick = {
 function num(v: unknown) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
+}
+
+type DashboardWorkoutRow = {
+  local_date: string | null;
+  start_time: string | null;
+  created_at: string | null;
+  sport: string | null;
+  duration_sec: number | null;
+  distance_m: number | null;
+  calories_kcal: number | null;
+};
+
+function rowDate(row: DashboardWorkoutRow) {
+  return (
+    row.local_date ??
+    row.start_time?.slice(0, 10) ??
+    row.created_at?.slice(0, 10) ??
+    null
+  );
+}
+
+function weekStartISO(isoDate: string) {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  const day = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() - day + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function aggregateDashboardWorkouts(rows: DashboardWorkoutRow[], fromISO: string) {
+  const daysMap = new Map<string, { d: string; workouts: number; time_sec: number; distance_m: number; kcal: number }>();
+  const weeksMap = new Map<string, { week_start: string; workouts: number; time_sec: number; distance_m: number }>();
+  const weekdayMap = new Map<number, { dow: number; workouts: number; time_sec: number }>();
+  const sportMap = new Map<string, { sport: string; workouts: number; time_sec: number }>();
+
+  for (const row of rows) {
+    const d = rowDate(row);
+    if (!d) continue;
+
+    const duration = num(row.duration_sec);
+    const distance = num(row.distance_m);
+    const kcal = num(row.calories_kcal);
+
+    const weekStart = weekStartISO(d);
+    const week = weeksMap.get(weekStart) ?? {
+      week_start: weekStart,
+      workouts: 0,
+      time_sec: 0,
+      distance_m: 0,
+    };
+    week.workouts += 1;
+    week.time_sec += duration;
+    week.distance_m += distance;
+    weeksMap.set(weekStart, week);
+
+    if (d < fromISO) continue;
+
+    const day = daysMap.get(d) ?? { d, workouts: 0, time_sec: 0, distance_m: 0, kcal: 0 };
+    day.workouts += 1;
+    day.time_sec += duration;
+    day.distance_m += distance;
+    day.kcal += kcal;
+    daysMap.set(d, day);
+
+    const date = new Date(`${d}T00:00:00Z`);
+    const dow = date.getUTCDay() || 7;
+    const weekday = weekdayMap.get(dow) ?? { dow, workouts: 0, time_sec: 0 };
+    weekday.workouts += 1;
+    weekday.time_sec += duration;
+    weekdayMap.set(dow, weekday);
+
+    const sport = row.sport?.trim() || "other";
+    const sportRow = sportMap.get(sport) ?? { sport, workouts: 0, time_sec: 0 };
+    sportRow.workouts += 1;
+    sportRow.time_sec += duration;
+    sportMap.set(sport, sportRow);
+  }
+
+  return {
+    days: Array.from(daysMap.values()).sort((a, b) => a.d.localeCompare(b.d)),
+    weeks: Array.from(weeksMap.values()).sort((a, b) => a.week_start.localeCompare(b.week_start)),
+    weekday: Array.from(weekdayMap.values()).sort((a, b) => a.dow - b.dow),
+    sportMix: Array.from(sportMap.values()).sort((a, b) => b.time_sec - a.time_sec),
+  };
 }
 
 export async function GET(req: NextRequest) {
@@ -141,6 +227,23 @@ export async function GET(req: NextRequest) {
       goalsList.find((x) => x.is_primary && x.status === "active") ??
       goalsList.find((x) => x.status === "active") ??
       null;
+
+    const dashboardFromISO = dateDaysAgo(Math.max(days, 84));
+    const { data: dashboardWorkouts, error: dashboardWorkoutsError } = await supabase
+      .from("workouts")
+      .select("local_date,start_time,created_at,sport,duration_sec,distance_m,calories_kcal")
+      .eq("user_id", user.id)
+      .is("deleted_at", null)
+      .gte("local_date", dashboardFromISO);
+
+    if (dashboardWorkoutsError) {
+      return NextResponse.json({ error: dashboardWorkoutsError.message }, { status: 500 });
+    }
+
+    const cleanDashboard = aggregateDashboardWorkouts(
+      (dashboardWorkouts ?? []) as DashboardWorkoutRow[],
+      fromISO
+    );
 
     const forecastFromISO = dateDaysAgo(28);
     const forecastToISO = dateDaysAhead(28);
@@ -252,10 +355,10 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       data: {
-        days: fastDaysRes.data ?? [],
-        weeks: fastWeeksRes.data ?? [],
-        weekday: weekdayRes.data ?? [],
-        sportMix: sportMixRes.data ?? [],
+        days: cleanDashboard.days,
+        weeks: cleanDashboard.weeks,
+        weekday: cleanDashboard.weekday,
+        sportMix: cleanDashboard.sportMix,
         hrZones: zonesRes.data ?? [],
         nextPlanned: nextPlannedRes.data ?? null,
         primaryGoal,
