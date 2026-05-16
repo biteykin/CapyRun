@@ -1,3 +1,5 @@
+//frontend/app/api/integrations/strava-status/route.ts
+
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabaseServerApp";
 

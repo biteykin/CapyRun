@@ -1208,13 +1208,79 @@ export async function POST(req: NextRequest) {
     if (latestStructuredPlan && isLikelyPlanConfirmAction(action, finalText)) {
       stage = "plan_confirm_write";
 
-      const saved = await confirmStructuredPlanIntoDb({
-        db,
-        userId: user.id,
-        goalId: activeGoal?.id ?? null,
-        timezone,
-        plan: latestStructuredPlan,
-      });
+      const sourcePlanMsgId = latestPlanDraftMessage?.id ?? null;
+
+      // Idempotency: если для этого же draft-сообщения уже есть успешное сохранение —
+      // не сохраняем второй раз, возвращаем существующее подтверждение.
+      if (sourcePlanMsgId) {
+        const { data: recentCoachMsgs } = await db
+          .from("coach_messages")
+          .select("*")
+          .eq("thread_id", threadId)
+          .eq("type", "coach")
+          .order("created_at", { ascending: false })
+          .limit(50);
+
+        const alreadySaved = (recentCoachMsgs ?? []).find(
+          (m: any) =>
+            m?.meta?.stage === "plan_saved" &&
+            m?.meta?.source_plan_message_id === sourcePlanMsgId
+        );
+
+        if (alreadySaved) {
+          return NextResponse.json({
+            threadId,
+            userMessage: userMsgRow,
+            coachMessage: alreadySaved,
+          });
+        }
+      }
+
+      let saved: any = null;
+      let saveError: string | null = null;
+
+      try {
+        saved = await confirmStructuredPlanIntoDb({
+          db,
+          userId: user.id,
+          goalId: activeGoal?.id ?? null,
+          timezone,
+          plan: latestStructuredPlan,
+        });
+      } catch (e: any) {
+        saveError = e?.message ?? String(e);
+        console.error("plan_save_failed", {
+          user_id: user.id,
+          thread_id: threadId,
+          source_plan_message_id: sourcePlanMsgId,
+          err: saveError,
+        });
+      }
+
+      if (saveError || !saved) {
+        const failIns = await insertCoachReply({
+          db,
+          threadId,
+          userId: user.id,
+          replyToId: userMsgRow.id,
+          body:
+            `Не получилось добавить план в календарь.\n\n` +
+            `Причина: ${saveError || "неизвестная ошибка"}.\n\n` +
+            `Попробуй ещё раз через минуту. Если ошибка повторится — попроси меня пересобрать план на другой период.`,
+          stage: "plan_save_failed",
+          meta: {
+            model: "local",
+            error: saveError,
+            source_plan_message_id: sourcePlanMsgId,
+          },
+        });
+
+        return NextResponse.json({
+          threadId,
+          userMessage: userMsgRow,
+          coachMessage: failIns.data,
+        });
+      }
 
       const ins = await insertCoachReply({
         db,
@@ -1234,7 +1300,7 @@ export async function POST(req: NextRequest) {
           user_plan_id: saved.userPlanId,
           sessions_count: saved.sessionsCount,
           overwrite_range: saved.overwriteRange,
-          source_plan_message_id: latestPlanDraftMessage?.id ?? null,
+          source_plan_message_id: sourcePlanMsgId,
         },
       });
 

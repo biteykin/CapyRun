@@ -91,6 +91,28 @@ function CoachAvatar() {
   );
 }
 
+function SendFailedRetry({
+  onRetry,
+  disabled,
+}: {
+  onRetry: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="mt-1.5 flex items-center justify-end gap-2 text-[10px]">
+      <span className="font-semibold text-rose-700">Не доставлено</span>
+      <button
+        type="button"
+        onClick={onRetry}
+        disabled={disabled}
+        className="rounded-full border border-rose-300/60 bg-rose-50 px-2.5 py-0.5 font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-50"
+      >
+        Повторить
+      </button>
+    </div>
+  );
+}
+
 function startOfLocalDay(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
@@ -298,7 +320,15 @@ export default function CoachChat(props: {
   const [showAllAuto, setShowAllAuto] = React.useState(false);
   const [visibleDateLabel, setVisibleDateLabel] = React.useState<string | null>(null);
 
+  const [failedNonces, setFailedNonces] = React.useState<Set<string>>(new Set());
+  const [realtimeStatus, setRealtimeStatus] = React.useState<string>("CONNECTING");
+
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
+  const messagesRef = React.useRef<RawMessage[]>(messages);
+
+  React.useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   React.useEffect(() => {
     setHydrated(true);
@@ -332,15 +362,83 @@ export default function CoachChat(props: {
         },
         (payload) => {
           const m = payload.new as RawMessage;
+          // Echo собственного user-сообщения — пропускаем (уже добавили оптимистично)
+          if (m.type === "user" && m.author_id === currentUserId) {
+            const nonce = m.meta?.client_nonce;
+            if (typeof nonce === "string") {
+              setFailedNonces((prev) => {
+                if (!prev.has(nonce)) return prev;
+                const next = new Set(prev);
+                next.delete(nonce);
+                return next;
+              });
+            }
+            return;
+          }
           setMessages((prev) => mergeDedup(prev, [m]));
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log("[coach] realtime status", status);
+        setRealtimeStatus(status);
+      });
 
     return () => {
       supabase.removeChannel(channel);
     };
+  }, [threadId, currentUserId]);
+
+  const refetchSinceLatest = React.useCallback(async () => {
+    const list = messagesRef.current;
+    const latest = list[list.length - 1];
+    if (!latest?.created_at) return;
+
+    try {
+      const params = new URLSearchParams({
+        threadId,
+        since: latest.created_at,
+      });
+      const res = await fetch(`/api/coach/messages?${params.toString()}`, {
+        method: "GET",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        console.warn("[coach] refetchSinceLatest http", res.status);
+        return;
+      }
+      const json = (await res.json()) as { messages?: RawMessage[] };
+      const fresh = json.messages ?? [];
+      if (fresh.length > 0) {
+        setMessages((prev) => mergeDedup(prev, fresh));
+      }
+    } catch (e) {
+      console.warn("[coach] refetchSinceLatest failed", e);
+    }
   }, [threadId]);
+
+  // Подтягиваем свежие сообщения при возвращении в таб/фокусе окна
+  React.useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        void refetchSinceLatest();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, [refetchSinceLatest]);
+
+  // Polling fallback: если realtime не SUBSCRIBED — дёргаем /messages?since= каждые 25 сек
+  React.useEffect(() => {
+    if (realtimeStatus === "SUBSCRIBED") return;
+    const id = setInterval(() => {
+      void refetchSinceLatest();
+    }, 25_000);
+    return () => clearInterval(id);
+  }, [realtimeStatus, refetchSinceLatest]);
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
@@ -536,12 +634,17 @@ export default function CoachChat(props: {
       };
 
       setMessages((prev) => mergeDedup(prev, [optimisticUser]));
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60_000);
+
       try {
         const res = await fetch("/api/coach/send", {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ threadId, text: trimmed, client_nonce, action }),
+          signal: controller.signal,
         });
 
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -562,7 +665,10 @@ export default function CoachChat(props: {
           meta: { ...(data.userMessage.meta ?? {}), client_nonce },
         } as RawMessage;
 
-        setMessages((prev) => mergeDedup(prev, [patchedUser]));
+        // Мержим и user, и coach-ответ из тела ответа — на случай если realtime сейчас лежит
+        const incoming: RawMessage[] = [patchedUser];
+        if (data.coachMessage) incoming.push(data.coachMessage as RawMessage);
+        setMessages((prev) => mergeDedup(prev, incoming));
 
         try {
           await markRead();
@@ -571,11 +677,37 @@ export default function CoachChat(props: {
         }
       } catch (e) {
         console.error("coach_send_failed", e);
+        setFailedNonces((prev) => {
+          const next = new Set(prev);
+          next.add(client_nonce);
+          return next;
+        });
       } finally {
+        clearTimeout(timeoutId);
         setIsSending(false);
       }
     },
     [currentUserId, isSending, markRead, threadId]
+  );
+
+  const handleRetryFailed = React.useCallback(
+    (failed: RawMessage) => {
+      const nonce = failed.meta?.client_nonce as string | undefined;
+      if (!nonce) return;
+
+      // Убираем "висящее" temp-сообщение и снимаем failed-флаг
+      setMessages((prev) => prev.filter((m) => m.id !== failed.id));
+      setFailedNonces((prev) => {
+        if (!prev.has(nonce)) return prev;
+        const next = new Set(prev);
+        next.delete(nonce);
+        return next;
+      });
+
+      // Заново отправляем тот же текст — будет новый client_nonce
+      void sendMessage(failed.body);
+    },
+    [sendMessage]
   );
 
   function getRole(m: RawMessage): "user" | "coach" | "system" {
@@ -681,6 +813,11 @@ export default function CoachChat(props: {
                 pendingPlanActionMessageId != null &&
                 pendingPlanActionMessageId === m.id;
 
+              const isFailedUserMessage =
+                m.type === "user" &&
+                typeof m.meta?.client_nonce === "string" &&
+                failedNonces.has(m.meta.client_nonce);
+
               const avatar =
                 role === "user"
                   ? userAvatarNode
@@ -726,6 +863,11 @@ export default function CoachChat(props: {
                           ]);
                           void sendMessage("отмена", { action: "cancel_plan" });
                         }}
+                      />
+                    ) : isFailedUserMessage ? (
+                      <SendFailedRetry
+                        onRetry={() => handleRetryFailed(m)}
+                        disabled={isSending}
                       />
                     ) : null
                   }

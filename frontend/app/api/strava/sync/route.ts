@@ -774,6 +774,7 @@ export async function POST() {
       // Берём только те, у которых нет инсайта
       const workoutIdsForPostProcess = workoutIdsAll.filter((id) => !hasInsight.has(id));
 
+      // Weather дёргаем для всех — лёгкий вызов, погода нужна каждой тренировке отдельно
       for (const workoutId of workoutIdsForPostProcess) {
         try {
           await invokeEdgeFunction("workout-weather-fetch", {
@@ -784,15 +785,59 @@ export async function POST() {
         } catch (e) {
           console.warn("[strava] workout-weather-fetch failed", workoutId, e);
         }
+      }
 
-        try {
-          await invokeEdgeFunction("coach-workout-enqueue", {
-            user_id: user.id,
-            workout_id: workoutId,
-            source: "strava_sync",
-          });
-        } catch (e) {
-          console.warn("[strava] coach-workout-enqueue failed", workoutId, e);
+      // Coach-разбор (тяжёлый LLM-вызов): в пачке запускаем ТОЛЬКО для самой свежей тренировки.
+      // Daily-sync (1 тренировка) — поведение прежнее.
+      // Первое подключение / большой догон (50+) — не дёргаем 50× LLM, разбираем только последнюю.
+      if (workoutIdsForPostProcess.length > 0) {
+        const idToStravaId = new Map<string, string>();
+        for (const r of wmap as any[]) {
+          if (r?.id && r?.strava_activity_id) {
+            idToStravaId.set(String(r.id), String(r.strava_activity_id));
+          }
+        }
+
+        const stravaIdToStartDate = new Map<string, string>();
+        for (const a of all) {
+          if (a?.start_date) stravaIdToStartDate.set(String(a.id), a.start_date);
+        }
+
+        let latestWorkoutId: string | null = null;
+        let latestStartMs = -Infinity;
+        for (const workoutId of workoutIdsForPostProcess) {
+          const stravaId = idToStravaId.get(workoutId);
+          if (!stravaId) continue;
+          const startDate = stravaIdToStartDate.get(stravaId);
+          if (!startDate) continue;
+          const t = new Date(startDate).getTime();
+          if (Number.isFinite(t) && t > latestStartMs) {
+            latestStartMs = t;
+            latestWorkoutId = workoutId;
+          }
+        }
+
+        // Fallback: если start_date не нашли (защитный кейс) — берём последний из массива
+        if (!latestWorkoutId) {
+          latestWorkoutId =
+            workoutIdsForPostProcess[workoutIdsForPostProcess.length - 1] ?? null;
+        }
+
+        if (latestWorkoutId) {
+          try {
+            await invokeEdgeFunction("coach-workout-enqueue", {
+              user_id: user.id,
+              workout_id: latestWorkoutId,
+              source: "strava_sync",
+              batch_size: workoutIdsForPostProcess.length,
+            });
+          } catch (e) {
+            console.warn(
+              "[strava] coach-workout-enqueue failed",
+              latestWorkoutId,
+              e
+            );
+          }
         }
       }
     }

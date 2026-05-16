@@ -18,6 +18,7 @@ export async function GET(req: Request) {
 
     const url = new URL(req.url);
     const threadId = url.searchParams.get("threadId");
+    const since = url.searchParams.get("since");
 
     if (!threadId) {
       return NextResponse.json(
@@ -26,11 +27,17 @@ export async function GET(req: Request) {
       );
     }
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("coach_messages")
       .select("*")
       .eq("thread_id", threadId)
       .order("created_at", { ascending: true });
+
+    if (since) {
+      query = query.gt("created_at", since);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.warn("[api/coach/messages] select error", error);
