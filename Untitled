@@ -1,0 +1,11 @@
+import { StravaConnectCard } from "@/components/onboarding/StravaConnectCard";
+
+// внутри компонента:
+<StravaConnectCard
+  isConnected={stravaConn?.status === "connected"}
+  isLoading={isConnecting}
+  onConnect={() => {
+    setIsConnecting(true);
+    window.location.href = "/api/strava/start"; // или твой OAuth-start route
+  }}
+/>

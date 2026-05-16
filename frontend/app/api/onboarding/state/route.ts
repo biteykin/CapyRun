@@ -1,3 +1,5 @@
+//frontend/app/api/onboarding/state/route.ts
+
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabaseServerApp";
 

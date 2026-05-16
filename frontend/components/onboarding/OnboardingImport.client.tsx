@@ -4,30 +4,26 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Activity, FileUp, PencilLine, Unplug } from "lucide-react";
+import { FileUp, PencilLine, Unplug } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import OnboardingStepHeader from "@/components/onboarding/OnboardingStepHeader";
+import { StravaConnectCard } from "@/components/onboarding/StravaConnectCard";
 
 type ImportChoice = "strava" | "upload" | "manual" | "skipped";
 
+type StravaConn = {
+  status: string | null;
+} | null;
+
 const ACTIONS = [
-  {
-    id: "strava" as const,
-    title: "Подключить Strava",
-    description: "Автоматически подтянем тренировки и дадим тренеру больше контекста.",
-    icon: Activity,
-    href: "/api/strava/connect",
-    primary: true,
-  },
   {
     id: "upload" as const,
     title: "Загрузить тренировку",
     description: "Загрузите файл тренировки, если он уже есть на компьютере.",
     icon: FileUp,
     href: "/workouts/upload",
-    primary: false,
   },
   {
     id: "manual" as const,
@@ -35,7 +31,6 @@ const ACTIONS = [
     description: "Подойдёт, если хочется быстро внести последнюю тренировку без файла.",
     icon: PencilLine,
     href: "/workouts/new",
-    primary: false,
   },
 ];
 
@@ -43,9 +38,22 @@ export default function OnboardingImportClient() {
   const router = useRouter();
   const [loadingChoice, setLoadingChoice] = React.useState<ImportChoice | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [stravaConn, setStravaConn] = React.useState<StravaConn>(null);
+  const [isConnecting, setIsConnecting] = React.useState(false);
+
+  React.useEffect(() => {
+    fetch("/api/integrations/strava-status", { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (json?.conn) setStravaConn(json.conn);
+      })
+      .catch(() => {
+        // тихо — карточка покажет «не подключено»
+      });
+  }, []);
 
   async function finishOnboarding(choice: ImportChoice, href: string) {
-    if (loadingChoice) return;
+    if (loadingChoice || isConnecting) return;
     setLoadingChoice(choice);
     setError(null);
 
@@ -72,8 +80,18 @@ export default function OnboardingImportClient() {
       console.error("onboarding import finish failed", e);
       setError(e?.message ?? "Не удалось завершить онбординг");
       setLoadingChoice(null);
+      setIsConnecting(false);
     }
   }
+
+  async function handleStravaConnect() {
+    if (loadingChoice || isConnecting) return;
+    setIsConnecting(true);
+    setError(null);
+    await finishOnboarding("strava", "/api/strava/connect");
+  }
+
+  const busy = Boolean(loadingChoice) || isConnecting;
 
   return (
     <section className="space-y-6">
@@ -88,7 +106,13 @@ export default function OnboardingImportClient() {
         </p>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-3">
+      <StravaConnectCard
+        isConnected={stravaConn?.status === "connected"}
+        isLoading={isConnecting}
+        onConnect={() => void handleStravaConnect()}
+      />
+
+      <div className="grid gap-3 sm:grid-cols-2">
         {ACTIONS.map((action) => {
           const Icon = action.icon;
           const loading = loadingChoice === action.id;
@@ -105,9 +129,9 @@ export default function OnboardingImportClient() {
               <CardContent className="mt-auto">
                 <Button
                   type="button"
-                  variant={action.primary ? "primary" : "secondary"}
+                  variant="secondary"
                   className="w-full"
-                  disabled={Boolean(loadingChoice)}
+                  disabled={busy}
                   onClick={() => void finishOnboarding(action.id, action.href)}
                 >
                   {loading ? "Открываем…" : action.title}
@@ -135,8 +159,8 @@ export default function OnboardingImportClient() {
           <Button
             type="button"
             variant="secondary"
-            disabled={Boolean(loadingChoice)}
-            onClick={() => void finishOnboarding("skipped", "/home")}
+            disabled={busy}
+            onClick={() => void finishOnboarding("skipped", "/onboarding/finalizing")}
           >
             {loadingChoice === "skipped" ? "Завершаем…" : "Пропустить"}
           </Button>

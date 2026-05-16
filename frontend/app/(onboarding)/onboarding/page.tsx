@@ -57,9 +57,16 @@ export default async function OnboardingPage({
     city: profile?.city ?? null,
   };
 
-  // если уже прошёл — не пускаем
+  // Если уже прошёл онбординг — больше не пускаем сюда.
+  // Если завершил только что (≤10 мин назад) — отправляем на «настраиваем кабинет».
+  // В остальных случаях — сразу на /coach.
   if (profile?.onboarding_completed_at) {
-    redirect("/dashboard");
+    const completedMs = new Date(profile.onboarding_completed_at).getTime();
+    const ageMs = Date.now() - completedMs;
+    if (ageMs < 10 * 60 * 1000) {
+      redirect("/onboarding/finalizing");
+    }
+    redirect("/coach");
   }
 
   if (requestedStep === "profile" || !onboarding.profile_done) {

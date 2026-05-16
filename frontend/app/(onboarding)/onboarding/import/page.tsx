@@ -1,3 +1,5 @@
+//frontend/app/(onboarding)/onboarding/import/page.tsx
+
 import OnboardingImportClient from "@/components/onboarding/OnboardingImport.client";
 
 export const dynamic = "force-dynamic";
