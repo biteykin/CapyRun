@@ -6,16 +6,24 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import {
   Activity,
+  Bike,
   CalendarDays,
-  Check,
   CheckCircle2,
-  ChevronsUpDown,
   Dumbbell,
+  Flame,
   Flag,
+  Footprints,
   Gauge,
+  PersonStanding,
   Route,
+  Snowflake,
   Sparkles,
   Timer,
+  TrendingUp,
+  Trophy,
+  Waves,
+  Wind,
+  Zap,
 } from "lucide-react";
 import PlansCalendar, { type PlanEvent } from "./PlansCalendar.client";
 import { cn } from "@/lib/utils";
@@ -36,25 +44,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
 import ConfirmActionDialog from "@/components/ui/confirm-action-dialog";
 
 type ActiveGoal = {
@@ -112,13 +101,92 @@ function getTodayIso() {
   return `${y}-${m}-${day}`;
 }
 
-const HR_ZONE_OPTIONS = [
-  { value: "Z1", label: "Z1 · восстановление" },
-  { value: "Z2", label: "Z2 · лёгкая аэробная" },
-  { value: "Z3", label: "Z3 · умеренная" },
-  { value: "Z4", label: "Z4 · пороговая" },
-  { value: "Z5", label: "Z5 · максимальная" },
+function pluralizeRu(n: number, forms: [string, string, string]): string {
+  const abs = Math.abs(n) % 100;
+  const n1 = abs % 10;
+  if (abs > 10 && abs < 20) return forms[2];
+  if (n1 > 1 && n1 < 5) return forms[1];
+  if (n1 === 1) return forms[0];
+  return forms[2];
+}
+
+function calcPace(
+  distance_m?: number | null,
+  duration_sec?: number | null,
+  sport?: string | null
+): string | null {
+  if (!distance_m || !duration_sec || distance_m <= 0 || duration_sec <= 0) return null;
+  const km = distance_m / 1000;
+  if (sport === "ride") {
+    const kmh = km / (duration_sec / 3600);
+    return `${kmh.toFixed(1)} км/ч`;
+  }
+  if (sport === "swim") {
+    const minPer100m = duration_sec / 60 / (distance_m / 100);
+    const m = Math.floor(minPer100m);
+    const s = Math.round((minPer100m - m) * 60);
+    return `${m}:${String(s).padStart(2, "0")} /100м`;
+  }
+  const minPerKm = duration_sec / 60 / km;
+  const m = Math.floor(minPerKm);
+  const s = Math.round((minPerKm - m) * 60);
+  return `${m}:${String(s).padStart(2, "0")} /км`;
+}
+
+function daysBetweenIso(fromIso: string, toIso: string): number {
+  const a = new Date(fromIso + "T00:00:00");
+  const b = new Date(toIso + "T00:00:00");
+  return Math.round((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function getGoalMotivation(daysToGoal: number, isRace: boolean): string {
+  if (daysToGoal < 0) return "Эта цель уже в прошлом. Время поставить новую и двигаться дальше.";
+  if (daysToGoal === 0) return isRace ? "Сегодня твой день! Доверяй подготовке и наслаждайся стартом 🚀" : "Сегодня дата цели.";
+  if (daysToGoal <= 3) return "Финал совсем рядом. Сохраняй спокойствие — главная работа уже сделана.";
+  if (daysToGoal <= 14) return "Финиш близко. Сбавь объём, набирай свежесть и доверяй плану.";
+  if (daysToGoal <= 56) return "Подготовка в активной фазе. Каждая тренировка приближает результат.";
+  return "Впереди достаточно времени для качественной подготовки. Главное — последовательность.";
+}
+
+type SportOption = {
+  value: string;
+  label: string;
+  Icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
+  color: string;
+  bg: string;
+  textColor?: string;
+};
+const SPORT_OPTIONS: SportOption[] = [
+  { value: "run", label: "Бег", Icon: Footprints, color: "#30bb5c", bg: "rgba(48,187,92,0.14)", textColor: "#1F8541" },
+  { value: "ride", label: "Вело", Icon: Bike, color: "#a400d0", bg: "rgba(164,0,208,0.10)" },
+  { value: "swim", label: "Плавание", Icon: Waves, color: "#2565f9", bg: "rgba(37,101,249,0.10)" },
+  { value: "strength", label: "ОФП", Icon: Dumbbell, color: "#ed3b44", bg: "rgba(237,59,68,0.10)", textColor: "#C72530" },
+  { value: "walk", label: "Ходьба", Icon: PersonStanding, color: "#f3950a", bg: "rgba(243,149,10,0.14)", textColor: "#A86200" },
+  { value: "other", label: "Другое", Icon: Activity, color: "#B7B9AE", bg: "rgba(183,185,174,0.20)", textColor: "#5C5E58" },
 ];
+
+type EffortPreset = { label: string; color: string; bg: string; textColor?: string };
+const EFFORT_PRESETS: EffortPreset[] = [
+  { label: "Легко", color: "#3AAAEF", bg: "#C5E8FF" },
+  { label: "Умеренно", color: "#1A9E3A", bg: "#C5EDD0" },
+  { label: "Тяжело", color: "#FFD600", bg: "#FFF5B0", textColor: "#8B6B00" },
+  { label: "Максимум", color: "#E60012", bg: "#FFCCCC" },
+];
+
+type HrZoneDef = { value: string; desc: string; color: string; bg: string; textColor?: string };
+const HR_ZONE_DEFS: HrZoneDef[] = [
+  { value: "Z1", desc: "восстановление", color: "#59229F", bg: "#D1C1E4" },
+  { value: "Z2", desc: "лёгкая аэробная", color: "#3AAAEF", bg: "#C5E8FF" },
+  { value: "Z3", desc: "умеренная", color: "#1A9E3A", bg: "#C5EDD0" },
+  { value: "Z4", desc: "пороговая", color: "#FFD600", bg: "#FFF5B0", textColor: "#8B6B00" },
+  { value: "Z5", desc: "максимальная", color: "#E60012", bg: "#FFCCCC" },
+];
+
+function getHrZoneDef(value?: string | null): HrZoneDef | null {
+  if (!value) return null;
+  const key = value.trim().toUpperCase();
+  return HR_ZONE_DEFS.find((z) => z.value === key) ?? null;
+}
 
 function formatDateRu(isoDate: string) {
   const d = new Date(isoDate);
@@ -198,115 +266,33 @@ function MetaPill(props: {
   );
 }
 
-const STEP_THEME_BY_TYPE: Record<
-  string,
-  {
-    timeline: string;
-    pill: string;
-    tone: string;
-    timelineStyle?: React.CSSProperties;
-    pillStyle?: React.CSSProperties;
-  }
-> = {
-  warmup: {
-    timeline: "",
-    pill: "",
-    tone: "border-l-[rgb(41,73,246)] bg-[rgb(212,219,253,0.35)]",
-    timelineStyle: {
-      backgroundColor: "#D4DBFD",
-      color: "#0E0E0E",
-      borderColor: "rgba(41,73,246,0.2)",
-    },
-    pillStyle: {
-      backgroundColor: "#D4DBFD",
-      color: "#2949F6",
-      borderColor: "rgba(41,73,246,0.25)",
-    },
-  },
-
-  interval: {
-    timeline: "",
-    pill: "",
-    tone: "border-l-[rgb(89,34,159)] bg-[rgba(209,193,228,0.6)]",
-    timelineStyle: {
-      backgroundColor: "#D1C1E4",
-      color: "#0E0E0E",
-      borderColor: "rgba(89,34,159,0.2)",
-    },
-    pillStyle: {
-      backgroundColor: "#D1C1E4",
-      color: "#59229F",
-      borderColor: "rgba(89,34,159,0.25)",
-    },
-  },
-
-  recovery: {
-    timeline: "",
-    pill: "",
-    tone: "border-l-[rgb(78,132,36)] bg-[rgb(217,238,218,0.5)]",
-    timelineStyle: {
-      backgroundColor: "#D9EEDA",
-      color: "#0E0E0E",
-      borderColor: "rgba(78,132,36,0.2)",
-    },
-    pillStyle: {
-      backgroundColor: "#D9EEDA",
-      color: "#4E8424",
-      borderColor: "rgba(78,132,36,0.25)",
-    },
-  },
-
-  cooldown: {
-    timeline: "",
-    pill: "",
-    tone: "border-l-[rgb(170,172,168)] bg-[rgb(240,241,236,0.7)]",
-    timelineStyle: {
-      backgroundColor: "#F0F1EC",
-      color: "#595958",
-      borderColor: "rgba(170,172,168,0.25)",
-    },
-    pillStyle: {
-      backgroundColor: "#F0F1EC",
-      color: "#595958",
-      borderColor: "rgba(170,172,168,0.25)",
-    },
-  },
-
-  exercise: {
-    timeline: "",
-    pill: "",
-    tone: "border-l-[rgb(89,34,159)] bg-[rgb(209,193,228,0.4)]",
-    timelineStyle: {
-      backgroundColor: "#D1C1E4",
-      color: "#0E0E0E",
-      borderColor: "rgba(89,34,159,0.2)",
-    },
-    pillStyle: {
-      backgroundColor: "#D1C1E4",
-      color: "#59229F",
-      borderColor: "rgba(89,34,159,0.25)",
-    },
-  },
-
-  default: {
-    timeline: "",
-    pill: "",
-    tone: "border-l-[rgb(240,145,55)] bg-[rgba(240,145,55,0.12)]",
-    timelineStyle: {
-      backgroundColor: "#F0E7D4",
-      color: "#0E0E0E",
-      borderColor: "rgba(240,145,55,0.2)",
-    },
-    pillStyle: {
-      backgroundColor: "#F0E7D4",
-      color: "#F09137",
-      borderColor: "rgba(240,145,55,0.25)",
-    },
-  },
+type StepTheme = {
+  color: string;
+  bg: string;
+  textColor?: string;
+  Icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
+  label: string;
 };
 
-function getStepTheme(type?: string | null) {
+const STEP_THEME_BY_TYPE: Record<string, StepTheme> = {
+  warmup: { color: "#3AAAEF", bg: "#C5E8FF", Icon: Flame, label: "Разминка" },
+  interval: { color: "#E60012", bg: "#FFCCCC", Icon: Zap, label: "Интервал" },
+  tempo: { color: "#FFD600", bg: "#FFF5B0", textColor: "#8B6B00", Icon: TrendingUp, label: "Темп" },
+  recovery: { color: "#1A9E3A", bg: "#C5EDD0", Icon: Wind, label: "Восстановление" },
+  cooldown: { color: "#59229F", bg: "#D1C1E4", Icon: Snowflake, label: "Заминка" },
+  exercise: { color: "#ed3b44", bg: "rgba(237,59,68,0.14)", textColor: "#C72530", Icon: Dumbbell, label: "Упражнение" },
+  default: { color: "#f3950a", bg: "rgba(243,149,10,0.14)", textColor: "#A86200", Icon: Activity, label: "Шаг" },
+};
+
+function getStepTheme(type?: string | null): StepTheme {
   return STEP_THEME_BY_TYPE[type ?? ""] ?? STEP_THEME_BY_TYPE.default;
+}
+
+function getSportTheme(sport?: string | null) {
+  return (
+    SPORT_OPTIONS.find((o) => o.value === sport) ??
+    SPORT_OPTIONS[SPORT_OPTIONS.length - 1]
+  );
 }
 
 function getTrainingBenefit(evt: ExtendedEvent | null, activeGoal?: ActiveGoal) {
@@ -414,7 +400,7 @@ function getExecutionTips(evt: ExtendedEvent | null): string[] {
   const hrTarget = String(evt?.hr_target ?? evt?.structure?.hr_target ?? "");
   const sport = String(evt?.sport ?? "").toLowerCase();
 
-  if (sport === "strength" || title.includes("офп") || goal.includes("офп")) {
+  if (sport === "strength" || title.includes("офп") || goal.includes("")) {
     tips.push("Держи технику на первом месте и не работай через боль.");
     tips.push("Делай движения спокойно и контролируемо, без спешки.");
     tips.push("Между подходами восстанавливай дыхание, а не просто жди время.");
@@ -448,6 +434,262 @@ function getExecutionTips(evt: ExtendedEvent | null): string[] {
   return tips.slice(0, 4);
 }
 
+type PlannedWorkoutFormProps = {
+  date: string;
+  onDateChange?: (v: string) => void;
+  minDate?: string;
+  title: string;
+  onTitleChange: (v: string) => void;
+  sport: string;
+  onSportChange: (v: string) => void;
+  durationMin: string;
+  onDurationMinChange: (v: string) => void;
+  distanceKm: string;
+  onDistanceKmChange: (v: string) => void;
+  effort: string;
+  onEffortChange: (v: string) => void;
+  hrZones: string[];
+  onHrZonesChange: (v: string[]) => void;
+  notes: string;
+  onNotesChange: (v: string) => void;
+  error?: string | null;
+};
+
+function PlannedWorkoutForm({
+  date,
+  onDateChange,
+  minDate,
+  title,
+  onTitleChange,
+  sport,
+  onSportChange,
+  durationMin,
+  onDurationMinChange,
+  distanceKm,
+  onDistanceKmChange,
+  effort,
+  onEffortChange,
+  hrZones,
+  onHrZonesChange,
+  notes,
+  onNotesChange,
+  error,
+}: PlannedWorkoutFormProps) {
+  const isDistanceVisible = sport !== "strength" && sport !== "other";
+
+  function toggleZone(value: string) {
+    onHrZonesChange(
+      hrZones.includes(value)
+        ? hrZones.filter((z) => z !== value)
+        : [...hrZones, value]
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Тип тренировки — тайлы с иконками */}
+      <div className="space-y-2">
+        <Label>Тип тренировки</Label>
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+          {SPORT_OPTIONS.map((opt) => {
+            const selected = sport === opt.value;
+            const Icon = opt.Icon;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => onSportChange(opt.value)}
+                style={
+                  selected
+                    ? {
+                        backgroundColor: opt.bg,
+                        borderColor: opt.color,
+                        color: opt.textColor ?? opt.color,
+                      }
+                    : undefined
+                }
+                className={cn(
+                  "flex flex-col items-center gap-1.5 rounded-xl border px-2 py-3 text-xs font-medium transition-colors",
+                  selected
+                    ? "shadow-sm"
+                    : "border-border bg-background text-muted-foreground hover:border-[rgba(12,91,249,0.4)] hover:bg-[rgba(12,91,249,0.04)] hover:text-foreground"
+                )}
+              >
+                <Icon
+                  className="size-5"
+                  style={selected ? { color: opt.color } : undefined}
+                />
+                <span>{opt.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Название */}
+      <div className="space-y-2">
+        <Label htmlFor="pwf-title">Название</Label>
+        <Input
+          id="pwf-title"
+          value={title}
+          onChange={(e) => onTitleChange(e.target.value)}
+          placeholder="Например: Лёгкий бег 40 минут"
+        />
+      </div>
+
+      {/* Дата (только если редактируемая) + длительность + дистанция */}
+      <div
+        className={cn(
+          "grid grid-cols-1 gap-3",
+          onDateChange ? "sm:grid-cols-3" : "sm:grid-cols-2"
+        )}
+      >
+        {onDateChange ? (
+          <div className="space-y-2">
+            <Label htmlFor="pwf-date">Дата</Label>
+            <Input
+              id="pwf-date"
+              type="date"
+              min={minDate}
+              value={date}
+              onChange={(e) => onDateChange(e.target.value)}
+            />
+          </div>
+        ) : null}
+        <div className="space-y-2">
+          <Label htmlFor="pwf-duration">Длительность, мин</Label>
+          <Input
+            id="pwf-duration"
+            type="number"
+            inputMode="numeric"
+            min={1}
+            value={durationMin}
+            onChange={(e) => onDurationMinChange(e.target.value)}
+            placeholder="40"
+          />
+        </div>
+        {isDistanceVisible ? (
+          <div className="space-y-2">
+            <Label htmlFor="pwf-distance">Дистанция, км</Label>
+            <Input
+              id="pwf-distance"
+              type="number"
+              inputMode="decimal"
+              min={0}
+              step="0.1"
+              value={distanceKm}
+              onChange={(e) => onDistanceKmChange(e.target.value)}
+              placeholder="6.0"
+            />
+          </div>
+        ) : null}
+      </div>
+
+      {/* Интенсивность — пресеты + свободное поле */}
+      <div className="space-y-2">
+        <Label htmlFor="pwf-effort">Интенсивность</Label>
+        <div className="flex flex-wrap gap-2">
+          {EFFORT_PRESETS.map((preset) => {
+            const selected =
+              effort.trim().toLowerCase() === preset.label.toLowerCase();
+            return (
+              <button
+                key={preset.label}
+                type="button"
+                onClick={() => onEffortChange(selected ? "" : preset.label)}
+                style={
+                  selected
+                    ? {
+                        backgroundColor: preset.bg,
+                        borderColor: preset.color,
+                        color: preset.textColor ?? preset.color,
+                      }
+                    : undefined
+                }
+                className={cn(
+                  "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                  selected
+                    ? "shadow-sm"
+                    : "border-border bg-background text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                )}
+              >
+                {preset.label}
+              </button>
+            );
+          })}
+        </div>
+        <Input
+          id="pwf-effort"
+          value={effort}
+          onChange={(e) => onEffortChange(e.target.value)}
+          placeholder="или опиши своими словами"
+        />
+      </div>
+
+      {/* Пульсовые зоны — inline чипы */}
+      <div className="space-y-2">
+        <Label>Пульсовые зоны</Label>
+        <div className="flex flex-wrap gap-2">
+          {HR_ZONE_DEFS.map((zone) => {
+            const selected = hrZones.includes(zone.value);
+            return (
+              <button
+                key={zone.value}
+                type="button"
+                onClick={() => toggleZone(zone.value)}
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                  selected
+                    ? "shadow-sm"
+                    : "border-border bg-background text-muted-foreground hover:bg-muted/40"
+                )}
+                style={
+                  selected
+                    ? {
+                        backgroundColor: zone.bg,
+                        borderColor: zone.color,
+                        color: zone.textColor ?? zone.color,
+                      }
+                    : undefined
+                }
+              >
+                <span
+                  className="size-2 rounded-full"
+                  style={{ backgroundColor: zone.color }}
+                  aria-hidden
+                />
+                <span className="font-bold">{zone.value}</span>
+                <span className="opacity-75">{zone.desc}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="text-xs text-muted-foreground">
+          Можно выбрать несколько зон, например Z2 и Z3
+        </div>
+      </div>
+
+      {/* Заметки */}
+      <div className="space-y-2">
+        <Label htmlFor="pwf-notes">План и заметки</Label>
+        <Textarea
+          id="pwf-notes"
+          value={notes}
+          onChange={(e) => onNotesChange(e.target.value)}
+          rows={4}
+          placeholder="Например: 10 минут разминки, затем ровный лёгкий бег. После — заминка и растяжка."
+        />
+      </div>
+
+      {error ? (
+        <div className="rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function PlansCalendarHost({
   events,
   initialMonthISO,
@@ -472,7 +714,6 @@ export default function PlansCalendarHost({
   const [createDistanceKm, setCreateDistanceKm] = React.useState("");
   const [createEffort, setCreateEffort] = React.useState("");
   const [createHrZones, setCreateHrZones] = React.useState<string[]>([]);
-  const [hrZonesOpen, setHrZonesOpen] = React.useState(false);
   const [createNotes, setCreateNotes] = React.useState("");
   const [isCreating, setIsCreating] = React.useState(false);
   const [createError, setCreateError] = React.useState<string | null>(null);
@@ -484,7 +725,6 @@ export default function PlansCalendarHost({
   const [editDistanceKm, setEditDistanceKm] = React.useState("");
   const [editEffort, setEditEffort] = React.useState("");
   const [editHrZones, setEditHrZones] = React.useState<string[]>([]);
-  const [editHrZonesOpen, setEditHrZonesOpen] = React.useState(false);
   const [editNotes, setEditNotes] = React.useState("");
   const [isUpdating, setIsUpdating] = React.useState(false);
   const [editError, setEditError] = React.useState<string | null>(null);
@@ -572,6 +812,7 @@ export default function PlansCalendarHost({
   };
 
   const handleDayClick = (isoDate: string) => {
+    if (isoDate < getTodayIso()) return;
     setCreateDate(isoDate);
     setCreateTitle("");
     setCreateSport("run");
@@ -637,12 +878,6 @@ export default function PlansCalendarHost({
     setEditError(null);
     setEditOpen(true);
   }, [selected]);
-
-  function toggleEditHrZone(zone: string) {
-    setEditHrZones((prev) =>
-      prev.includes(zone) ? prev.filter((z) => z !== zone) : [...prev, zone]
-    );
-  }
 
   const handleEventDrop = React.useCallback(
     async (evt: PlanEvent, nextDate: string) => {
@@ -825,29 +1060,17 @@ export default function PlansCalendarHost({
     isCreating,
   ]);
 
-  const isDistanceVisible =
-    createSport !== "strength" && createSport !== "other";
-
   const isCreateValid =
     !!createDate &&
     !!createSport &&
     createTitle.trim().length > 0 &&
     (createDurationMin === "" || Number(createDurationMin) > 0);
 
-  const isEditDistanceVisible =
-    editSport !== "strength" && editSport !== "other";
-
   const isEditValid =
     !!editDate &&
     !!editSport &&
     editTitle.trim().length > 0 &&
     (editDurationMin === "" || Number(editDurationMin) > 0);
-
-  function toggleHrZone(zone: string) {
-    setCreateHrZones((prev) =>
-      prev.includes(zone) ? prev.filter((z) => z !== zone) : [...prev, zone]
-    );
-  }
 
   const dateStr = selected ? formatDateRu(selected.date) : "—";
   const description = (selected?.description as string | null | undefined) ?? null;
@@ -861,7 +1084,7 @@ export default function PlansCalendarHost({
   const plannedHrZones: PlannedHrZoneChip[] = (() => {
     const raw = (structure as any)?.hr_zones;
     if (!Array.isArray(raw) || raw.length === 0) return [];
-    return raw.map((z: unknown, i: number) => {
+    const items = raw.map((z: unknown, i: number) => {
       if (typeof z === "string") {
         return { value: z, label: z };
       }
@@ -876,6 +1099,13 @@ export default function PlansCalendarHost({
       }
       return { value: String(z ?? i) };
     });
+    const order = (z: PlannedHrZoneChip) => {
+      const m = String(z.value ?? z.label ?? "")
+        .toUpperCase()
+        .match(/Z(\d+)/);
+      return m ? parseInt(m[1], 10) : 999;
+    };
+    return items.sort((a, b) => order(a) - order(b));
   })();
   const plannedStrengthBlock =
     structure?.strength_block ?? (selected as any)?.strength_block ?? null;
@@ -1194,45 +1424,122 @@ export default function PlansCalendarHost({
               </div>
 
               {isGoal ? (
-                <Card className="gap-4 bg-[rgba(255,214,0,0.12)] py-5">
-                  <CardContent className="space-y-4 px-5">
-                    <div className="flex items-start gap-4">
-                      <div className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-background/70 text-3xl">
-                        {(selected as any)?.goal_icon ?? "🎯"}
-                      </div>
-                      <div className="min-w-0 space-y-1">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          Цель в календаре
-                        </div>
-                        <div className="text-xl font-bold leading-tight">
-                          {selected?.title || "Цель"}
-                        </div>
-                        <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                          <CalendarDays className="h-4 w-4" />
-                          <span>{dateStr}</span>
-                        </div>
-                      </div>
-                    </div>
+                (() => {
+                  const goalType = String((selected as any)?.goal_type ?? "").toLowerCase();
+                  const isRaceGoal = ["5k", "10k", "hm", "m", "race", "event"].includes(goalType);
+                  const goalIcon = (selected as any)?.goal_icon ?? "🎯";
+                  const daysToGoal = selected?.date ? daysBetweenIso(getTodayIso(), String(selected.date)) : null;
+                  const motivation = daysToGoal != null ? getGoalMotivation(daysToGoal, isRaceGoal) : "";
+                  const accent = isRaceGoal
+                    ? { main: "#E58B21", deep: "#A56300", soft: "#FFD600", orb: "rgba(255,214,0,0.35)" }
+                    : { main: "#1B2EC9", deep: "#0E1A8E", soft: "#3AAAEF", orb: "rgba(58,170,239,0.30)" };
 
-                    <div className="rounded-2xl border bg-background/65 p-4 text-sm text-muted-foreground">
-                      {selected?.description || "Дата завершения цели."}
-                    </div>
+                  return (
+                    <Card
+                      className="relative gap-0 overflow-hidden border-2 py-0"
+                      style={{
+                        borderColor: isRaceGoal ? "rgba(229,139,33,0.4)" : "rgba(27,46,201,0.3)",
+                        background: isRaceGoal
+                          ? "linear-gradient(135deg, rgba(255,214,0,0.20) 0%, rgba(255,255,255,0.55) 60%, rgba(229,139,33,0.14) 100%)"
+                          : "linear-gradient(135deg, rgba(58,170,239,0.16) 0%, rgba(255,255,255,0.55) 60%, rgba(27,46,201,0.12) 100%)",
+                      }}
+                    >
+                      <div
+                        className="pointer-events-none absolute -right-16 -top-16 size-56 rounded-full blur-3xl"
+                        style={{ background: accent.orb }}
+                      />
+                      <div
+                        className="pointer-events-none absolute -bottom-16 -left-16 size-56 rounded-full blur-3xl"
+                        style={{ background: isRaceGoal ? "rgba(229,139,33,0.22)" : "rgba(27,46,201,0.18)" }}
+                      />
 
-                    {/* CTA */}
-                    <div className="flex justify-end pt-2">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={() => {
-                          setSelected(null);
-                          router.push("/goals");
-                        }}
-                      >
-                        Перейти к целям
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
+                      <CardContent className="relative space-y-5 p-6 sm:p-7">
+                        {/* Hero */}
+                        <div className="flex flex-col items-center gap-4 text-center sm:flex-row sm:items-start sm:gap-5 sm:text-left">
+                          <div
+                            className="flex size-20 shrink-0 items-center justify-center rounded-3xl bg-white text-5xl shadow-lg ring-4"
+                            style={{ boxShadow: `0 0 0 4px ${isRaceGoal ? "rgba(255,214,0,0.4)" : "rgba(58,170,239,0.4)"}, 0 10px 25px -10px rgba(0,0,0,0.2)` }}
+                          >
+                            {goalIcon}
+                          </div>
+                          <div className="min-w-0 flex-1 space-y-2">
+                            <div
+                              className="inline-flex items-center gap-1.5 rounded-full bg-white/80 px-3 py-1 text-[10px] font-bold uppercase tracking-wider backdrop-blur-sm"
+                              style={{ color: accent.deep }}
+                            >
+                              <Trophy className="size-3" />
+                              {isRaceGoal ? "Гонка / Соревнование" : "Цель"}
+                            </div>
+                            <div className="text-2xl font-bold leading-tight sm:text-3xl">
+                              {selected?.title || "Цель"}
+                            </div>
+                            <div className="flex items-center justify-center gap-1.5 text-sm font-medium text-foreground/80 sm:justify-start">
+                              <CalendarDays className="size-4" />
+                              <span>{dateStr}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Countdown cards */}
+                        {daysToGoal != null ? (
+                          <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                            <div className="rounded-2xl bg-white/75 p-3 text-center shadow-sm backdrop-blur-sm">
+                              <div className="text-3xl font-extrabold tabular-nums" style={{ color: accent.deep }}>
+                                {Math.abs(daysToGoal)}
+                              </div>
+                              <div className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                                {pluralizeRu(Math.abs(daysToGoal), ["день", "дня", "дней"])}{daysToGoal < 0 ? " назад" : daysToGoal === 0 ? "" : " до"}
+                              </div>
+                            </div>
+                            <div className="rounded-2xl bg-white/75 p-3 text-center shadow-sm backdrop-blur-sm">
+                              <div className="text-3xl font-extrabold tabular-nums" style={{ color: accent.deep }}>
+                                {Math.floor(Math.abs(daysToGoal) / 7)}
+                              </div>
+                              <div className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                                {pluralizeRu(Math.floor(Math.abs(daysToGoal) / 7), ["неделя", "недели", "недель"])}
+                              </div>
+                            </div>
+                            <div className="rounded-2xl bg-white/75 p-3 text-center shadow-sm backdrop-blur-sm">
+                              <div className="text-2xl font-extrabold uppercase tabular-nums" style={{ color: accent.deep }}>
+                                {String((selected as any)?.goal_type ?? "—").toUpperCase()}
+                              </div>
+                              <div className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                                Тип
+                              </div>
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {/* Motivation */}
+                        {motivation ? (
+                          <div
+                            className="rounded-2xl border bg-white/65 p-4 backdrop-blur-sm"
+                            style={{ borderColor: isRaceGoal ? "rgba(229,139,33,0.30)" : "rgba(27,46,201,0.25)" }}
+                          >
+                            <div className="flex items-start gap-2.5">
+                              <Sparkles className="mt-0.5 size-4 shrink-0" style={{ color: accent.main }} />
+                              <div className="text-sm font-medium leading-relaxed">{motivation}</div>
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {/* CTA */}
+                        <div className="flex justify-end pt-1">
+                          <Button
+                            type="button"
+                            variant="primary"
+                            onClick={() => {
+                              setSelected(null);
+                              router.push("/goals");
+                            }}
+                          >
+                            Открыть цель
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })()
               ) : isPlanned ? (
                 <>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -1246,21 +1553,37 @@ export default function PlansCalendarHost({
                       <CardContent className="px-4">
                         {plannedHrZones.length > 0 ? (
                           <div className="flex flex-wrap gap-2">
-                            {plannedHrZones.map((zone, idx) => (
-                              <span
-                                key={zone.value ?? zone.label ?? String(idx)}
-                                className="inline-flex items-center gap-1.5 rounded-full border bg-muted/20 px-2.5 py-1 text-xs font-medium"
-                              >
+                            {plannedHrZones.map((zone, idx) => {
+                              const def = getHrZoneDef(zone.value ?? zone.label);
+                              const accent = def?.color ?? zone.color ?? "#1B2EC9";
+                              return (
                                 <span
-                                  className="h-2.5 w-2.5 rounded-full"
-                                  style={{ backgroundColor: zone.color ?? "#1B2EC9" }}
-                                />
-                                <span>{zone.value ?? zone.label}</span>
-                                {zone.range ? (
-                                  <span className="text-muted-foreground">{zone.range}</span>
-                                ) : null}
-                              </span>
-                            ))}
+                                  key={zone.value ?? zone.label ?? String(idx)}
+                                  className="inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-medium"
+                                  style={
+                                    def
+                                      ? {
+                                          backgroundColor: def.bg,
+                                          borderColor: def.color,
+                                          color: def.textColor ?? def.color,
+                                        }
+                                      : undefined
+                                  }
+                                >
+                                  <span
+                                    className="size-2 rounded-full"
+                                    style={{ backgroundColor: accent }}
+                                    aria-hidden
+                                  />
+                                  <span className="font-bold">{zone.value ?? zone.label}</span>
+                                  {def ? (
+                                    <span className="opacity-75">{def.desc}</span>
+                                  ) : zone.range ? (
+                                    <span className="text-muted-foreground">{zone.range}</span>
+                                  ) : null}
+                                </span>
+                              );
+                            })}
                           </div>
                         ) : (
                           <div className="text-sm font-medium">
@@ -1318,7 +1641,7 @@ export default function PlansCalendarHost({
                         <div className="mb-2 text-xs font-medium text-muted-foreground">
                           Визуализация тренировки
                         </div>
-                        <div className="flex overflow-hidden rounded-lg border bg-muted/20">
+                        <div className="flex h-20 overflow-hidden rounded-xl border bg-muted/5 shadow-sm">
                           {plannedSteps.map((step, idx) => {
                             const raw =
                               Number(step?.duration_min ?? 0) > 0
@@ -1329,52 +1652,120 @@ export default function PlansCalendarHost({
                             const weighted = raw * repeats;
                             const flexGrow = Math.max(1, weighted);
                             const theme = getStepTheme(step?.type);
+                            const Icon = theme.Icon;
+                            const durLabel =
+                              Number(step?.duration_min ?? 0) > 0
+                                ? `${Math.round(Number(step.duration_min))}'`
+                                : Number(step?.distance_km ?? 0) > 0
+                                  ? `${Number(step.distance_km).toFixed(1)}km`
+                                  : "";
 
                             return (
                               <div
                                 key={`${selected?.id}-viz-${idx}`}
-                                className={`min-w-[56px] border-r px-2 py-3 text-center text-[10px] font-semibold last:border-r-0 ${theme.timeline}`}
+                                className="group relative flex flex-col items-center justify-center gap-0.5 overflow-hidden border-r border-white/60 px-2 transition-all last:border-r-0 hover:brightness-105"
                                 style={{
+                                  background: theme.bg,
                                   flex: `${flexGrow} 1 0%`,
-                                  ...theme.timelineStyle,
+                                  minWidth: 60,
                                 }}
                                 title={formatStep(step)}
                               >
-                                <div className="truncate">
-                                  {step?.label ?? `Шаг ${idx + 1}`}
+                                <div className="absolute inset-x-0 top-0 h-1" style={{ background: theme.color }} />
+                                <Icon className="size-4" style={{ color: theme.color }} />
+                                <div
+                                  className="text-[10px] font-extrabold leading-none tabular-nums"
+                                  style={{ color: theme.textColor ?? theme.color }}
+                                >
+                                  {durLabel}
                                 </div>
+                                {repeats > 1 ? (
+                                  <div
+                                    className="text-[9px] font-bold uppercase tracking-wider"
+                                    style={{ color: theme.textColor ?? theme.color, opacity: 0.75 }}
+                                  >
+                                    ×{repeats}
+                                  </div>
+                                ) : null}
                               </div>
                             );
                           })}
+                        </div>
+
+                        {/* Legend */}
+                        <div className="flex flex-wrap gap-1.5">
+                          {(() => {
+                            const seen = new Set<string>();
+                            return plannedSteps
+                              .map((s) => String(s?.type ?? "default"))
+                              .filter((t) => {
+                                if (seen.has(t)) return false;
+                                seen.add(t);
+                                return true;
+                              })
+                              .map((type) => {
+                                const theme = getStepTheme(type);
+                                const Icon = theme.Icon;
+                                return (
+                                  <span
+                                    key={type}
+                                    className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider"
+                                    style={{
+                                      borderColor: theme.color,
+                                      color: theme.textColor ?? theme.color,
+                                      backgroundColor: theme.bg,
+                                    }}
+                                  >
+                                    <Icon className="size-3" />
+                                    {theme.label}
+                                  </span>
+                                );
+                              });
+                          })()}
                         </div>
                       </CardContent>
                       <CardContent className="space-y-3 px-4">
                         {plannedSteps.map((step, idx) => {
                           const stepTheme = getStepTheme(step?.type);
+                          const StepIcon = stepTheme.Icon;
                           return (
                           <div
                             key={`${selected?.id}-step-${idx}`}
-                            className={`rounded-lg border-l-4 px-4 py-3 ${stepTheme.tone}`}
+                            className="overflow-hidden rounded-xl border bg-card shadow-sm transition-shadow hover:shadow-md"
+                            style={{ borderLeftWidth: 4, borderLeftColor: stepTheme.color }}
                           >
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="text-sm font-medium">
-                                  {step?.label ?? `Шаг ${idx + 1}`}
-                                </div>
-                                <div className="mt-1 text-sm text-muted-foreground">
-                                  {formatStep(step)}
+                            <div className="flex items-start gap-3 p-4">
+                              <div
+                                className="flex size-10 shrink-0 items-center justify-center rounded-xl"
+                                style={{ background: stepTheme.bg }}
+                              >
+                                <StepIcon className="size-5" style={{ color: stepTheme.color }} />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0 flex-1 space-y-1">
+                                    <div className="text-sm font-semibold">
+                                      {step?.label ?? `Шаг ${idx + 1}`}
+                                    </div>
+                                    <div className="text-sm text-muted-foreground">
+                                      {formatStep(step)}
+                                    </div>
+                                  </div>
+                                  <span
+                                    className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
+                                    style={{
+                                      background: stepTheme.bg,
+                                      color: stepTheme.textColor ?? stepTheme.color,
+                                    }}
+                                  >
+                                    {stepTheme.label}
+                                  </span>
                                 </div>
                                 {step?.notes ? (
-                                  <div className="mt-1 text-sm text-muted-foreground">
+                                  <div className="mt-2 text-sm text-muted-foreground">
                                     {String(step.notes)}
                                   </div>
                                 ) : null}
-                              </div>
-                              <div
-                                className={`rounded-full border border-solid px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${stepTheme.pill}`}
-                                style={stepTheme.pillStyle}
-                              >
-                                {step?.type ?? "step"}
                               </div>
                             </div>
                           </div>
@@ -1461,54 +1852,124 @@ export default function PlansCalendarHost({
                 </>
               ) : (
                 <>
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                    <Card className="gap-4 py-4">
-                      <CardHeader className="px-4 pb-0">
-                        <CardTitle className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                          <Route className="h-4 w-4" />
-                          Дистанция
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="px-4">
-                        <div className="text-sm font-medium">{distanceStr}</div>
-                      </CardContent>
-                    </Card>
+                  {(() => {
+                    const sportTheme = getSportTheme(sport);
+                    const SportIco = sportTheme.Icon;
+                    const paceStr = calcPace(
+                      selected?.distance_m as number | null | undefined,
+                      selected?.duration_sec as number | null | undefined,
+                      sport
+                    );
+                    return (
+                      <>
+                        {/* Achievement banner */}
+                        <Card
+                          className="relative gap-0 overflow-hidden border-2 py-0"
+                          style={{
+                            borderColor: "rgba(26,158,58,0.35)",
+                            background:
+                              "linear-gradient(135deg, rgba(197,237,208,0.55) 0%, rgba(255,255,255,0.7) 60%, rgba(26,158,58,0.12) 100%)",
+                          }}
+                        >
+                          <div
+                            className="pointer-events-none absolute -right-12 -top-12 size-44 rounded-full blur-3xl"
+                            style={{ background: "rgba(26,158,58,0.25)" }}
+                          />
+                          <CardContent className="relative flex items-center justify-between gap-3 p-5">
+                            <div className="flex items-center gap-3">
+                              <div className="flex size-12 items-center justify-center rounded-2xl bg-white shadow-md ring-2 ring-emerald-200/60">
+                                <CheckCircle2 className="size-6 text-emerald-700" />
+                              </div>
+                              <div>
+                                <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">
+                                  Выполнено
+                                </div>
+                                <div className="text-base font-bold">Тренировка завершена</div>
+                              </div>
+                            </div>
+                            <Sparkles className="size-6 text-emerald-600/60" />
+                          </CardContent>
+                        </Card>
 
-                    <Card className="gap-4 py-4">
-                      <CardHeader className="px-4 pb-0">
-                        <CardTitle className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                          <Timer className="h-4 w-4" />
-                          Время
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="px-4">
-                        <div className="text-sm font-medium">{durationStr}</div>
-                      </CardContent>
-                    </Card>
-
-                    <Card className="gap-4 py-4">
-                      <CardHeader className="px-4 pb-0">
-                        <CardTitle className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                          <Activity className="h-4 w-4" />
-                          Тип
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="px-4">
-                        <div className="text-sm font-medium">
-                          <SportBadge sport={sport} />
+                        {/* Metric grid */}
+                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                          <div
+                            className="rounded-2xl border bg-card p-3 transition-shadow hover:shadow-md"
+                            style={{ borderColor: `${sportTheme.color}33` }}
+                          >
+                            <div
+                              className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider"
+                              style={{ color: sportTheme.textColor ?? sportTheme.color }}
+                            >
+                              <Route className="size-3.5" />
+                              <span>Дистанция</span>
+                            </div>
+                            <div className="mt-1 text-xl font-extrabold tabular-nums">{distanceStr}</div>
+                          </div>
+                          <div
+                            className="rounded-2xl border bg-card p-3 transition-shadow hover:shadow-md"
+                            style={{ borderColor: `${sportTheme.color}33` }}
+                          >
+                            <div
+                              className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider"
+                              style={{ color: sportTheme.textColor ?? sportTheme.color }}
+                            >
+                              <Timer className="size-3.5" />
+                              <span>Время</span>
+                            </div>
+                            <div className="mt-1 text-xl font-extrabold tabular-nums">{durationStr}</div>
+                          </div>
+                          <div
+                            className="rounded-2xl border bg-card p-3 transition-shadow hover:shadow-md"
+                            style={{ borderColor: `${sportTheme.color}33` }}
+                          >
+                            <div
+                              className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider"
+                              style={{ color: sportTheme.textColor ?? sportTheme.color }}
+                            >
+                              <Gauge className="size-3.5" />
+                              <span>Темп</span>
+                            </div>
+                            <div className="mt-1 text-xl font-extrabold tabular-nums">{paceStr ?? "—"}</div>
+                          </div>
+                          <div
+                            className="rounded-2xl border p-3 transition-shadow hover:shadow-md"
+                            style={{
+                              borderColor: `${sportTheme.color}33`,
+                              background: sportTheme.bg,
+                            }}
+                          >
+                            <div
+                              className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider"
+                              style={{ color: sportTheme.textColor ?? sportTheme.color }}
+                            >
+                              <SportIco className="size-3.5" />
+                              <span>Тип</span>
+                            </div>
+                            <div
+                              className="mt-1 text-xl font-extrabold"
+                              style={{ color: sportTheme.textColor ?? sportTheme.color }}
+                            >
+                              {sportTheme.label}
+                            </div>
+                          </div>
                         </div>
-                      </CardContent>
-                    </Card>
-                  </div>
 
-                  <Card className="gap-4 py-4">
-                    <CardHeader className="px-4 pb-0">
-                      <CardTitle className="text-sm font-semibold">Описание тренировки</CardTitle>
-                    </CardHeader>
-                    <CardContent className="px-4">
-                      <div className="text-sm text-muted-foreground">{description || "—"}</div>
-                    </CardContent>
-                  </Card>
+                        {/* Description */}
+                        {description ? (
+                          <Card>
+                            <CardContent className="space-y-2 p-5">
+                              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                                <Sparkles className="size-3.5" />
+                                Описание
+                              </div>
+                              <div className="text-sm leading-relaxed">{description}</div>
+                            </CardContent>
+                          </Card>
+                        ) : null}
+                      </>
+                    );
+                  })()}
                 </>
               )}
             </div>
@@ -1585,154 +2046,41 @@ export default function PlansCalendarHost({
           <DialogOverlay className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" />
           <RD.Content
             className={cn(
-              "fixed left-1/2 top-1/2 z-50 flex w-[min(760px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden",
+              "fixed left-1/2 top-1/2 z-50 flex max-h-[90vh] w-[min(760px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden",
               "rounded-[var(--radius-lg,var(--radius))] border border-border bg-background p-0 text-foreground shadow-strong",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             )}
           >
-            <div className="border-b px-6 py-5">
-              <DialogTitle>Создать плановую тренировку</DialogTitle>
-              <div className="mt-1 text-sm text-muted-foreground">
-                Добавьте тренировку в план на {formatDateRu(createDate)}.
+            <div className="shrink-0 border-b px-6 py-5">
+              <DialogTitle>Новая плановая тренировка</DialogTitle>
+              <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-3 py-1 text-xs font-medium text-muted-foreground">
+                <CalendarDays className="size-3.5" />
+                <span>{formatDateRu(createDate)}</span>
               </div>
             </div>
 
-            <div className="space-y-5 px-6 py-5">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="planned-title">Название</Label>
-                  <Input
-                    id="planned-title"
-                    value={createTitle}
-                    onChange={(e) => setCreateTitle(e.target.value)}
-                    placeholder="Например: Лёгкий бег 40 минут"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Вид тренировки</Label>
-                  <Select value={createSport} onValueChange={setCreateSport}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Выберите спорт" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="run">Бег</SelectItem>
-                      <SelectItem value="ride">Вело</SelectItem>
-                      <SelectItem value="swim">Плавание</SelectItem>
-                      <SelectItem value="strength">ОФП / силовая</SelectItem>
-                      <SelectItem value="walk">Ходьба</SelectItem>
-                      <SelectItem value="other">Другое</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="planned-effort">Интенсивность</Label>
-                  <Input
-                    id="planned-effort"
-                    value={createEffort}
-                    onChange={(e) => setCreateEffort(e.target.value)}
-                    placeholder="Легко / умеренно / тяжело"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="planned-duration">Длительность, мин</Label>
-                  <Input
-                    id="planned-duration"
-                    type="number"
-                    inputMode="numeric"
-                    value={createDurationMin}
-                    onChange={(e) => setCreateDurationMin(e.target.value)}
-                    placeholder="40"
-                  />
-                </div>
-
-                {isDistanceVisible ? (
-                  <div className="space-y-2">
-                    <Label htmlFor="planned-distance">Дистанция, км</Label>
-                    <Input
-                      id="planned-distance"
-                      type="number"
-                      inputMode="decimal"
-                      value={createDistanceKm}
-                      onChange={(e) => setCreateDistanceKm(e.target.value)}
-                      placeholder="6.0"
-                    />
-                  </div>
-                ) : null}
-
-                <div className="space-y-2 sm:col-span-2">
-                  <Label>Пульсовые зоны</Label>
-                  <Popover open={hrZonesOpen} onOpenChange={setHrZonesOpen}>
-                    <PopoverTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        role="combobox"
-                        className="w-full justify-between"
-                      >
-                        <span className="truncate">
-                          {createHrZones.length
-                            ? createHrZones.join(", ")
-                            : "Выберите одну или несколько зон"}
-                        </span>
-                        <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
-                      <Command>
-                        <CommandList>
-                          <CommandEmpty>Зоны не найдены</CommandEmpty>
-                          <CommandGroup>
-                            {HR_ZONE_OPTIONS.map((zone) => {
-                              const zoneSelected = createHrZones.includes(zone.value);
-                              return (
-                                <CommandItem
-                                  key={zone.value}
-                                  value={zone.label}
-                                  onSelect={() => toggleHrZone(zone.value)}
-                                >
-                                  <Check
-                                    className={cn(
-                                      "mr-2 size-4",
-                                      zoneSelected ? "opacity-100" : "opacity-0"
-                                    )}
-                                  />
-                                  {zone.label}
-                                </CommandItem>
-                              );
-                            })}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-                  <div className="text-xs text-muted-foreground">
-                    Можно выбрать несколько зон, например Z2 и Z3
-                  </div>
-                </div>
-
-                <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="planned-notes">План и заметки</Label>
-                  <Textarea
-                    id="planned-notes"
-                    value={createNotes}
-                    onChange={(e) => setCreateNotes(e.target.value)}
-                    rows={4}
-                    placeholder="Например: 10 минут разминки, затем ровный лёгкий бег. После — заминка и растяжка."
-                  />
-                </div>
-              </div>
-
-              {createError ? (
-                <div className="rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-                  {createError}
-                </div>
-              ) : null}
+            <div className="flex-1 overflow-y-auto px-6 py-5">
+              <PlannedWorkoutForm
+                date={createDate}
+                title={createTitle}
+                onTitleChange={setCreateTitle}
+                sport={createSport}
+                onSportChange={setCreateSport}
+                durationMin={createDurationMin}
+                onDurationMinChange={setCreateDurationMin}
+                distanceKm={createDistanceKm}
+                onDistanceKmChange={setCreateDistanceKm}
+                effort={createEffort}
+                onEffortChange={setCreateEffort}
+                hrZones={createHrZones}
+                onHrZonesChange={setCreateHrZones}
+                notes={createNotes}
+                onNotesChange={setCreateNotes}
+                error={createError}
+              />
             </div>
 
-            <div className="flex justify-end gap-2 border-t px-6 py-4">
+            <div className="shrink-0 flex justify-end gap-2 border-t px-6 py-4">
               <Button
                 type="button"
                 variant="secondary"
@@ -1759,165 +2107,42 @@ export default function PlansCalendarHost({
           <DialogOverlay className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" />
           <RD.Content
             className={cn(
-              "fixed left-1/2 top-1/2 z-50 flex w-[min(760px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden",
+              "fixed left-1/2 top-1/2 z-50 flex max-h-[90vh] w-[min(760px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden",
               "rounded-[var(--radius-lg,var(--radius))] border border-border bg-background p-0 text-foreground shadow-strong",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             )}
           >
-            <div className="border-b px-6 py-5">
+            <div className="shrink-0 border-b px-6 py-5">
               <DialogTitle>Редактировать тренировку</DialogTitle>
               <div className="mt-1 text-sm text-muted-foreground">
                 Измените параметры плановой тренировки.
               </div>
             </div>
 
-            <div className="space-y-5 px-6 py-5">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="edit-planned-date">Дата</Label>
-                  <Input
-                    id="edit-planned-date"
-                    type="date"
-                    min={getTodayIso()}
-                    value={editDate}
-                    onChange={(e) => setEditDate(e.target.value)}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Вид тренировки</Label>
-                  <Select value={editSport} onValueChange={setEditSport}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Выберите спорт" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="run">Бег</SelectItem>
-                      <SelectItem value="ride">Вело</SelectItem>
-                      <SelectItem value="swim">Плавание</SelectItem>
-                      <SelectItem value="strength">ОФП / силовая</SelectItem>
-                      <SelectItem value="walk">Ходьба</SelectItem>
-                      <SelectItem value="other">Другое</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="edit-planned-title">Название</Label>
-                  <Input
-                    id="edit-planned-title"
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    placeholder="Например: Лёгкий бег 40 минут"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="edit-planned-effort">Интенсивность</Label>
-                  <Input
-                    id="edit-planned-effort"
-                    value={editEffort}
-                    onChange={(e) => setEditEffort(e.target.value)}
-                    placeholder="Легко / умеренно / тяжело"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="edit-planned-duration">Длительность, мин</Label>
-                  <Input
-                    id="edit-planned-duration"
-                    type="number"
-                    inputMode="numeric"
-                    value={editDurationMin}
-                    onChange={(e) => setEditDurationMin(e.target.value)}
-                    placeholder="40"
-                  />
-                </div>
-
-                {isEditDistanceVisible ? (
-                  <div className="space-y-2">
-                    <Label htmlFor="edit-planned-distance">Дистанция, км</Label>
-                    <Input
-                      id="edit-planned-distance"
-                      type="number"
-                      inputMode="decimal"
-                      value={editDistanceKm}
-                      onChange={(e) => setEditDistanceKm(e.target.value)}
-                      placeholder="6.0"
-                    />
-                  </div>
-                ) : null}
-
-                <div className="space-y-2 sm:col-span-2">
-                  <Label>Пульсовые зоны</Label>
-                  <Popover open={editHrZonesOpen} onOpenChange={setEditHrZonesOpen}>
-                    <PopoverTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        role="combobox"
-                        className="w-full justify-between"
-                      >
-                        <span className="truncate">
-                          {editHrZones.length
-                            ? editHrZones.join(", ")
-                            : "Выберите одну или несколько зон"}
-                        </span>
-                        <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
-                      <Command>
-                        <CommandList>
-                          <CommandEmpty>Зоны не найдены</CommandEmpty>
-                          <CommandGroup>
-                            {HR_ZONE_OPTIONS.map((zone) => {
-                              const zoneSelected = editHrZones.includes(zone.value);
-                              return (
-                                <CommandItem
-                                  key={zone.value}
-                                  value={zone.label}
-                                  onSelect={() => toggleEditHrZone(zone.value)}
-                                >
-                                  <Check
-                                    className={cn(
-                                      "mr-2 size-4",
-                                      zoneSelected ? "opacity-100" : "opacity-0"
-                                    )}
-                                  />
-                                  {zone.label}
-                                </CommandItem>
-                              );
-                            })}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-                  <div className="text-xs text-muted-foreground">
-                    Можно выбрать несколько зон, например Z2 и Z3
-                  </div>
-                </div>
-
-                <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="edit-planned-notes">План и заметки</Label>
-                  <Textarea
-                    id="edit-planned-notes"
-                    value={editNotes}
-                    onChange={(e) => setEditNotes(e.target.value)}
-                    rows={4}
-                    placeholder="Например: 10 минут разминки, затем ровный лёгкий бег. После — заминка и растяжка."
-                  />
-                </div>
-              </div>
-
-              {editError ? (
-                <div className="rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-                  {editError}
-                </div>
-              ) : null}
+            <div className="flex-1 overflow-y-auto px-6 py-5">
+              <PlannedWorkoutForm
+                date={editDate}
+                onDateChange={setEditDate}
+                minDate={getTodayIso()}
+                title={editTitle}
+                onTitleChange={setEditTitle}
+                sport={editSport}
+                onSportChange={setEditSport}
+                durationMin={editDurationMin}
+                onDurationMinChange={setEditDurationMin}
+                distanceKm={editDistanceKm}
+                onDistanceKmChange={setEditDistanceKm}
+                effort={editEffort}
+                onEffortChange={setEditEffort}
+                hrZones={editHrZones}
+                onHrZonesChange={setEditHrZones}
+                notes={editNotes}
+                onNotesChange={setEditNotes}
+                error={editError}
+              />
             </div>
 
-            <div className="flex justify-end gap-2 border-t px-6 py-4">
+            <div className="shrink-0 flex justify-end gap-2 border-t px-6 py-4">
               <Button
                 type="button"
                 variant="secondary"

@@ -91,6 +91,71 @@ function CoachAvatar() {
   );
 }
 
+function startOfLocalDay(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function messageDateKey(iso?: string | null) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+
+  return `${y}-${m}-${day}`;
+}
+
+function formatMessageDateSeparator(iso?: string | null) {
+  if (!iso) return "";
+
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+
+  const today = startOfLocalDay(new Date());
+  const messageDay = startOfLocalDay(d);
+  const diffDays = Math.round(
+    (today.getTime() - messageDay.getTime()) / 86_400_000
+  );
+
+  if (diffDays === 0) return "Сегодня";
+  if (diffDays === 1) return "Вчера";
+
+  return d
+    .toLocaleDateString("ru-RU", {
+      day: "numeric",
+      month: "long",
+      year: today.getFullYear() === d.getFullYear() ? undefined : "numeric",
+    })
+    .replace(/\s?г\.?$/, "");
+}
+
+function FloatingMessageDateBadge({ label }: { label?: string | null }) {
+  if (!label) return null;
+
+  return (
+    <div className="pointer-events-none sticky top-2 z-20 flex justify-center">
+      <div className="rounded-full border border-border/70 bg-background/90 px-3 py-1 text-[11px] font-semibold text-muted-foreground shadow-sm backdrop-blur">
+        {label}
+      </div>
+    </div>
+  );
+}
+
+function MessageDateSeparator({ iso }: { iso?: string | null }) {
+  const label = formatMessageDateSeparator(iso);
+  if (!label) return null;
+
+  return (
+    <div className="flex justify-center py-1">
+      <div className="rounded-full border border-border/70 bg-muted/60 px-3 py-1 text-[11px] font-semibold text-muted-foreground shadow-sm">
+        {label}
+      </div>
+    </div>
+  );
+}
+
 function UserAvatar({ src, initials }: { src?: string | null; initials: string }) {
   if (src) {
     return (
@@ -231,6 +296,7 @@ export default function CoachChat(props: {
   const [hasMoreMessages, setHasMoreMessages] = React.useState(initialHasMoreMessages);
   const [hydrated, setHydrated] = React.useState(false);
   const [showAllAuto, setShowAllAuto] = React.useState(false);
+  const [visibleDateLabel, setVisibleDateLabel] = React.useState<string | null>(null);
 
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -363,6 +429,50 @@ export default function CoachChat(props: {
     return typingMessage ? [...displayMessages, typingMessage] : displayMessages;
   }, [displayMessages, typingMessage]);
 
+  const updateVisibleDateLabel = React.useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const messageNodes = Array.from(
+      el.querySelectorAll<HTMLElement>("[data-message-date-label]")
+    );
+
+    if (messageNodes.length === 0) {
+      setVisibleDateLabel(null);
+      return;
+    }
+
+    const viewportTop = el.getBoundingClientRect().top;
+    const threshold = viewportTop + 56;
+
+    let activeLabel = messageNodes[0].dataset.messageDateLabel ?? null;
+
+    for (const node of messageNodes) {
+      const top = node.getBoundingClientRect().top;
+      if (top <= threshold) {
+        activeLabel = node.dataset.messageDateLabel ?? activeLabel;
+      } else {
+        break;
+      }
+    }
+
+    setVisibleDateLabel((prev) => (prev === activeLabel ? prev : activeLabel));
+  }, []);
+
+  React.useEffect(() => {
+    updateVisibleDateLabel();
+  }, [displayMessagesWithTyping, updateVisibleDateLabel]);
+
+  React.useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    el.addEventListener("scroll", updateVisibleDateLabel, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", updateVisibleDateLabel);
+    };
+  }, [updateVisibleDateLabel]);
+
   const [pendingPlanActionMessageId, setPendingPlanActionMessageId] =
     React.useState<string | null>(null);
   const [resolvedPlanMessageIds, setResolvedPlanMessageIds] = React.useState<string[]>([]);
@@ -494,8 +604,11 @@ export default function CoachChat(props: {
       <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
         <div
           ref={scrollRef}
-          className="min-h-0 flex-1 overflow-y-auto px-1 pb-3 pt-1 space-y-3"
+          className="min-h-0 flex-1 overflow-y-auto px-1 pb-3 pt-1"
         >
+            <FloatingMessageDateBadge label={visibleDateLabel} />
+
+            <div className="space-y-3">
             {hasMoreMessages && (
               <div className="flex items-center justify-center">
                 <Button
@@ -576,8 +689,17 @@ export default function CoachChat(props: {
                     : null;
 
               return (
-                <CoachMessageBubble
+                <div
                   key={msgKey(m)}
+                  data-message-date-key={messageDateKey(m.created_at)}
+                  data-message-date-label={formatMessageDateSeparator(m.created_at)}
+                >
+                  {messageDateKey(m.created_at) !==
+                  messageDateKey(arr[i - 1]?.created_at) ? (
+                    <MessageDateSeparator iso={m.created_at} />
+                  ) : null}
+
+                  <CoachMessageBubble
                   role={role}
                   createdAt={isTyping ? null : m.created_at}
                   hydrated={hydrated}
@@ -618,11 +740,13 @@ export default function CoachChat(props: {
                       m.body
                     )
                   }
-                />
+                  />
+                </div>
               );
             })}
 
             <div className="h-2" />
+            </div>
         </div>
 
         <CoachChatInput isSending={isSending} onSend={sendMessage} />

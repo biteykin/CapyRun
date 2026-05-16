@@ -3,7 +3,18 @@
 "use client";
 
 import * as React from "react";
-import { Trophy } from "lucide-react";
+import {
+  Activity,
+  AlertCircle,
+  Bike,
+  Check,
+  Dumbbell,
+  Footprints,
+  GripVertical,
+  Mountain,
+  Trophy,
+  Waves,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -36,6 +47,7 @@ export type PlanEvent = {
   steps?: any[] | null;
   planned_duration_min?: number | null;
   planned_distance_km?: number | null;
+  goal_icon?: string | null;
   isCompleted?: boolean;  // Флаг, который выставляем в Host
   [key: string]: any;
 };
@@ -129,6 +141,247 @@ function getEventMetaLine(e: PlanEvent): string | null {
   }
   if (e.sport === "strength" && e.strength_block) return "ОФП";
   return e.goal ?? e.sport ?? null;
+}
+
+function getEventTooltip(e: PlanEvent, canDrag: boolean): string {
+  if (e.kind === "goal") {
+    return `Цель: ${e.title}`;
+  }
+
+  if (e.kind === "planned" && e.status === "completed") {
+    return "План выполнен";
+  }
+
+  if (e.kind === "planned" && e.status === "missed") {
+    return "План пропущен";
+  }
+
+  if (e.kind === "planned") {
+    return canDrag
+      ? "Запланировано. Можно перетащить на другую дату"
+      : "Запланированная тренировка";
+  }
+
+  if (e.kind === "workout" || e.isCompleted) {
+    return "Выполненная тренировка";
+  }
+
+  return e.title;
+}
+
+type EventVariant =
+  | "goal"
+  | "planned-completed"
+  | "planned-missed"
+  | "planned"
+  | "workout"
+  | "default";
+
+function getEventVariant(e: PlanEvent): EventVariant {
+  if (e.kind === "goal") return "goal";
+  if (e.kind === "planned" && e.status === "completed") return "planned-completed";
+  if (e.status === "missed") return "planned-missed";
+  if (e.kind === "planned") return "planned";
+  if (e.isCompleted) return "workout";
+  return "default";
+}
+
+function getSportIcon(
+  sport?: string | null,
+): React.ComponentType<{ className?: string }> {
+  switch (sport) {
+    case "run":
+    case "walk":
+      return Footprints;
+    case "ride":
+      return Bike;
+    case "swim":
+      return Waves;
+    case "hike":
+      return Mountain;
+    case "strength":
+      return Dumbbell;
+    default:
+      return Activity;
+  }
+}
+
+function getEventChips(e: PlanEvent): string[] {
+  const chips: string[] = [];
+  if (e.kind === "workout") {
+    if (e.distance_m && e.distance_m > 0) {
+      chips.push(`${(e.distance_m / 1000).toFixed(1)} км`);
+    }
+    if (e.duration_sec && e.duration_sec > 0) {
+      chips.push(`${Math.round(e.duration_sec / 60)} мин`);
+    }
+  } else if (e.kind === "planned") {
+    if (e.planned_distance_km && Number(e.planned_distance_km) > 0) {
+      chips.push(`${Number(e.planned_distance_km).toFixed(1)} км`);
+    }
+    if (e.planned_duration_min && Number(e.planned_duration_min) > 0) {
+      chips.push(`${Math.round(Number(e.planned_duration_min))} мин`);
+    }
+  }
+  return chips;
+}
+
+type EventCardProps = {
+  event: PlanEvent;
+  draggable: boolean;
+  isDragging: boolean;
+  inMonth: boolean;
+  onClick: (e: React.MouseEvent) => void;
+  onDragStart: (e: React.DragEvent) => void;
+  onDragEnd: () => void;
+};
+
+function EventCard({
+  event,
+  draggable,
+  isDragging,
+  inMonth,
+  onClick,
+  onDragStart,
+  onDragEnd,
+}: EventCardProps) {
+  const variant = getEventVariant(event);
+  const chips = getEventChips(event);
+  const SportIcon = getSportIcon(event.sport);
+  const tooltip = getEventTooltip(event, draggable);
+  const metaText = getEventMetaLine(event);
+
+  const variantClasses: Record<EventVariant, string> = {
+    goal: "border-[rgba(229,139,33,0.45)] bg-[rgba(255,214,0,0.18)]",
+    "planned-completed": "border-[rgba(27,46,201,0.55)]",
+    "planned-missed": "border-[rgba(246,176,33,0.55)]",
+    planned:
+      "border-[rgba(12,91,249,0.22)] border-t-[3px] border-t-[rgb(12,91,249)] " +
+      "bg-[rgba(12,91,249,0.06)] hover:bg-[rgba(12,91,249,0.10)] " +
+      "dark:bg-[rgba(12,91,249,0.10)] dark:hover:bg-[rgba(12,91,249,0.16)]",
+    workout: "border-transparent text-white",
+    default: "",
+  };
+
+  const variantStyle: React.CSSProperties = {};
+  if (variant === "planned-completed") {
+    variantStyle.backgroundImage =
+      "repeating-linear-gradient(135deg, rgba(27,46,201,0.22) 0, rgba(27,46,201,0.22) 6px, rgba(27,46,201,0.08) 6px, rgba(27,46,201,0.08) 12px)";
+  } else if (variant === "planned-missed") {
+    variantStyle.backgroundImage =
+      "repeating-linear-gradient(135deg, rgba(246,176,33,0.22) 0, rgba(246,176,33,0.22) 6px, rgba(246,176,33,0.08) 6px, rgba(246,176,33,0.08) 12px)";
+  } else if (variant === "workout" && event.colorHex) {
+    variantStyle.backgroundColor = event.colorHex;
+    variantStyle.borderColor = event.colorHex;
+  } else if (variant === "default" && event.colorHex) {
+    variantStyle.borderColor = event.colorHex;
+  }
+
+  const iconColor: Record<EventVariant, string> = {
+    goal: "text-[rgb(180,120,20)]",
+    "planned-completed": "text-[rgb(27,46,201)]",
+    "planned-missed": "text-[rgb(180,120,20)]",
+    planned: "text-[rgb(12,91,249)]",
+    workout: "text-white/90",
+    default: "text-muted-foreground",
+  };
+
+  const chipClasses: Record<EventVariant, string> = {
+    goal: "bg-[rgba(229,139,33,0.18)] text-[rgb(140,90,15)]",
+    "planned-completed": "bg-[rgba(27,46,201,0.18)] text-[rgb(27,46,201)]",
+    "planned-missed": "bg-[rgba(246,176,33,0.22)] text-[rgb(140,90,15)]",
+    planned: "bg-[rgba(12,91,249,0.12)] text-[rgb(12,91,249)]",
+    workout: "bg-white/20 text-white",
+    default: "bg-muted text-muted-foreground",
+  };
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          draggable={draggable}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          onClick={onClick}
+          style={variantStyle}
+          title={event.title}
+          className={cn(
+            "group relative block w-full overflow-hidden rounded-lg border px-2 py-1.5 text-left text-xs transition-all duration-150",
+            "shadow-[0_1px_0_rgba(0,0,0,0.02)]",
+            variantClasses[variant],
+            variant !== "workout" && "hover:shadow-md",
+            variant === "planned" && "hover:-translate-y-px",
+            !inMonth && "opacity-75",
+            draggable && "cursor-grab active:cursor-grabbing",
+            isDragging && "opacity-50",
+          )}
+        >
+          <div className="flex items-start gap-1.5">
+            {variant !== "goal" ? (
+              <SportIcon
+                className={cn("mt-0.5 size-3.5 shrink-0", iconColor[variant])}
+                aria-hidden
+              />
+            ) : null}
+
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1">
+                {variant === "planned-completed" ? (
+                  <Check className="size-3 shrink-0 text-[rgb(27,46,201)]" aria-hidden />
+                ) : null}
+                {variant === "planned-missed" ? (
+                  <AlertCircle className="size-3 shrink-0 text-[rgb(180,120,20)]" aria-hidden />
+                ) : null}
+                <div className="truncate text-[12px] font-semibold leading-tight">
+                  {variant === "goal"
+                    ? `${event.goal_icon ?? "🎯"} ${event.title}`
+                    : event.title}
+                </div>
+              </div>
+
+              {chips.length > 0 && (variant === "planned" || variant === "workout") ? (
+                <div className="mt-1 flex flex-wrap items-center gap-1">
+                  {chips.map((chip) => (
+                    <span
+                      key={chip}
+                      className={cn(
+                        "rounded-full px-1.5 text-[10px] font-semibold leading-[1.5]",
+                        chipClasses[variant],
+                      )}
+                    >
+                      {chip}
+                    </span>
+                  ))}
+                </div>
+              ) : metaText ? (
+                <div
+                  className={cn(
+                    "mt-0.5 truncate text-[10px] opacity-85",
+                    variant === "workout"
+                      ? "text-white"
+                      : variant === "planned-completed" || variant === "planned-missed"
+                        ? "text-foreground"
+                        : "text-muted-foreground",
+                  )}
+                >
+                  {metaText}
+                </div>
+              ) : null}
+            </div>
+
+            {draggable ? (
+              <GripVertical
+                className="mt-0.5 size-3 shrink-0 text-[rgb(12,91,249)]/50 opacity-0 transition-opacity group-hover:opacity-100"
+                aria-hidden
+              />
+            ) : null}
+          </div>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top">{tooltip}</TooltipContent>
+    </Tooltip>
+  );
 }
 
 export default function PlansCalendar({
@@ -246,7 +499,10 @@ export default function PlansCalendar({
           return (
             <div
               key={k}
-              onClick={() => onDayClick?.(k)}
+              onClick={() => {
+                if (k < todayIso) return;
+                onDayClick?.(k);
+              }}
               onDragOver={(ev) => {
                 if (!canDropHere || !onEventDrop) return;
 
@@ -276,7 +532,7 @@ export default function PlansCalendar({
               }}
               className={cn(
                 "min-h-[132px] p-2 transition-colors",
-                onDayClick && "cursor-pointer",
+                onDayClick && k >= todayIso && "cursor-pointer",
                 isGoalDay
                   ? "border border-yellow bg-yellow/20"
                   : "bg-background",
@@ -323,45 +579,24 @@ export default function PlansCalendar({
 
               <div className="space-y-1">
                 {dayEvents.slice(0, 3).map((e) => {
-                  const style: React.CSSProperties = {};
                   const draggable = canDragEvent(e);
 
-                  if (e.kind === "goal") {
-                    style.backgroundColor = "rgba(255, 214, 0, 0.18)";
-                    style.borderColor = "rgba(229, 139, 33, 0.45)";
-                    style.color = "inherit";
-                  } else if (e.kind === "planned" && e.status === "completed") {
-                    style.backgroundImage =
-                      "repeating-linear-gradient(135deg, rgba(27,46,201,0.22) 0, rgba(27,46,201,0.22) 6px, rgba(27,46,201,0.08) 6px, rgba(27,46,201,0.08) 12px)";
-                    style.borderColor = "rgba(27,46,201,0.65)";
-                    style.color = "var(--foreground)";
-                  } else if (e.status === "missed") {
-                    style.backgroundImage =
-                      "repeating-linear-gradient(135deg, rgba(246,176,33,0.22) 0, rgba(246,176,33,0.22) 6px, rgba(246,176,33,0.08) 6px, rgba(246,176,33,0.08) 12px)";
-                    style.borderColor = "rgba(246,176,33,0.65)";
-                    style.color = "var(--foreground)";
-                  } else if (e.isCompleted && e.colorHex) {
-                    // Выполненная: заливка + белый текст
-                    style.backgroundColor = e.colorHex;
-                    style.borderColor = e.colorHex;
-                    style.color = "#FFFFFF";
-                  } else if (e.colorHex) {
-                    // Остальные: цвет рамки
-                    style.borderColor = e.colorHex;
-                  }
-
                   return (
-                    <Tooltip key={e.id}>
-                      <TooltipTrigger asChild>
-                        <button
-                      type="button"
+                    <EventCard
+                      key={e.id}
+                      event={e}
                       draggable={draggable}
+                      isDragging={draggingEventId === String(e.id)}
+                      inMonth={inMonth}
+                      onClick={(ev) => {
+                        ev.stopPropagation();
+                        onEventClick?.(e);
+                      }}
                       onDragStart={(ev) => {
                         if (!draggable) {
                           ev.preventDefault();
                           return;
                         }
-
                         ev.stopPropagation();
                         setDraggingEventId(String(e.id));
                         ev.dataTransfer.effectAllowed = "move";
@@ -371,46 +606,7 @@ export default function PlansCalendar({
                         );
                       }}
                       onDragEnd={() => setDraggingEventId(null)}
-                      onClick={(ev) => {
-                        ev.stopPropagation();
-                        onEventClick?.(e);
-                      }}
-                      className={cn(
-                        "block w-full rounded-lg border px-2.5 py-2 text-left text-xs shadow-[0_1px_0_rgba(0,0,0,0.02)] transition-colors",
-                        !e.isCompleted && "hover:bg-muted/60",
-                        !inMonth && "opacity-75",
-                        draggable && "cursor-grab active:cursor-grabbing",
-                        draggingEventId === String(e.id) && "opacity-50"
-                      )}
-                      style={style}
-                      title={e.title}
-                    >
-                      <div className="truncate font-medium leading-tight">
-                        {e.kind === "goal" ? `${e.goal_icon ?? "🎯"} ${e.title}` : e.title}
-                      </div>
-                      {getEventMetaLine(e) ? (
-                        <div
-                          className={cn(
-                            "mt-0.5 truncate text-[10px] opacity-80",
-                            (e.kind === "planned" &&
-                              (e.status === "completed" || e.status === "missed"))
-                              ? "text-foreground"
-                              : e.isCompleted
-                                ? "text-white/90"
-                                : "text-muted-foreground"
-                          )}
-                        >
-                          {getEventMetaLine(e)}
-                        </div>
-                      ) : null}
-                    </button>
-                      </TooltipTrigger>
-                      {draggable ? (
-                        <TooltipContent side="top">
-                          Можно передвинуть на другую дату
-                        </TooltipContent>
-                      ) : null}
-                    </Tooltip>
+                    />
                   );
                 })}
 
