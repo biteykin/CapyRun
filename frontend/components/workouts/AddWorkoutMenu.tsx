@@ -62,6 +62,18 @@ export default function AddWorkoutMenu() {
             Добавить вручную
             <div className="text-xs text-[var(--text-secondary)]">Дата, тип, дистанция, время…</div>
           </Link>
+
+          <Link
+            href="/integrations"
+            onClick={() => setOpen(false)}
+            role="menuitem"
+            className="block w-full rounded-lg px-3 py-2 text-left no-underline text-foreground hover:bg-[var(--color-bg-fill-tertiary)]"
+          >
+            Синхронизировать
+            <div className="text-xs text-[var(--text-secondary)]">
+              Импортировать тренировки из аккаунта Strava
+            </div>
+          </Link>
         </div>
       )}
     </div>
