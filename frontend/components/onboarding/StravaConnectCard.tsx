@@ -1,23 +1,22 @@
 // frontend/components/onboarding/StravaConnectCard.tsx
 "use client";
 
-import { Check, ExternalLink, Loader2 } from "lucide-react";
+import type { ReactNode } from "react";
+import { cn } from "@/lib/utils";
+import { Card, CardContent, CardDescription, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import StravaIcon from "@/components/icons/StravaIcon";
+import {
+  CheckCircle2,
+  History,
+  Loader2,
+  RefreshCw,
+  Sparkles,
+  Unplug,
+} from "lucide-react";
 
-function StravaIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden>
-      <path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.598h4.172L10.463 0l-7 13.828h4.169" />
-    </svg>
-  );
-}
-
-const FEATURES = [
-  "Авто-синхронизация после каждой тренировки",
-  "История за всё время на Strava",
-  "GPS-треки, пульс и темп",
-  "Капи разбирает каждую тренировку",
-];
+const STRAVA_ORANGE = "#FC4C02";
 
 export function StravaConnectCard({
   isConnected,
@@ -29,77 +28,124 @@ export function StravaConnectCard({
   onConnect: () => void;
 }) {
   return (
-    <div className="group relative overflow-hidden rounded-2xl border border-black/5 bg-gradient-to-br from-[#FC5200] via-[#FC6B26] to-[#FF8A3C] p-6 text-white shadow-lg shadow-orange-900/10">
-      {/* декоративные орбы */}
-      <div className="pointer-events-none absolute -right-12 -top-12 h-44 w-44 rounded-full bg-white/15 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-16 -left-12 h-44 w-44 rounded-full bg-amber-300/25 blur-3xl" />
-
-      <div className="relative flex items-start gap-4">
-        <div className="flex h-12 w-12 flex-none items-center justify-center rounded-xl bg-white/95 shadow-md ring-1 ring-white/40">
-          <StravaIcon className="h-7 w-7 text-[#FC5200]" />
-        </div>
-
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-lg font-bold leading-tight">Strava</h3>
-            {isConnected ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-white/25 px-2 py-0.5 text-xs font-semibold backdrop-blur">
-                <Check className="h-3 w-3" strokeWidth={3} />
-                Подключено
-              </span>
-            ) : (
-              <span className="inline-flex items-center rounded-full bg-white/20 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider backdrop-blur">
-                Рекомендуем
-              </span>
-            )}
-          </div>
-          <p className="mt-1.5 text-sm leading-relaxed text-white/90">
-            Подключи Strava — и все твои тренировки попадут в Капи автоматически. Ничего вручную заводить не придётся.
-          </p>
-        </div>
-      </div>
-
-      {/* фичи */}
-      <ul className="relative mt-5 grid grid-cols-1 gap-2 sm:grid-cols-2">
-        {FEATURES.map((f) => (
-          <li key={f} className="flex items-start gap-1.5 text-xs text-white/95">
-            <Check className="mt-0.5 h-3.5 w-3.5 flex-none" strokeWidth={3} />
-            <span>{f}</span>
-          </li>
-        ))}
-      </ul>
-
-      {/* CTA */}
-      <div className="relative mt-5">
-        {isConnected ? (
-          <Button
-            type="button"
-            disabled
-            className="w-full bg-white/95 font-semibold text-[#FC5200] hover:bg-white"
-          >
-            <Check className="mr-2 h-4 w-4" strokeWidth={3} />
-            Уже подключено
-          </Button>
-        ) : (
-          <Button
-            type="button"
-            onClick={onConnect}
-            disabled={isLoading}
-            className="w-full bg-white font-semibold text-[#FC5200] shadow-md transition hover:bg-white/95"
-          >
-            {isLoading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Открываем Strava…
-              </>
-            ) : (
-              <>
-                Подключить Strava
-                <ExternalLink className="ml-2 h-4 w-4" />
-              </>
-            )}
-          </Button>
+    <Card className="relative overflow-hidden">
+      <div
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full blur-3xl",
+          isConnected ? "bg-[#FC4C02]/20" : "bg-[#FC4C02]/12"
         )}
+      />
+      {isConnected ? (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-transparent via-[#FC4C02] to-transparent"
+        />
+      ) : null}
+
+      <CardContent className="relative space-y-6 p-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div className="flex items-start gap-4">
+            <div className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border bg-background shadow-sm">
+              <StravaIcon className="h-6 w-6" style={{ color: STRAVA_ORANGE }} />
+            </div>
+            <div className="space-y-2">
+              <div>
+                <CardTitle className="text-lg">Strava</CardTitle>
+                <CardDescription>
+                  Импорт тренировок и автосинхронизация активности
+                </CardDescription>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {isConnected ? (
+                  <Badge className="gap-1.5 rounded-full border border-green-300 bg-green-100 px-3 py-1 text-green-800 hover:bg-green-100">
+                    <CheckCircle2 className="size-3.5" />
+                    Подключено
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="gap-1.5 rounded-full px-3 py-1">
+                    <Unplug className="size-3.5" />
+                    Не подключено
+                  </Badge>
+                )}
+                <Badge
+                  variant="outline"
+                  className="gap-1.5 rounded-full border-[#FC4C02]/40 bg-[#FC4C02]/8 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-[#FC4C02]"
+                >
+                  Рекомендуем
+                </Badge>
+              </div>
+            </div>
+          </div>
+
+          {!isConnected ? (
+            <Button
+              type="button"
+              onClick={onConnect}
+              disabled={isLoading}
+              className="shrink-0 gap-2 bg-[#FC4C02] text-white shadow-sm transition hover:bg-[#e34503] focus-visible:ring-[#FC4C02]/40"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Открываем Strava…
+                </>
+              ) : (
+                <>
+                  <StravaIcon className="h-4 w-4" />
+                  Подключить Strava
+                </>
+              )}
+            </Button>
+          ) : null}
+        </div>
+
+        {!isConnected ? <BenefitsGrid /> : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function BenefitsGrid() {
+  const items: { icon: ReactNode; title: string; desc: string }[] = [
+    {
+      icon: <History className="size-4" />,
+      title: "История",
+      desc: "Подтянем все прошлые активности",
+    },
+    {
+      icon: <Sparkles className="size-4" />,
+      title: "AI-аналитика",
+      desc: "Данные сразу попадают в AI-тренера",
+    },
+    {
+      icon: <RefreshCw className="size-4" />,
+      title: "В один клик",
+      desc: "Повторная синхронизация в любой момент",
+    },
+  ];
+
+  return (
+    <div className="rounded-2xl border bg-muted/15 p-4">
+      <div className="mb-3 text-sm font-semibold">Что вы получите</div>
+      <div className="grid gap-2 sm:grid-cols-3">
+        {items.map((b) => (
+          <div
+            key={b.title}
+            className="flex items-start gap-3 rounded-xl border bg-background p-3 transition hover:shadow-sm"
+          >
+            <div
+              className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#FC4C02]/10"
+              style={{ color: STRAVA_ORANGE }}
+            >
+              {b.icon}
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm font-semibold">{b.title}</div>
+              <div className="text-xs text-muted-foreground">{b.desc}</div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

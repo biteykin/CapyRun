@@ -32,7 +32,9 @@ export async function GET(req: Request) {
   const state = url.searchParams.get("state");
   const error = url.searchParams.get("error");
 
-  const redirectOk = new URL("/integrations?strava=connected&autosync=1", base);
+  // Если в cookie указан альтернативный безопасный редирект (например после онбординга —
+  // на /onboarding/finalizing), используем его одноразово. Иначе — стандартный путь в /integrations.
+  let redirectOk = new URL("/integrations?strava=connected&autosync=1", base);
   const redirectErr = (reason: string, detail?: string) => {
     const u = new URL("/integrations", base);
     u.searchParams.set("strava", "error");
@@ -57,6 +59,18 @@ export async function GET(req: Request) {
         },
       }
     );
+
+    // Подменяем redirectOk если есть валидная одноразовая cookie со сценарием возврата
+    const overrideRedirect = jar.get("strava_redirect_after")?.value || null;
+    if (
+      overrideRedirect &&
+      overrideRedirect.startsWith("/") &&
+      !overrideRedirect.startsWith("//")
+    ) {
+      redirectOk = new URL(overrideRedirect, base);
+      // одноразовость — гасим cookie сразу
+      jar.set("strava_redirect_after", "", { path: "/", maxAge: 0 });
+    }
 
     const { data: userData, error: userErr } = await supabase.auth.getUser();
     if (userErr) console.error("strava/callback getUser error:", userErr);

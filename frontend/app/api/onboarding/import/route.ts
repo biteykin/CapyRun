@@ -4,6 +4,8 @@ import { NextResponse } from "next/server";
 import { createClientWithCookies } from "@/lib/supabase/server";
 
 const ALLOWED_CHOICES = new Set(["strava", "upload", "manual", "skipped"]);
+const ONBOARDING_DONE_COOKIE = "cr_onboarding_just_done";
+const ONBOARDING_DONE_TTL_SEC = 120;
 
 export async function POST(req: Request) {
   try {
@@ -70,7 +72,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: updateError.message }, { status: 500 });
     }
 
-    return NextResponse.json({ profile });
+    // Маркер для middleware: после OAuth-redirect'а Strava или прямого редиректа из клиента
+    // на любой защищённой странице юзер пройдёт через /onboarding/finalizing → /coach.
+    const response = NextResponse.json({ profile });
+    response.cookies.set(ONBOARDING_DONE_COOKIE, "1", {
+      maxAge: ONBOARDING_DONE_TTL_SEC,
+      path: "/",
+      sameSite: "lax",
+    });
+    return response;
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },

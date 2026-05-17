@@ -23,7 +23,7 @@ const STAGES: Stage[] = [
 ];
 
 const TOTAL_MS = STAGES.reduce((s, st) => s + st.durationMs, 0);
-const REDIRECT_TARGET = "/coach";
+const REDIRECT_TARGET = "/home";
 const TAIL_BUFFER_MS = 500;
 
 export default function OnboardingFinalizingClient() {
@@ -87,19 +87,23 @@ export default function OnboardingFinalizingClient() {
   }, [router]);
 
   return (
-    <div className="min-h-[100dvh] flex items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-amber-50 px-6 py-12">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-gradient-to-br from-indigo-50 via-white to-amber-50 px-6 py-12">
       <div className="w-full max-w-md">
-        {/* Капи с glow-эффектом */}
-        <div className="flex justify-center mb-8">
-          <div className="relative">
-            <div className="absolute inset-0 rounded-full bg-amber-400/25 blur-2xl animate-pulse" />
-            <div className="relative h-24 w-24 rounded-full bg-white shadow-xl shadow-amber-500/10 ring-1 ring-black/5 overflow-hidden">
+        {/* Капи — квадрат с glow и hover-анимацией, как в GoalsEmptyState */}
+        <div className="mb-8 flex justify-center">
+          <div className="group relative">
+            <div
+              className="pointer-events-none absolute inset-0 -z-10 rounded-[32px] bg-gradient-to-br from-yellow-200 to-orange-300 opacity-60 blur-2xl animate-pulse"
+              aria-hidden="true"
+            />
+            <div className="rounded-[28px] bg-background p-2 shadow-xl transition-transform duration-300 group-hover:scale-105">
               <Image
                 src={logo}
                 alt="Капи"
-                width={96}
-                height={96}
-                className="h-full w-full object-cover"
+                width={112}
+                height={112}
+                priority
+                className="-rotate-3 rounded-[22px] transition-transform duration-300 group-hover:rotate-0"
               />
             </div>
           </div>

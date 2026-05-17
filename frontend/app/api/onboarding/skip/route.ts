@@ -3,6 +3,9 @@
 import { NextResponse } from "next/server";
 import { createClientWithCookies } from "@/lib/supabase/server";
 
+const ONBOARDING_DONE_COOKIE = "cr_onboarding_just_done";
+const ONBOARDING_DONE_TTL_SEC = 120;
+
 export async function POST() {
   try {
     const supabase = await createClientWithCookies();
@@ -54,7 +57,15 @@ export async function POST() {
       return NextResponse.json({ error: updateError.message }, { status: 500 });
     }
 
-    return NextResponse.json({ profile });
+    // Маркер для middleware: следующий переход на любую защищённую страницу
+    // забросит юзера через /onboarding/finalizing → анимация → /coach.
+    const response = NextResponse.json({ profile });
+    response.cookies.set(ONBOARDING_DONE_COOKIE, "1", {
+      maxAge: ONBOARDING_DONE_TTL_SEC,
+      path: "/",
+      sameSite: "lax",
+    });
+    return response;
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },

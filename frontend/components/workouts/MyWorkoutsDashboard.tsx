@@ -1922,9 +1922,9 @@ function WelcomeActionCard({
 }) {
   return (
     <Link href={href} className="block h-full">
-      <div className="group relative h-full overflow-hidden rounded-2xl border bg-card p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-foreground/15 hover:shadow-md">
+      <div className="group relative flex h-full min-h-[148px] flex-col items-center justify-center overflow-hidden rounded-2xl border bg-card p-4 text-center shadow-sm transition-all hover:-translate-y-0.5 hover:border-foreground/15 hover:shadow-md">
         <div
-          className="flex size-12 items-center justify-center rounded-xl text-2xl shadow-sm transition-transform group-hover:scale-110"
+          className="flex size-12 shrink-0 items-center justify-center rounded-xl text-2xl shadow-sm transition-transform group-hover:scale-110 sm:size-14 sm:text-3xl"
           style={{
             background: bg,
             border: `1px solid color-mix(in srgb, ${accent} 22%, transparent)`,
@@ -1932,8 +1932,10 @@ function WelcomeActionCard({
         >
           {emoji}
         </div>
-        <h3 className="mt-3 text-sm font-bold leading-snug">{title}</h3>
-        <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{description}</p>
+        <div className="mt-3 min-w-0">
+          <h3 className="text-sm font-bold leading-snug">{title}</h3>
+          <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{description}</p>
+        </div>
         <ArrowRight className="absolute right-3 top-3 size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
       </div>
     </Link>

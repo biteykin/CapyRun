@@ -1,6 +1,24 @@
-// middleware.ts
+// frontend/middleware.ts
+
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
+
+const ONBOARDING_DONE_COOKIE = "cr_onboarding_just_done";
+
+// Защищённые приложения, куда юзер может улететь после скипа онбординга.
+// Любой из них при наличии cookie заворачивается на /onboarding/finalizing.
+const REDIRECT_PROTECTED_PATHS = [
+  "/home",
+  "/dashboard",
+  "/coach",
+  "/workouts",
+  "/goals",
+  "/profile",
+  "/integrations",
+  "/plans",
+  "/settings",
+  "/calendar",
+];
 
 /** Распарсить твою жирную capyrun.auth (base64-JSON) */
 function parseCapyRunCookie(req: NextRequest): { access_token?: string; refresh_token?: string } | null {
@@ -29,6 +47,26 @@ export async function middleware(req: NextRequest) {
     p.startsWith("/api/")
   ) {
     return NextResponse.next();
+  }
+
+  // === Onboarding finalize catch-all ===
+  // Если юзер только что закончил онбординг (cookie выставляется в
+  // /api/onboarding/skip и /api/onboarding/import) и навигируется на любую
+  // защищённую страницу — заворачиваем его через финализирующий экран → /coach.
+  // Делаем это ДО supabase session refresh: session refresh отработает
+  // на следующем запросе к /onboarding/finalizing.
+  const onboardingFlag = req.cookies.get(ONBOARDING_DONE_COOKIE)?.value;
+  const isOnboardingPath = p.startsWith("/onboarding");
+
+  if (onboardingFlag && !isOnboardingPath) {
+    const shouldIntercept = REDIRECT_PROTECTED_PATHS.some(
+      (path) => p === path || p.startsWith(`${path}/`)
+    );
+    if (shouldIntercept) {
+      return NextResponse.redirect(
+        new URL("/onboarding/finalizing", req.nextUrl.origin)
+      );
+    }
   }
 
   const res = NextResponse.next();
@@ -89,6 +127,18 @@ export async function middleware(req: NextRequest) {
 
   // 3) попросим supabase актуализировать сессию и куки
   await supabase.auth.getSession();
+
+  // 4) Если юзер достиг финализирующего экрана — снимаем onboarding-cookie,
+  //    чтобы после анимации он не отскакивал обратно с /coach по нашему же
+  //    catch-all'у.
+  if (p === "/onboarding/finalizing") {
+    res.cookies.set({
+      name: ONBOARDING_DONE_COOKIE,
+      value: "",
+      maxAge: 0,
+      path: "/",
+    });
+  }
 
   return res;
 }

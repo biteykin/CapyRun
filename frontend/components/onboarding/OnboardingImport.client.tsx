@@ -4,35 +4,18 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { FileUp, PencilLine, Unplug } from "lucide-react";
+import { Clock } from "lucide-react";
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import OnboardingStepHeader from "@/components/onboarding/OnboardingStepHeader";
 import { StravaConnectCard } from "@/components/onboarding/StravaConnectCard";
 
-type ImportChoice = "strava" | "upload" | "manual" | "skipped";
+type ImportChoice = "strava" | "skipped";
 
 type StravaConn = {
   status: string | null;
 } | null;
-
-const ACTIONS = [
-  {
-    id: "upload" as const,
-    title: "Загрузить тренировку",
-    description: "Загрузите файл тренировки, если он уже есть на компьютере.",
-    icon: FileUp,
-    href: "/workouts/upload",
-  },
-  {
-    id: "manual" as const,
-    title: "Добавить тренировку вручную",
-    description: "Подойдёт, если хочется быстро внести последнюю тренировку без файла.",
-    icon: PencilLine,
-    href: "/workouts/new",
-  },
-];
 
 export default function OnboardingImportClient() {
   const router = useRouter();
@@ -88,6 +71,10 @@ export default function OnboardingImportClient() {
     if (loadingChoice || isConnecting) return;
     setIsConnecting(true);
     setError(null);
+    // После возврата из Strava OAuth callback'а — хотим, чтобы юзер попал на /onboarding/finalizing,
+    // а не на /integrations (стандартное место). Cookie одноразовая (10 мин TTL), читается в callback.
+    document.cookie =
+      "strava_redirect_after=/onboarding/finalizing; path=/; max-age=600; samesite=lax";
     await finishOnboarding("strava", "/api/strava/connect");
   }
 
@@ -112,46 +99,16 @@ export default function OnboardingImportClient() {
         onConnect={() => void handleStravaConnect()}
       />
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        {ACTIONS.map((action) => {
-          const Icon = action.icon;
-          const loading = loadingChoice === action.id;
-
-          return (
-            <Card key={action.id} className="flex flex-col">
-              <CardHeader className="pb-2">
-                <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-full border bg-background shadow-sm">
-                  <Icon className="h-5 w-5" />
-                </div>
-                <CardTitle className="text-base">{action.title}</CardTitle>
-                <CardDescription>{action.description}</CardDescription>
-              </CardHeader>
-              <CardContent className="mt-auto">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="w-full"
-                  disabled={busy}
-                  onClick={() => void finishOnboarding(action.id, action.href)}
-                >
-                  {loading ? "Открываем…" : action.title}
-                </Button>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
-
       <Card className="border-dashed">
         <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
             <div className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border bg-background">
-              <Unplug className="h-4 w-4" />
+              <Clock className="h-4 w-4 text-muted-foreground" />
             </div>
             <div>
-              <div className="text-sm font-semibold">Можно пропустить</div>
+              <div className="text-sm font-semibold">Можно подключить позже</div>
               <div className="text-sm text-muted-foreground">
-                Тренер начнёт с цели и параметров, а данные добавим позже.
+                Подключите Strava позже — раздел «Интеграции» всегда под рукой. Загрузить файлы с умных часов (Garmin, Polar, Suunto) или добавить тренировку вручную можно прямо в кабинете.
               </div>
             </div>
           </div>

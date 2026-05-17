@@ -5,7 +5,9 @@
 import * as React from "react";
 import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import Cropper from "react-easy-crop";
+import logo from "@/app/icon-512.png";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -440,7 +442,15 @@ export default function ProfileEditForm({
                 <div className="flex min-w-0 items-center gap-4">
                   <Avatar className="h-16 w-16 shrink-0 ring-2 ring-background shadow-sm">
                     <AvatarImage src={avatarSrc} alt="Profile avatar preview" />
-                    <AvatarFallback className="text-lg">{displayNameFallback}</AvatarFallback>
+                    <AvatarFallback className="bg-amber-50 p-0">
+                      <Image
+                        src={logo}
+                        alt="Капи"
+                        width={64}
+                        height={64}
+                        className="h-full w-full object-cover"
+                      />
+                    </AvatarFallback>
                   </Avatar>
 
                   <div className="min-w-0">
