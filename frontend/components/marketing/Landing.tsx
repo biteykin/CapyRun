@@ -317,12 +317,12 @@ export default function Landing() {
               </div>
 
               <h1 id="hero-title" className={`h-display ${styles.heroTitle}`}>
-                Начните бегать <em>без</em> живого тренера
+                Ваш тренер по бегу <em>всегда</em> на связи
               </h1>
 
               <p className={styles.heroSub}>
-                CapyRun помогает выбрать цель, собрать понятный план, отслеживать прогресс
-                и обсуждать любые спортивные вопросы столько, сколько нужно.
+                CapyRun помогает начать бегать, выбрать реалистичную цель, получить понятный план
+                и разбирать тренировки так, как будто рядом есть спокойный тренер.
               </p>
 
               <div className={styles.heroCtaRow}>
@@ -448,11 +448,11 @@ export default function Landing() {
           <div className={styles.sectionHead}>
             <div className={styles.sectionEyebrow}>01 — Выберите цель</div>
             <h2 id="goals-title" className={`h-display ${styles.sectionTitle}`}>
-              Цель, которая <em>подходит</em> вашей жизни
+              Цель, с которой <em>понятно</em>, что делать дальше
             </h2>
             <p className={styles.sectionSub}>
-              Не универсальный план “для всех”, а понятная цель под текущий уровень:
-              первые километры, первые 5 км, первые 10 км или стабильный бег без перегруза.
+              Не абстрактное “надо больше бегать”, а конкретный ориентир под ваш уровень:
+              начать с нуля, пробежать первые 5 или 10 км, вернуться после паузы или просто бегать регулярно.
             </p>
           </div>
 
@@ -602,11 +602,11 @@ export default function Landing() {
           <div className={styles.sectionHead}>
             <div className={styles.sectionEyebrow}>04 — Отслеживайте прогресс</div>
             <h2 className={`h-display ${styles.sectionTitle}`}>
-              Прогресс <em>без одержимости</em> цифрами
+              Видно, что вы <em>становитесь сильнее</em>
             </h2>
             <p className={styles.sectionSub}>
-              Для любителя важны регулярность, спокойный рост и ощущение контроля.
-              Не нужно жить в графиках, чтобы становиться сильнее.
+              CapyRun показывает не только километры и темп, но и главное:
+              регулярность, рост формы, усталость и моменты, когда лучше восстановиться.
             </p>
           </div>
 
@@ -677,10 +677,11 @@ export default function Landing() {
           <div className={styles.sectionHead}>
             <div className={styles.sectionEyebrow}>Живые вопросы</div>
             <h2 className={`h-display ${styles.sectionTitle}`}>
-              Всё, что давно хотелось <em>у кого-то спросить</em>
+              Можно спросить всё, что <em>непонятно</em> в беге
             </h2>
             <p className={styles.sectionSub}>
-              Спокойные ответы без осуждения, без “ты просто слабый” и без спортивного снобизма.
+              Почему тяжело бежать медленно, что делать с усталостью, как готовиться к старту
+              и когда лучше отдохнуть — тренер объяснит спокойно и по делу.
             </p>
           </div>
 
@@ -722,11 +723,11 @@ export default function Landing() {
             <div>
               <div className={styles.sectionEyebrow}>Приватность</div>
               <h2 className={`h-display ${styles.privacyTitle}`}>
-                Ваши тренировки остаются <em>вашими</em>
+                Ваши данные нужны только <em>для ваших тренировок</em>
               </h2>
               <p className={styles.sectionSub}>
-                Мы не продаём ваши данные и не строим рекламные профили. Разговоры с тренером
-                и история тренировок нужны только для плана, прогресса и персональных рекомендаций.
+                Мы не продаём тренировочную историю и не используем её для рекламных профилей.
+                Данные помогают тренеру точнее понимать ваш уровень, прогресс, нагрузку и восстановление.
               </p>
             </div>
             <div className={styles.privacyIconWrap} aria-hidden="true">
@@ -740,7 +741,7 @@ export default function Landing() {
         <div className={styles.container}>
           <div className={styles.sectionHead}>
             <div className={styles.sectionEyebrow}>Бета-пользователи</div>
-            <h2 className={`h-display ${styles.sectionTitle}`}>Обычные люди. Реальный прогресс.</h2>
+            <h2 className={`h-display ${styles.sectionTitle}`}>Бегуны-любители, которые уже тренируются спокойнее</h2>
           </div>
           <div className={styles.testimonials}>
             {testimonials.map((item, index) => (
@@ -769,7 +770,7 @@ export default function Landing() {
           <div className={styles.sectionHead}>
             <div className={styles.sectionEyebrow}>FAQ</div>
             <h2 className={`h-display ${styles.sectionTitle}`}>
-              Вопросы, <em>спокойно</em> отвеченные
+              Частые вопросы о <em>CapyRun</em>
             </h2>
             <p className={styles.sectionSub}>
               Если не нашли ответ — напишите на{" "}
@@ -831,10 +832,10 @@ export default function Landing() {
         <div className={styles.container}>
           <div className={styles.finalCta}>
             <h2 className="h-display">
-              Бегайте умнее. <em className={styles.finalAccent}>Спокойнее.</em>
+              Начните бегать с планом, <em className={styles.finalAccent}>а не наугад.</em>
             </h2>
             <p>
-              Начните с понятной цели, получите план и обсуждайте прогресс с AI-тренером.
+              Выберите цель, получите первые тренировки и задавайте AI-тренеру вопросы по ходу подготовки.
             </p>
             <div className={styles.finalCtaBtns}>
               <Link href="/login?mode=signup" className="btn btn-primary">

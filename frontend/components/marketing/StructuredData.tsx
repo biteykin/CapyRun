@@ -1,3 +1,5 @@
+//frontend/components/marketing/StructuredData.tsx
+
 /**
  * JSON-LD структурированные данные schema.org для лендинга CapyRun.
  * Включает: Organization, WebSite, SoftwareApplication, FAQPage.
